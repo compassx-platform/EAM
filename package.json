@@ -1,0 +1,11 @@
+{
+  "name": "compassx-eam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CompassX EAM (Enterprise Asset Management) - Workflow & Safety Interlocking Engine",
+  "scripts": {
+    "dev": "concurrently \"uvicorn backend.main:app --port 8080 --reload\" \"cd frontend && npm run dev\"",
+    "build": "cd frontend && npm run build",
+    "test": "pytest -v tests"
+  }
+}
