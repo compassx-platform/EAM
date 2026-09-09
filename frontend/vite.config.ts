@@ -5,10 +5,13 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5173,
+    allowedHosts: true,
+    watch: { usePolling: true, interval: 100 },
+    hmr: { clientPort: 443 },
+    port: 8080,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8085',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },

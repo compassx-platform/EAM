@@ -151,3 +151,12 @@ def deprecate_workflow(id: str, db: Session = Depends(get_db)):
     wf.status = "deprecated"
     db.commit()
     return wf.to_dict()
+
+@router.delete("/{id}")
+def delete_workflow(id: str, db: Session = Depends(get_db)):
+    wf = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    db.delete(wf)
+    db.commit()
+    return {"deleted": True, "id": id}

@@ -4,6 +4,7 @@ from backend.database import Base, engine
 from backend.models.users import AppUser, AppRole
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
+from backend.models.forms import EntityForm
 from backend.models.entities import WorkOrder, WorkOrderEvent, Permit, PermitEvent
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
