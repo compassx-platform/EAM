@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   GridLayout,
   useContainerWidth,
@@ -51,21 +51,27 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   const { width, containerRef, mounted } = useContainerWidth();
 
-  const load = async () => {
-    try {
-      const form = await api.getForm(entityType);
-      setItems((form.layout || []) as EntityFormItem[]);
-      setFields(form.fields || []);
-      setCols(form.cols || 12);
-      setRowHeight(form.row_height || 40);
-    } catch (e: any) {
-      setNotice({ kind: 'err', text: e.message });
-    } finally {
-      setLoaded(true);
-    }
-  };
-
-  void load();
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const form = await api.getForm(entityType);
+        if (cancelled) return;
+        setItems((form.layout || []) as EntityFormItem[]);
+        setFields(form.fields || []);
+        setCols(form.cols || 12);
+        setRowHeight(form.row_height || 40);
+      } catch (e: any) {
+        if (cancelled) return;
+        setNotice({ kind: 'err', text: e.message });
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityType]);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setNotice({ kind, text });
