@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Layers,
   FileText,
-  Heading,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
@@ -21,7 +20,6 @@ import type {
   ValidTransition,
   EntityField,
   GateTraceItem,
-  EntityFormItem,
 } from '../../types';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -72,7 +70,6 @@ export function EntityConsole() {
   const [valid, setValid] = useState<ValidTransition[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [fire, setFire] = useState<ValidTransition | null>(null);
 
   const selectedId = route.query.get('selected');
@@ -218,7 +215,7 @@ export function EntityConsole() {
           </button>
 
           <button
-            onClick={() => setCreateOpen(true)}
+            onClick={() => navigate('/entities/new', { type })}
             className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
           >
             <Plus className="h-4 w-4" /> New {type || 'entity'}
@@ -286,19 +283,6 @@ export function EntityConsole() {
         </table>
       </div>
 
-      {createOpen && (
-        <CreateEntityModal
-          entityType={type}
-          fields={fields}
-          onClose={() => setCreateOpen(false)}
-          onCreated={(entity) => {
-            setCreateOpen(false);
-            loadList();
-            patchQuery({ selected: entity.id });
-          }}
-        />
-      )}
-
       {detail && (
         <EntityDetail
           entityType={type}
@@ -328,109 +312,6 @@ export function EntityConsole() {
         />
       )}
     </div>
-  );
-}
-
-// ---- Create entity ---------------------------------------------------------
-
-function CreateEntityModal({
-  entityType,
-  fields,
-  onClose,
-  onCreated,
-}: {
-  entityType: string;
-  fields: EntityField[];
-  onClose: () => void;
-  onCreated: (e: EntityRecord) => void;
-}) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [layout, setLayout] = useState<EntityFormItem[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getForm(entityType)
-      .then((form) => {
-        if (!cancelled) setLayout(form.layout || []);
-      })
-      .catch(() => {
-        if (!cancelled) setLayout([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [entityType]);
-
-  const submit = async () => {
-    setSaving(true);
-    setErr(null);
-    try {
-      const custom = toCustomFields(values, fields);
-      const res = await api.createEntity(entityType, { custom_fields: custom });
-      onCreated(res.entity);
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const byName = new Map(fields.map((f) => [f.field_name, f]));
-  const placed = new Set((layout || []).map((it) => it.i));
-  const autoAppended = fields
-    .filter((f) => f.required && !placed.has(f.field_name))
-    .sort((a, b) => a.field_name.localeCompare(b.field_name));
-  const layoutFields = (layout || []).filter((it) => !it.isHeader && byName.has(it.i));
-
-  const ordered = [...layoutFields.map((it) => byName.get(it.i)!), ...autoAppended];
-
-  const renderRow = (f: EntityField, key: string) => (
-    <FieldRow key={key} field={f} value={values[f.field_name] ?? ''} onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))} />
-  );
-
-  return (
-    <Modal title={`New ${entityType} record`} onClose={onClose}>
-      {layout !== null && layout.length > 0 ? (
-        <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-          {layout.map((it) => {
-            if (it.isHeader) {
-              return (
-                <div
-                  key={it.i}
-                  className="flex items-center gap-1.5 border-b border-gray-100 pb-1 pt-1 text-sm font-bold text-indigo-700"
-                >
-                  <Heading className="h-3.5 w-3.5" /> {it.label}
-                </div>
-              );
-            }
-            const f = byName.get(it.i);
-            if (!f) return null;
-            return renderRow(f, it.i);
-          })}
-          {autoAppended.length > 0 && (
-            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
-              Required fields not on form
-            </div>
-          )}
-          {autoAppended.map((f) => renderRow(f, `auto-${f.field_name}`))}
-        </div>
-      ) : (
-        <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-          {ordered.map((f, i) => renderRow(f, `${f.field_name}-${i}`))}
-        </div>
-      )}
-      {err && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
-      <button
-        onClick={submit}
-        disabled={saving}
-        className="mt-2 flex items-center justify-center gap-1.5 rounded-md bg-blue-700 px-3 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-      >
-        {saving && <Loader2 className="h-4 w-4 animate-spin" />} Create entity (starts workflow)
-      </button>
-    </Modal>
   );
 }
 

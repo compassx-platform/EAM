@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { WorkflowList } from './components/WorkflowList';
 import { WorkflowBuilder } from './components/builder/WorkflowBuilder';
 import { EntityConsole } from './components/runtime/EntityConsole';
+import { EntityCreateForm } from './components/runtime/EntityCreateForm';
 import { FormList } from './components/forms/FormList';
 import { FormBuilder } from './components/forms/FormBuilder';
 import type { Workflow } from './types';
@@ -55,6 +56,11 @@ function App() {
           {navBtn('forms', 'Forms', PenTool)}
         </nav>
 
+        {tab === 'entities' && route.path === '/entities/new' && (
+          <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            New {route.query.get('type') || 'entity'}
+          </span>
+        )}
         {tab === 'workflows' && builderId !== undefined && (
           <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700">
             Workflow Builder
@@ -69,9 +75,18 @@ function App() {
 
       <main className="min-h-0 flex-1 overflow-hidden">
         {tab === 'entities' ? (
-          <div className="h-full overflow-y-auto">
-            <EntityConsole />
-          </div>
+          route.path === '/entities/new' ? (
+            <div className="h-full overflow-y-auto">
+              <EntityCreateForm
+                entityType={route.query.get('type') || 'workorder'}
+                onBack={() => navigate('/entities', { type: route.query.get('type') || undefined })}
+              />
+            </div>
+          ) : (
+            <div className="h-full overflow-y-auto">
+              <EntityConsole />
+            </div>
+          )
         ) : tab === 'forms' ? (
           formType !== null ? (
             <FormBuilder
