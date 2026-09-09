@@ -11,10 +11,18 @@ import {
   ChevronRight,
   Layers,
   FileText,
+  Heading,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
-import type { EntityRecord, EntityEvent, ValidTransition, EntityField, GateTraceItem } from '../../types';
+import type {
+  EntityRecord,
+  EntityEvent,
+  ValidTransition,
+  EntityField,
+  GateTraceItem,
+  EntityFormItem,
+} from '../../types';
 
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -339,6 +347,22 @@ function CreateEntityModal({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [layout, setLayout] = useState<EntityFormItem[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getForm(entityType)
+      .then((form) => {
+        if (!cancelled) setLayout(form.layout || []);
+      })
+      .catch(() => {
+        if (!cancelled) setLayout([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entityType]);
 
   const submit = async () => {
     setSaving(true);
@@ -354,11 +378,50 @@ function CreateEntityModal({
     }
   };
 
+  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const placed = new Set((layout || []).map((it) => it.i));
+  const autoAppended = fields
+    .filter((f) => f.required && !placed.has(f.field_name))
+    .sort((a, b) => a.field_name.localeCompare(b.field_name));
+  const layoutFields = (layout || []).filter((it) => !it.isHeader && byName.has(it.i));
+
+  const ordered = [...layoutFields.map((it) => byName.get(it.i)!), ...autoAppended];
+
+  const renderRow = (f: EntityField, key: string) => (
+    <FieldRow key={key} field={f} value={values[f.field_name] ?? ''} onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))} />
+  );
+
   return (
     <Modal title={`New ${entityType} record`} onClose={onClose}>
-      {fields.map((f) => (
-        <FieldRow key={f.field_name} field={f} value={values[f.field_name] ?? ''} onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))} />
-      ))}
+      {layout !== null && layout.length > 0 ? (
+        <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+          {layout.map((it) => {
+            if (it.isHeader) {
+              return (
+                <div
+                  key={it.i}
+                  className="flex items-center gap-1.5 border-b border-gray-100 pb-1 pt-1 text-sm font-bold text-indigo-700"
+                >
+                  <Heading className="h-3.5 w-3.5" /> {it.label}
+                </div>
+              );
+            }
+            const f = byName.get(it.i);
+            if (!f) return null;
+            return renderRow(f, it.i);
+          })}
+          {autoAppended.length > 0 && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+              Required fields not on form
+            </div>
+          )}
+          {autoAppended.map((f) => renderRow(f, `auto-${f.field_name}`))}
+        </div>
+      ) : (
+        <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+          {ordered.map((f, i) => renderRow(f, `${f.field_name}-${i}`))}
+        </div>
+      )}
       {err && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
       <button
         onClick={submit}

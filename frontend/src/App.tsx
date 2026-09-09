@@ -2,11 +2,13 @@ import { useCallback, useState } from 'react';
 import { WorkflowList } from './components/WorkflowList';
 import { WorkflowBuilder } from './components/builder/WorkflowBuilder';
 import { EntityConsole } from './components/runtime/EntityConsole';
+import { FormList } from './components/forms/FormList';
+import { FormBuilder } from './components/forms/FormBuilder';
 import type { Workflow } from './types';
-import { GitBranch, Layers } from 'lucide-react';
+import { GitBranch, Layers, PenTool } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
-type Tab = 'workflows' | 'entities';
+type Tab = 'workflows' | 'entities' | 'forms';
 
 function App() {
   const route = useHashRoute();
@@ -14,15 +16,21 @@ function App() {
 
   const refreshList = useCallback(() => setListTick((t) => t + 1), []);
 
-  const tab: Tab = route.path.startsWith('/entities') ? 'entities' : 'workflows';
+  const tab: Tab = route.path.startsWith('/entities')
+    ? 'entities'
+    : route.path.startsWith('/forms')
+      ? 'forms'
+      : 'workflows';
 
   const switchTab = (t: Tab) => {
     if (t === 'entities') navigate('/entities');
+    else if (t === 'forms') navigate('/forms');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
 
   const builderId = route.path === '/workflows/new' ? null : route.path.startsWith('/workflows/') ? route.id : undefined;
+  const formType = route.path.startsWith('/forms/') ? route.id : null;
 
   const navBtn = (t: Tab, label: string, Icon: typeof GitBranch) => (
     <button
@@ -44,11 +52,17 @@ function App() {
         <nav className="ml-4 flex items-center gap-1">
           {navBtn('workflows', 'Workflows', GitBranch)}
           {navBtn('entities', 'Entities', Layers)}
+          {navBtn('forms', 'Forms', PenTool)}
         </nav>
 
         {tab === 'workflows' && builderId !== undefined && (
           <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700">
             Workflow Builder
+          </span>
+        )}
+        {tab === 'forms' && formType !== null && (
+          <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            Form Builder · {formType}
           </span>
         )}
       </header>
@@ -58,6 +72,19 @@ function App() {
           <div className="h-full overflow-y-auto">
             <EntityConsole />
           </div>
+        ) : tab === 'forms' ? (
+          formType !== null ? (
+            <FormBuilder
+              key={formType}
+              entityType={formType}
+              onBack={() => navigate('/forms')}
+              onChanged={refreshList}
+            />
+          ) : (
+            <div key={listTick} className="h-full overflow-y-auto">
+              <FormList onBuild={(t) => navigate(`/forms/${encodeURIComponent(t)}`)} />
+            </div>
+          )
         ) : builderId !== undefined ? (
           <WorkflowBuilder
             key={builderId ?? 'new'}
