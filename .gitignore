@@ -46,8 +46,16 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# The generic lib/ rule above is for Python egg dirs; keep the frontend
+# helper module directory (src/lib/router.ts) tracked.
+!frontend/src/lib/
+!frontend/src/lib/**
+
 # Editor / OS
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Probe/test artifacts
+mtime-test-*/
