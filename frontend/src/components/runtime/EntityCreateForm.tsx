@@ -1,5 +1,5 @@
-import { useEffect, useId, useState } from 'react';
-import { GridLayout, useContainerWidth, verticalCompactor } from 'react-grid-layout';
+import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { ArrowLeft, CheckCircle2, Loader2, FileText, Heading, Zap } from 'lucide-react';
@@ -10,6 +10,32 @@ import type { EntityField, EntityFormItem } from '../../types';
 interface EntityCreateFormProps {
   entityType: string;
   onBack: () => void;
+}
+
+// The layout container only mounts once the form definition is loaded, so
+// react-grid-layout's built-in hook (which measures on mount) would miss it.
+// Measure explicitly once the container is available, and keep an eye on
+// viewport resizes so the grid fits its canvas width.
+function useContainerSize(active: boolean) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || !active) return;
+    const update = () => {
+      setWidth(Math.round(node.getBoundingClientRect().width));
+      setMounted(true);
+    };
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(node);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, [active]);
+  return { width, mounted, containerRef };
 }
 
 export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) {
@@ -23,7 +49,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const { width, containerRef, mounted } = useContainerWidth();
+  const { width, mounted, containerRef } = useContainerSize(loaded);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,19 +247,23 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
 }
 
 // --- grid cell: compact label+input on one row so it fits h=1 field cells ----
-function FillCell({
-  field,
-  value,
-  onChange,
-}: {
+// forwardRef + className/style forwarding so react-grid-layout can measure the
+// cell and position it (it clones each child with ref/className/style props).
+const FillCell = forwardRef<HTMLDivElement, {
   field: EntityField;
   value: string;
   onChange: (v: string) => void;
-}) {
+  className?: string;
+  style?: CSSProperties;
+}>(function FillCell({ field, value, onChange, className, style }, ref) {
   const id = useId();
   const input = makeInput(field, id, value, onChange);
   return (
-    <div className="flex h-full w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5">
+    <div
+      ref={ref}
+      style={style}
+      className={`${className ?? ''} flex h-full w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5`}
+    >
       <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-[11px] font-semibold text-gray-600">
         <FileText className="h-3 w-3 shrink-0 text-gray-400" />
         <span className="truncate">{field.field_name}</span>
@@ -243,7 +273,7 @@ function FillCell({
       <div className="min-w-0 flex-1">{input}</div>
     </div>
   );
-}
+});
 
 // --- full-width vertical label+input row (used for auto-appended fields) ----
 function FieldRow({
