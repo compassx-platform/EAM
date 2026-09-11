@@ -22,6 +22,15 @@ import {
   ChevronDown,
   X,
   FileText,
+  Hash,
+  Mail,
+  Phone,
+  Link,
+  Calendar,
+  CalendarClock,
+  Clock,
+  CheckSquare,
+  ToggleRight,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { EntityField, EntityFormItem, GenericFieldType } from '../../types';
@@ -38,22 +47,39 @@ interface FieldTypeDef {
   hint: string;
   defaultFieldName: string;
   defaultOptions: string[];
+  defaultHeight: number;
 }
 
 const FIELD_TYPE_DEFS: FieldTypeDef[] = [
-  { type: 'text', label: 'Text', hint: 'Single-line text input', defaultFieldName: 'text_field', defaultOptions: [] },
-  { type: 'long_text', label: 'Long text', hint: 'Multi-line text area', defaultFieldName: 'long_text_field', defaultOptions: [] },
-  { type: 'selection', label: 'Selection', hint: 'Radio buttons, choose one', defaultFieldName: 'selection_field', defaultOptions: ['Option 1', 'Option 2'] },
-  { type: 'dropdown', label: 'Dropdown', hint: 'Pick from a list', defaultFieldName: 'dropdown_field', defaultOptions: ['Option 1', 'Option 2'] },
+  { type: 'text', label: 'Text', hint: 'Single-line text input', defaultFieldName: 'text_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'long_text', label: 'Long text', hint: 'Multi-line text area', defaultFieldName: 'long_text_field', defaultOptions: [], defaultHeight: 3 },
+  { type: 'number', label: 'Number', hint: 'Numeric value', defaultFieldName: 'number_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'email', label: 'Email', hint: 'Email address', defaultFieldName: 'email_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'phone', label: 'Phone', hint: 'Phone number', defaultFieldName: 'phone_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'url', label: 'URL', hint: 'Web link', defaultFieldName: 'url_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'date', label: 'Date', hint: 'Date picker', defaultFieldName: 'date_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'datetime', label: 'Date & time', hint: 'Date and time picker', defaultFieldName: 'datetime_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'time', label: 'Time', hint: 'Time picker', defaultFieldName: 'time_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'selection', label: 'Selection', hint: 'Radio buttons, choose one', defaultFieldName: 'selection_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 2 },
+  { type: 'checkbox_group', label: 'Checkbox group', hint: 'Tick any number of options', defaultFieldName: 'checkbox_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 2 },
+  { type: 'dropdown', label: 'Dropdown', hint: 'Pick from a list', defaultFieldName: 'dropdown_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 1 },
+  { type: 'boolean', label: 'Yes / No', hint: 'Single checkbox toggle', defaultFieldName: 'boolean_field', defaultOptions: [], defaultHeight: 1 },
 ];
 
 const FIELD_TYPE_STYLE: Record<string, string> = {
   text: 'text-sky-700 bg-sky-50 border-sky-200',
   long_text: 'text-indigo-700 bg-indigo-50 border-indigo-200',
-  selection: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-  dropdown: 'text-amber-700 bg-amber-50 border-amber-200',
   number: 'text-violet-700 bg-violet-50 border-violet-200',
+  email: 'text-pink-700 bg-pink-50 border-pink-200',
+  phone: 'text-teal-700 bg-teal-50 border-teal-200',
+  url: 'text-blue-700 bg-blue-50 border-blue-200',
   date: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  datetime: 'text-teal-700 bg-teal-50 border-teal-200',
+  time: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+  selection: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  checkbox_group: 'text-purple-700 bg-purple-50 border-purple-200',
+  dropdown: 'text-amber-700 bg-amber-50 border-amber-200',
+  boolean: 'text-orange-700 bg-orange-50 border-orange-200',
   select: 'text-amber-700 bg-amber-50 border-amber-200',
   entity_reference: 'text-rose-700 bg-rose-50 border-rose-200',
 };
@@ -64,10 +90,28 @@ function fieldIcon(type?: string) {
       return Type;
     case 'long_text':
       return AlignLeft;
+    case 'number':
+      return Hash;
+    case 'email':
+      return Mail;
+    case 'phone':
+      return Phone;
+    case 'url':
+      return Link;
+    case 'date':
+      return Calendar;
+    case 'datetime':
+      return CalendarClock;
+    case 'time':
+      return Clock;
     case 'selection':
       return ListChecks;
+    case 'checkbox_group':
+      return CheckSquare;
     case 'dropdown':
       return ChevronDown;
+    case 'boolean':
+      return ToggleRight;
     default:
       return FileText;
   }
@@ -79,10 +123,28 @@ function iconColor(type?: string) {
       return 'text-sky-600';
     case 'long_text':
       return 'text-indigo-600';
+    case 'number':
+      return 'text-violet-600';
+    case 'email':
+      return 'text-pink-600';
+    case 'phone':
+      return 'text-teal-600';
+    case 'url':
+      return 'text-blue-600';
+    case 'date':
+      return 'text-emerald-600';
+    case 'datetime':
+      return 'text-teal-600';
+    case 'time':
+      return 'text-cyan-600';
     case 'selection':
       return 'text-emerald-600';
+    case 'checkbox_group':
+      return 'text-purple-600';
     case 'dropdown':
       return 'text-amber-600';
+    case 'boolean':
+      return 'text-orange-600';
     default:
       return 'text-gray-400';
   }
@@ -131,6 +193,31 @@ function ControlPreview({
     );
   }
 
+  if (type === 'checkbox_group') {
+    if (!options || options.length === 0) {
+      return <span className="text-[11px] text-gray-400">No options defined</span>;
+    }
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {options.map((o) => (
+          <label key={o} className="flex cursor-pointer items-center gap-1 text-xs text-gray-600">
+            <input type="checkbox" disabled className="pointer-events-none accent-blue-600" />
+            {o}
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  if (type === 'boolean') {
+    return (
+      <div className="flex items-center gap-2 text-xs text-gray-600">
+        <input type="checkbox" disabled className="pointer-events-none accent-blue-600" />
+        Yes — {placeholder || 'checked'} / No — unchecked
+      </div>
+    );
+  }
+
   if (type === 'dropdown' || type === 'select') {
     return (
       <select disabled className={inputCls}>
@@ -142,11 +229,17 @@ function ControlPreview({
     );
   }
 
-  if (type === 'number') {
-    return <input disabled type="number" className={inputCls} placeholder="0" />;
-  }
-  if (type === 'date') {
-    return <input disabled type="date" className={inputCls} />;
+  const NATIVE: Record<string, string> = {
+    number: 'number',
+    email: 'email',
+    phone: 'tel',
+    url: 'url',
+    date: 'date',
+    datetime: 'datetime-local',
+    time: 'time',
+  };
+  if (type && NATIVE[type]) {
+    return <input disabled type={NATIVE[type]} className={inputCls} />;
   }
   if (type === 'entity_reference') {
     return <input disabled type="text" className={inputCls} placeholder="linked entity id" />;
@@ -231,7 +324,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         x: 0,
         y,
         w: Math.max(6, Math.round(cols / 2)),
-        h: type === 'long_text' ? 3 : type === 'selection' ? 2 : 1,
+        h: def.defaultHeight,
         label: def.label,
         fieldName: name,
         fieldType: type,
@@ -595,7 +688,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                       patchItem(selectedItem.i, {
                         fieldType: t,
                         options:
-                          t === 'selection' || t === 'dropdown'
+                          t === 'selection' || t === 'checkbox_group' || t === 'dropdown'
                             ? (selectedItem.options?.length ? selectedItem.options : [...(def?.defaultOptions ?? [])])
                             : selectedItem.options,
                       });
@@ -610,7 +703,12 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   </select>
                 </div>
 
-                {(selectedItem.fieldType === 'text' || selectedItem.fieldType === 'long_text') && (
+                {(selectedItem.fieldType === 'text' ||
+                  selectedItem.fieldType === 'long_text' ||
+                  selectedItem.fieldType === 'number' ||
+                  selectedItem.fieldType === 'email' ||
+                  selectedItem.fieldType === 'phone' ||
+                  selectedItem.fieldType === 'url') && (
                   <div className="mt-3 flex flex-col gap-2">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Placeholder</label>
                     <input
@@ -622,7 +720,9 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   </div>
                 )}
 
-                {(selectedItem.fieldType === 'selection' || selectedItem.fieldType === 'dropdown') && (
+                {(selectedItem.fieldType === 'selection' ||
+                  selectedItem.fieldType === 'checkbox_group' ||
+                  selectedItem.fieldType === 'dropdown') && (
                   <div className="mt-3 flex flex-col gap-2">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Options</label>
                     {(selectedItem.options || []).map((o, idx) => (

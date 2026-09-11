@@ -107,11 +107,44 @@ def test_selection_and_dropdown_require_options(test_db):
 
 def test_unknown_field_type_rejected(test_db):
     layout = make_layout()
-    layout[3]["fieldType"] = "checkbox"
+    layout[3]["fieldType"] = "slider"
     with pytest.raises(HTTPException) as exc:
         save(test_db, "training", layout)
     assert exc.value.status_code == 400
     assert "Invalid field_type" in str(exc.value.detail)
+
+
+def test_new_scalar_types_accepted(test_db):
+    layout = make_layout()
+    extra = [
+        {"i": "field:test-6", "x": 0, "y": 5, "w": 6, "h": 1, "fieldName": "email", "fieldType": "email", "required": False, "options": [], "placeholder": None},
+        {"i": "field:test-7", "x": 0, "y": 6, "w": 6, "h": 1, "fieldName": "phone", "fieldType": "phone", "placeholder": None},
+        {"i": "field:test-8", "x": 0, "y": 7, "w": 6, "h": 1, "fieldName": "website", "fieldType": "url", "placeholder": None},
+        {"i": "field:test-9", "x": 0, "y": 8, "w": 6, "h": 1, "fieldName": "due", "fieldType": "datetime", "placeholder": None},
+        {"i": "field:test-10", "x": 0, "y": 9, "w": 6, "h": 1, "fieldName": "start", "fieldType": "time", "placeholder": None},
+        {"i": "field:test-11", "x": 0, "y": 10, "w": 6, "h": 1, "fieldName": "cost", "fieldType": "number", "placeholder": None},
+        {"i": "field:test-12", "x": 0, "y": 11, "w": 6, "h": 1, "fieldName": "enabled", "fieldType": "boolean", "placeholder": None},
+    ]
+    created = save(test_db, "training", layout + extra)
+    stored = {it["i"]: it for it in created["layout"]}
+    assert stored["field:test-12"]["fieldType"] == "boolean"
+    assert get_form("training", test_db)["layout"][-1]["fieldType"] == "boolean"
+
+
+def test_checkbox_group_requires_options_and_round_trips(test_db):
+    layout = make_layout()
+    layout.append(
+        {"i": "field:test-13", "x": 0, "y": 5, "w": 6, "h": 2, "fieldName": "certifications", "fieldType": "checkbox_group", "required": False, "options": [], "placeholder": None}
+    )
+    with pytest.raises(HTTPException) as exc:
+        save(test_db, "training", layout)
+    assert exc.value.status_code == 400
+    assert "at least one option" in str(exc.value.detail)
+
+    layout[-1]["options"] = ["Safety", "Quality"]
+    created = save(test_db, "training", layout)
+    stored = {it["i"]: it for it in created["layout"]}
+    assert stored["field:test-13"]["options"] == ["Safety", "Quality"]
 
 
 def test_missing_field_name_rejected(test_db):

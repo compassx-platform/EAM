@@ -8,9 +8,24 @@ from backend.models.field_registry import EntityField
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
 
-GENERIC_FIELD_TYPES = ["text", "long_text", "selection", "dropdown"]
+GENERIC_FIELD_TYPES = [
+    "text",
+    "long_text",
+    "number",
+    "email",
+    "phone",
+    "url",
+    "date",
+    "datetime",
+    "time",
+    "selection",
+    "checkbox_group",
+    "dropdown",
+    "boolean",
+]
 LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
-ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + LEGACY_FIELD_TYPES
+ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + [t for t in LEGACY_FIELD_TYPES if t not in GENERIC_FIELD_TYPES]
+OPTION_REQUIRED_TYPES = ("selection", "checkbox_group", "dropdown")
 
 class FormItem(BaseModel):
     i: str
@@ -125,7 +140,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 s = str(o).strip()
                 if s and s not in options:
                     options.append(s)
-            if ft in ("selection", "dropdown") and not options:
+            if ft in OPTION_REQUIRED_TYPES and not options:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Field '{name}' requires at least one option"

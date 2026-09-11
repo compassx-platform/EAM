@@ -47,7 +47,20 @@ export interface ValidationResult {
 
 export type WorkflowStatus = Workflow['status'];
 
-export type GenericFieldType = 'text' | 'long_text' | 'selection' | 'dropdown';
+export type GenericFieldType =
+  | 'text'
+  | 'long_text'
+  | 'number'
+  | 'email'
+  | 'phone'
+  | 'url'
+  | 'date'
+  | 'datetime'
+  | 'time'
+  | 'selection'
+  | 'checkbox_group'
+  | 'dropdown'
+  | 'boolean';
 
 export interface EntityField {
   entity_type: string;

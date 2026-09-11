@@ -386,6 +386,44 @@ function makeInput(
       </div>
     );
   }
+  if (def.type === 'checkbox_group') {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {def.options.length === 0 ? (
+          <span className="text-[11px] text-gray-400">No options defined</span>
+        ) : (
+          def.options.map((o) => {
+            const checked = value.split(',').map((s) => s.trim()).includes(o);
+            return (
+              <label key={o} className="flex cursor-pointer items-center gap-1 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onChange(toggleMulti(value, o))}
+                  className="accent-blue-600"
+                />
+                {o}
+              </label>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+  if (def.type === 'boolean') {
+    return (
+      <label className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+        <input
+          id={id}
+          type="checkbox"
+          checked={value === 'yes'}
+          onChange={(e) => onChange(e.target.checked ? 'yes' : 'no')}
+          className="accent-blue-600"
+        />
+        Yes
+      </label>
+    );
+  }
   if (def.type === 'dropdown' || def.type === 'select') {
     return (
       <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cls}>
@@ -396,16 +434,33 @@ function makeInput(
       </select>
     );
   }
+  const nativeType: Record<string, string> = {
+    number: 'number',
+    email: 'email',
+    phone: 'tel',
+    url: 'url',
+    date: 'date',
+    datetime: 'datetime-local',
+    time: 'time',
+  };
   return (
     <input
       id={id}
-      type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
+      type={nativeType[def.type] ?? 'text'}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={def.type === 'entity_reference' ? 'linked entity id' : def.placeholder || ''}
+      placeholder={def.placeholder || ''}
       className={cls}
     />
   );
+}
+
+/** Toggle one option in a comma-joined multi-select value string. */
+function toggleMulti(current: string, option: string): string {
+  const set = new Set(current ? current.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  if (set.has(option)) set.delete(option);
+  else set.add(option);
+  return [...set].join(',');
 }
 
 function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): Record<string, unknown> {
@@ -419,6 +474,10 @@ function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): 
     if (def?.type === 'number') {
       const n = Number(trimmed);
       out[name] = Number.isNaN(n) ? trimmed : n;
+    } else if (def?.type === 'boolean') {
+      out[name] = trimmed === 'yes';
+    } else if (def?.type === 'checkbox_group') {
+      out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
     } else {
       out[name] = trimmed;
     }
