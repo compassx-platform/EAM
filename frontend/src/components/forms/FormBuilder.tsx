@@ -34,6 +34,10 @@ import {
   CheckSquare,
   ToggleRight,
   Table2,
+  Code2,
+  Copy,
+  ClipboardCheck,
+  Upload,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { EntityField, EntityFormItem, GenericFieldType } from '../../types';
@@ -326,6 +330,10 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const [deleting, setDeleting] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [jsonDraft, setJsonDraft] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { width, containerRef, mounted } = useContainerWidth();
 
@@ -498,6 +506,86 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   const selectedItem = selected ? items.find((it) => it.i === selected) : null;
 
+  const currentDefinition = () => ({
+    entity_type: entityType,
+    layout: items.map((it) => {
+      const copy: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(it)) {
+        if (v !== undefined && v !== null) copy[k] = v;
+      }
+      return copy;
+    }),
+    cols,
+    row_height: rowHeight,
+  });
+
+  const openJson = () => {
+    setJsonDraft(JSON.stringify(currentDefinition(), null, 2));
+    setJsonError(null);
+    setCopied(false);
+    setJsonOpen(true);
+  };
+
+  const copyJson = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonDraft);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      flash('err', 'Copy failed — select the JSON and copy manually.');
+    }
+  };
+
+  const importJson = () => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonDraft);
+    } catch {
+      setJsonError('Invalid JSON — check for missing commas or trailing commas.');
+      return;
+    }
+    const obj = parsed as {
+      layout?: unknown;
+      cols?: unknown;
+      row_height?: unknown;
+    };
+    if (!Array.isArray(obj.layout)) {
+      setJsonError('The JSON must contain a "layout" array.');
+      return;
+    }
+    const layout = obj.layout as EntityFormItem[];
+    for (let idx = 0; idx < layout.length; idx += 1) {
+      const it = layout[idx];
+      if (!it || typeof it !== 'object' || typeof it.i !== 'string' || !it.i.trim()) {
+        setJsonError(`Layout item #${idx + 1} is missing a valid "i" id.`);
+        return;
+      }
+      const dup = layout.findIndex((o, j) => j < idx && o.i === it.i);
+      if (dup !== -1) {
+        setJsonError(`Duplicate layout item id "${it.i}".`);
+        return;
+      }
+    }
+    const nextCols = Number.isFinite(Number(obj.cols)) && Number(obj.cols) >= 1 ? Math.round(Number(obj.cols)) : cols;
+    const nextRowHeight =
+      Number.isFinite(Number(obj.row_height)) && Number(obj.row_height) >= 1 ? Math.round(Number(obj.row_height)) : rowHeight;
+    const normalized: EntityFormItem[] = layout.map((it) => ({
+      i: it.i,
+      x: Number.isFinite(Number(it.x)) ? Math.max(0, Math.round(Number(it.x))) : 0,
+      y: Number.isFinite(Number(it.y)) ? Math.max(0, Math.round(Number(it.y))) : 0,
+      w: Number.isFinite(Number(it.w)) ? Math.max(1, Math.min(nextCols, Math.round(Number(it.w)))) : 6,
+      h: Number.isFinite(Number(it.h)) ? Math.max(1, Math.round(Number(it.h))) : 1,
+      ...it,
+    }));
+    setItems(normalized);
+    setCols(nextCols);
+    setRowHeight(nextRowHeight);
+    setJsonOpen(false);
+    setJsonError(null);
+    setDirty(true);
+    flash('ok', `Imported ${normalized.length} item(s) from JSON. Review and Save to persist.`);
+  };
+
   return (
     <div className="flex h-full flex-col">
       {/* Toolbar */}
@@ -540,6 +628,13 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
             className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
           >
             {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+          </button>
+          <button
+            onClick={openJson}
+            title="View, edit, copy or export the form as JSON"
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Code2 className="h-4 w-4" /> JSON
           </button>
           <button
             onClick={handleSave}
@@ -852,6 +947,86 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
           </div>
         </aside>
       </div>
+
+      {jsonOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex h-[80vh] max-h-[720px] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
+              <Code2 className="h-5 w-5 text-blue-700" />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-gray-900">Form JSON</h3>
+                <p className="truncate text-[11px] text-gray-400">
+                  Copy to export, or paste JSON from another form to import its layout.
+                </p>
+              </div>
+              <button
+                onClick={() => setJsonOpen(false)}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+                <button
+                  onClick={importJson}
+                  className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
+                >
+                  <Upload className="h-4 w-4" /> Import JSON into editor
+                </button>
+                <button
+                  onClick={copyJson}
+                  className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                >
+                  {copied ? <ClipboardCheck className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                  {copied ? 'Copied!' : 'Copy JSON'}
+                </button>
+                {jsonError ? (
+                  <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+                    <X className="h-3.5 w-3.5" /> {jsonError}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-gray-400">
+                    {items.length} item(s) · {cols} cols · {rowHeight}px rows
+                  </span>
+                )}
+              </div>
+
+              <textarea
+                value={jsonDraft}
+                onChange={(e) => {
+                  setJsonDraft(e.target.value);
+                  if (jsonError) setJsonError(null);
+                }}
+                spellCheck={false}
+                className={`mx-4 mt-3 flex-1 resize-none rounded-md border bg-gray-50 px-3 py-2.5 font-mono text-xs leading-relaxed text-gray-800 focus:outline-none ${
+                  jsonError ? 'border-red-400 ring-1 ring-red-200' : 'border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
+                }`}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-4 py-3">
+              <button
+                onClick={() => {
+                  setJsonOpen(false);
+                  setJsonError(null);
+                }}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={importJson}
+                className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
+              >
+                <Upload className="h-4 w-4" /> Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
