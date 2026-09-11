@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties } fr
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, CheckCircle2, Loader2, FileText, Heading, Zap } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Heading, Zap } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
 import type { EntityField, EntityFormItem } from '../../types';
@@ -17,6 +17,8 @@ interface ResolvedField {
   key: string;
   /** Storage key on the record's custom_fields. */
   name: string;
+  /** Human-readable label from the form builder. */
+  label?: string;
   type: string;
   required: boolean;
   options: string[];
@@ -92,6 +94,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       return {
         key: it.i,
         name: it.fieldName || it.i,
+        label: it.label ?? undefined,
         type: it.fieldType,
         required: Boolean(it.required),
         options: it.options || [],
@@ -112,16 +115,6 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const visibleItems = items.filter((it) => it.isHeader || resolveItem(it) !== null);
   const hasLayout = visibleItems.length > 0;
 
-  const placedKeys = new Set(items.map((it) => it.i));
-  const inlineNames = new Set(
-    items.filter((it) => !it.isHeader && it.fieldType).map((it) => it.fieldName || it.i)
-  );
-  const autoAppended = fields
-    .filter(
-      (f) => f.required && !placedKeys.has(f.field_name) && !inlineNames.has(f.field_name)
-    )
-    .sort((a, b) => a.field_name.localeCompare(b.field_name));
-
   const fallbackFields =
     !hasLayout && fields.length > 0 ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name)) : [];
 
@@ -132,7 +125,6 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     try {
       const defs = [
         ...visibleItems.filter((it) => resolveItem(it) !== null).map((it) => resolveItem(it)!),
-        ...autoAppended.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] })),
         ...fallbackFields.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] })),
       ];
       const custom = toCustomFields(values, defs);
@@ -182,12 +174,12 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              {visibleItems.length || autoAppended.length ? 'Form layout' : 'No form layout defined'}
+              {hasLayout ? 'Form layout' : 'No form layout defined'}
             </span>
             {mounted && <span className="text-[11px] text-gray-400">{cols} cols · {rowHeight}px rows</span>}
           </div>
 
-          {hasLayout || autoAppended.length > 0 || fallbackFields.length > 0 ? (
+          {hasLayout || fallbackFields.length > 0 ? (
             <div className="p-4">
               <div ref={containerRef}>
                 {mounted && hasLayout && (
@@ -203,7 +195,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                     }}
                     dragConfig={{ enabled: false }}
                     resizeConfig={{ enabled: false }}
-                    className="rounded-lg border border-gray-100 bg-gray-50/50"
+                    className="rounded-lg"
                   >
                     {visibleItems.map((it) =>
                       it.isHeader ? (
@@ -219,6 +211,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                           key={it.i}
                           def={resolveItem(it)!}
                           value={values[it.i] ?? ''}
+                          itemHeight={it.h}
                           onChange={(v) => setValues((s) => ({ ...s, [it.i]: v }))}
                         />
                       )
@@ -243,24 +236,6 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                       onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
                     />
                   ))}
-                </div>
-              )}
-
-              {autoAppended.length > 0 && (
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
-                    Required fields not on the form
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {autoAppended.map((f) => (
-                      <FieldRow
-                        key={`auto-${f.field_name}`}
-                        def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] }}
-                        value={values[f.field_name] ?? ''}
-                        onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
-                      />
-                    ))}
-                  </div>
                 </div>
               )}
             </div>
@@ -296,23 +271,23 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
 const FillCell = forwardRef<HTMLDivElement, {
   def: ResolvedField;
   value: string;
+  itemHeight?: number;
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ def, value, onChange, className, style }, ref) {
+}>(function FillCell({ def, value, itemHeight = 1, onChange, className, style }, ref) {
   const id = useId();
-  const input = makeInput(def, id, value, onChange, 1);
+  const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
+  const input = makeInput(def, id, value, onChange, rows);
   return (
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5`}
+      className={`${className ?? ''} flex h-full w-full items-center gap-2 px-2.5 py-1`}
     >
-      <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-[11px] font-semibold text-gray-600">
-        <FileText className="h-3 w-3 shrink-0 text-gray-400" />
-        <span className="truncate">{def.name}</span>
+      <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-xs font-medium text-gray-700">
+        <span className="truncate">{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
-        <span className="ml-auto rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
       </label>
       <div className="min-w-0 flex-1">{input}</div>
     </div>
@@ -332,11 +307,9 @@ function FieldRow({
   const id = useId();
   return (
     <div className="flex flex-col gap-0.5">
-      <label htmlFor={id} className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
-        <FileText className="h-3 w-3 text-gray-400" />
-        {def.name}
+      <label htmlFor={id} className="flex items-center gap-1 text-xs font-medium text-gray-700">
+        {def.label || def.name}
         {def.required && <span className="text-red-500">*</span>}
-        <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
       </label>
       {makeInput(def, id, value, onChange, 3)}
     </div>
