@@ -60,7 +60,8 @@ export type GenericFieldType =
   | 'selection'
   | 'checkbox_group'
   | 'dropdown'
-  | 'boolean';
+  | 'boolean'
+  | 'table';
 
 export interface EntityField {
   entity_type: string;

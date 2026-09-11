@@ -33,6 +33,7 @@ import {
   Clock,
   CheckSquare,
   ToggleRight,
+  Table2,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { EntityField, EntityFormItem, GenericFieldType } from '../../types';
@@ -66,6 +67,7 @@ const FIELD_TYPE_DEFS: FieldTypeDef[] = [
   { type: 'checkbox_group', label: 'Checkbox group', hint: 'Tick any number of options', defaultFieldName: 'checkbox_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 2 },
   { type: 'dropdown', label: 'Dropdown', hint: 'Pick from a list', defaultFieldName: 'dropdown_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 1 },
   { type: 'boolean', label: 'Yes / No', hint: 'Single checkbox toggle', defaultFieldName: 'boolean_field', defaultOptions: [], defaultHeight: 1 },
+  { type: 'table', label: 'Table', hint: 'Dynamic row grid (columns added here, rows added at fill)', defaultFieldName: 'table_field', defaultOptions: ['Column 1', 'Column 2'], defaultHeight: 3 },
 ];
 
 function fieldIcon(type?: string) {
@@ -96,6 +98,8 @@ function fieldIcon(type?: string) {
       return ChevronDown;
     case 'boolean':
       return ToggleRight;
+    case 'table':
+      return Table2;
     default:
       return FileText;
   }
@@ -129,6 +133,8 @@ function iconColor(type?: string) {
       return 'text-amber-600';
     case 'boolean':
       return 'text-orange-600';
+    case 'table':
+      return 'text-rose-600';
     default:
       return 'text-gray-400';
   }
@@ -217,6 +223,27 @@ function ControlPreview({
         placeholder={placeholder || ''}
         className={`${inputCls} h-full min-h-[30px] resize-none leading-snug`}
       />
+    );
+  }
+
+  if (type === 'table') {
+    const cols = options && options.length > 0 ? options : ['Column 1', 'Column 2'];
+    return (
+      <div className="pointer-events-none w-full select-none overflow-hidden rounded-md border border-gray-300 bg-white text-xs text-gray-700">
+        <div className="flex border-b border-gray-200 bg-gray-50">
+          {cols.map((c, i) => (
+            <span
+              key={i}
+              className="flex-1 truncate border-r border-gray-200 px-2 py-1.5 font-medium text-gray-500 last:border-r-0"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 px-2 py-1.5 text-[11px] text-gray-400">
+          <Plus className="h-3 w-3" /> Add row at fill time
+        </div>
+      </div>
     );
   }
 
@@ -410,9 +437,14 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   const addOption = (id: string) => {
     setItems((prev) =>
-      prev.map((it) =>
-        it.i === id ? { ...it, options: [...(it.options || []), `Option ${(it.options || []).length + 1}`] } : it
-      )
+      prev.map((it) => {
+        if (it.i !== id) return it;
+        const n = (it.options || []).length;
+        return {
+          ...it,
+          options: [...(it.options || []), it.fieldType === 'table' ? `Column ${n + 1}` : `Option ${n + 1}`],
+        };
+      })
     );
     setDirty(true);
   };
@@ -702,7 +734,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                       patchItem(selectedItem.i, {
                         fieldType: t,
                         options:
-                          t === 'selection' || t === 'checkbox_group' || t === 'dropdown'
+                          t === 'selection' || t === 'checkbox_group' || t === 'dropdown' || t === 'table'
                             ? selectedItem.options?.length
                               ? selectedItem.options
                               : [...(def?.defaultOptions ?? [])]
@@ -747,8 +779,16 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
                 {(selectedItem.fieldType === 'selection' ||
                   selectedItem.fieldType === 'checkbox_group' ||
-                  selectedItem.fieldType === 'dropdown') && (
-                  <InspectorField label="Options">
+                  selectedItem.fieldType === 'dropdown' ||
+                  selectedItem.fieldType === 'table') && (
+                  <InspectorField
+                    label={selectedItem.fieldType === 'table' ? 'Columns' : 'Options'}
+                    hint={
+                      selectedItem.fieldType === 'table'
+                        ? 'Add the columns the dynamic row table will show.'
+                        : undefined
+                    }
+                  >
                     <div className="flex flex-col gap-1.5">
                       {(selectedItem.options || []).map((o, idx) => (
                         <div key={idx} className="flex items-center gap-1.5">
@@ -760,7 +800,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                           <button
                             onClick={() => removeOption(selectedItem.i, idx)}
                             className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                            title="Remove option"
+                            title="Remove column"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
@@ -770,7 +810,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                         onClick={() => addOption(selectedItem.i)}
                         className="flex items-center justify-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                       >
-                        <Plus className="h-3.5 w-3.5" /> Add option
+                        <Plus className="h-3.5 w-3.5" />
+                        {selectedItem.fieldType === 'table' ? 'Add column' : 'Add option'}
                       </button>
                     </div>
                   </InspectorField>

@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties } fr
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, CheckCircle2, Loader2, Heading, Zap } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Heading, Plus, X, Zap } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
 import type { EntityField, EntityFormItem } from '../../types';
@@ -397,6 +397,10 @@ function makeInput(
       </label>
     );
   }
+
+  if (def.type === 'table') {
+    return <DynamicTable def={def} value={value} onChange={onChange} />;
+  }
   if (def.type === 'dropdown' || def.type === 'select') {
     return (
       <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cls}>
@@ -436,6 +440,116 @@ function toggleMulti(current: string, option: string): string {
   return [...set].join(',');
 }
 
+/**
+ * Dynamic-row table. Columns come from the form-builder definition (added at
+ * build time); rows are added/removed by the user while filling the form.
+ * The value binding is a JSON string of row objects keyed by column name.
+ */
+function parseTableRows(value: string): Record<string, string>[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => (row && typeof row === 'object' ? Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String((v ?? '') as unknown)])) : {}))
+      .filter((row) => Object.keys(row).length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function DynamicTable({
+  def,
+  value,
+  onChange,
+}: {
+  def: ResolvedField;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const cols = def.options && def.options.length > 0 ? def.options : [''];
+  const [rows, setRows] = useState<Record<string, string>[]>(() => parseTableRows(value));
+
+  const commit = (next: Record<string, string>[]) => {
+    setRows(next);
+    onChange(JSON.stringify(next.filter((r) => Object.values(r).some((v) => v.trim() !== ''))));
+  };
+
+  const addRow = () => {
+    const empty = Object.fromEntries(cols.map((c) => [c, ''])) as Record<string, string>;
+    commit([...rows, empty]);
+  };
+
+  const removeRow = (idx: number) => {
+    commit(rows.filter((_, i) => i !== idx));
+  };
+
+  const setCell = (rowIdx: number, col: string, cellValue: string) => {
+    const next = rows.map((r, i) => (i === rowIdx ? { ...r, [col]: cellValue } : r));
+    commit(next);
+  };
+
+  return (
+    <div className="w-full overflow-hidden rounded-md border border-gray-300">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-gray-50 text-left text-gray-500">
+              {cols.map((c) => (
+                <th key={c} className="border-b border-gray-200 px-2 py-1.5 font-medium">
+                  {c}
+                </th>
+              ))}
+              <th className="w-8 border-b border-gray-200" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={cols.length + 1} className="px-2 py-2 text-center text-[11px] text-gray-400">
+                  No rows yet — click “Add row”.
+                </td>
+              </tr>
+            )}
+            {rows.map((row, ri) => (
+              <tr key={ri} className="border-b border-gray-100 last:border-b-0">
+                {cols.map((c) => (
+                  <td key={c} className="border-r border-gray-100 px-1 py-1 last:border-r-0">
+                    <input
+                      value={row[c] ?? ''}
+                      onChange={(e) => setCell(ri, c, e.target.value)}
+                      className="w-full rounded border border-transparent px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
+                    />
+                  </td>
+                ))}
+                <td className="px-1 py-1 text-center">
+                  <button
+                    type="button"
+                    onClick={() => removeRow(ri)}
+                    title="Remove row"
+                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="border-t border-gray-200 bg-gray-50/60 px-2 py-1.5">
+        <button
+          type="button"
+          onClick={addRow}
+          className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+        >
+          <Plus className="h-3 w-3" /> Add row
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): Record<string, unknown> {
   const byKey = new Map(defs.map((d) => [d.key, d]));
   const out: Record<string, unknown> = {};
@@ -451,6 +565,8 @@ function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): 
       out[name] = trimmed === 'yes';
     } else if (def?.type === 'checkbox_group') {
       out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (def?.type === 'table') {
+      out[name] = parseTableRows(trimmed);
     } else {
       out[name] = trimmed;
     }

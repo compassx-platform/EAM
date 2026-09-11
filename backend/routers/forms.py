@@ -22,10 +22,11 @@ GENERIC_FIELD_TYPES = [
     "checkbox_group",
     "dropdown",
     "boolean",
+    "table",
 ]
 LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
 ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + [t for t in LEGACY_FIELD_TYPES if t not in GENERIC_FIELD_TYPES]
-OPTION_REQUIRED_TYPES = ("selection", "checkbox_group", "dropdown")
+OPTION_REQUIRED_TYPES = ("selection", "checkbox_group", "dropdown", "table")
 
 class FormItem(BaseModel):
     i: str

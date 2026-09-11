@@ -147,6 +147,24 @@ def test_checkbox_group_requires_options_and_round_trips(test_db):
     assert stored["field:test-13"]["options"] == ["Safety", "Quality"]
 
 
+def test_table_requires_columns_and_round_trips(test_db):
+    layout = make_layout()
+    layout.append(
+        {"i": "field:test-14", "x": 0, "y": 5, "w": 12, "h": 3, "fieldName": "lototo_table", "fieldType": "table", "required": False, "options": [], "placeholder": None}
+    )
+    with pytest.raises(HTTPException) as exc:
+        save(test_db, "training", layout)
+    assert exc.value.status_code == 400
+    assert "at least one option" in str(exc.value.detail)
+
+    layout[-1]["options"] = ["Equipment", "Lock / Tag No.", "Key Holder", "Remarks"]
+    created = save(test_db, "training", layout)
+    stored = {it["i"]: it for it in created["layout"]}
+    assert stored["field:test-14"]["fieldType"] == "table"
+    assert stored["field:test-14"]["options"] == ["Equipment", "Lock / Tag No.", "Key Holder", "Remarks"]
+    assert stored["field:test-14"]["w"] == 12
+
+
 def test_missing_field_name_rejected(test_db):
     layout = make_layout()
     layout[1]["fieldName"] = "  "
