@@ -12,6 +12,17 @@ interface EntityCreateFormProps {
   onBack: () => void;
 }
 
+interface ResolvedField {
+  /** Input identity — layout item id for inline fields, field name for registry fields. */
+  key: string;
+  /** Storage key on the record's custom_fields. */
+  name: string;
+  type: string;
+  required: boolean;
+  options: string[];
+  placeholder?: string;
+}
+
 // The layout container only mounts once the form definition is loaded, so
 // react-grid-layout's built-in hook (which measures on mount) would miss it.
 // Measure explicitly once the container is available, and keep an eye on
@@ -74,24 +85,57 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   }, [entityType]);
 
   const byName = new Map(fields.map((f) => [f.field_name, f]));
-  const placed = new Set(items.map((it) => it.i));
+
+  const resolveItem = (it: EntityFormItem): ResolvedField | null => {
+    if (it.isHeader) return null;
+    if (it.fieldType) {
+      return {
+        key: it.i,
+        name: it.fieldName || it.i,
+        type: it.fieldType,
+        required: Boolean(it.required),
+        options: it.options || [],
+        placeholder: it.placeholder ?? undefined,
+      };
+    }
+    const f = byName.get(it.i);
+    if (!f) return null;
+    return {
+      key: it.i,
+      name: f.field_name,
+      type: f.field_type,
+      required: f.required,
+      options: f.select_options || [],
+    };
+  };
+
+  const visibleItems = items.filter((it) => it.isHeader || resolveItem(it) !== null);
+  const hasLayout = visibleItems.length > 0;
+
+  const placedKeys = new Set(items.map((it) => it.i));
+  const inlineNames = new Set(
+    items.filter((it) => !it.isHeader && it.fieldType).map((it) => it.fieldName || it.i)
+  );
   const autoAppended = fields
-    .filter((f) => f.required && !placed.has(f.field_name))
+    .filter(
+      (f) => f.required && !placedKeys.has(f.field_name) && !inlineNames.has(f.field_name)
+    )
     .sort((a, b) => a.field_name.localeCompare(b.field_name));
 
-  const visibleItems = items.filter((it) => it.isHeader || byName.has(it.i));
-  const hasLayout = visibleItems.length > 0;
   const fallbackFields =
-    !hasLayout && fields.length > 0
-      ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name))
-      : [];
+    !hasLayout && fields.length > 0 ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name)) : [];
 
   const submit = async () => {
     setSaving(true);
     setErr(null);
     setSuccess(false);
     try {
-      const custom = toCustomFields(values, fields);
+      const defs = [
+        ...visibleItems.filter((it) => resolveItem(it) !== null).map((it) => resolveItem(it)!),
+        ...autoAppended.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] })),
+        ...fallbackFields.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] })),
+      ];
+      const custom = toCustomFields(values, defs);
       const res = await api.createEntity(entityType, { custom_fields: custom });
       setSuccess(true);
       window.setTimeout(
@@ -173,7 +217,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                       ) : (
                         <FillCell
                           key={it.i}
-                          field={byName.get(it.i)!}
+                          def={resolveItem(it)!}
                           value={values[it.i] ?? ''}
                           onChange={(v) => setValues((s) => ({ ...s, [it.i]: v }))}
                         />
@@ -194,7 +238,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                   {fallbackFields.map((f) => (
                     <FieldRow
                       key={`fallback-${f.field_name}`}
-                      field={f}
+                      def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] }}
                       value={values[f.field_name] ?? ''}
                       onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
                     />
@@ -211,7 +255,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                     {autoAppended.map((f) => (
                       <FieldRow
                         key={`auto-${f.field_name}`}
-                        field={f}
+                        def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] }}
                         value={values[f.field_name] ?? ''}
                         onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
                       />
@@ -250,14 +294,14 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
 // forwardRef + className/style forwarding so react-grid-layout can measure the
 // cell and position it (it clones each child with ref/className/style props).
 const FillCell = forwardRef<HTMLDivElement, {
-  field: EntityField;
+  def: ResolvedField;
   value: string;
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ field, value, onChange, className, style }, ref) {
+}>(function FillCell({ def, value, onChange, className, style }, ref) {
   const id = useId();
-  const input = makeInput(field, id, value, onChange);
+  const input = makeInput(def, id, value, onChange, 1);
   return (
     <div
       ref={ref}
@@ -266,9 +310,9 @@ const FillCell = forwardRef<HTMLDivElement, {
     >
       <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-[11px] font-semibold text-gray-600">
         <FileText className="h-3 w-3 shrink-0 text-gray-400" />
-        <span className="truncate">{field.field_name}</span>
-        {field.required && <span className="text-red-500">*</span>}
-        <span className="ml-auto rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{field.field_type}</span>
+        <span className="truncate">{def.name}</span>
+        {def.required && <span className="text-red-500">*</span>}
+        <span className="ml-auto rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
       </label>
       <div className="min-w-0 flex-1">{input}</div>
     </div>
@@ -277,11 +321,11 @@ const FillCell = forwardRef<HTMLDivElement, {
 
 // --- full-width vertical label+input row (used for auto-appended fields) ----
 function FieldRow({
-  field,
+  def,
   value,
   onChange,
 }: {
-  field: EntityField;
+  def: ResolvedField;
   value: string;
   onChange: (v: string) => void;
 }) {
@@ -290,27 +334,63 @@ function FieldRow({
     <div className="flex flex-col gap-0.5">
       <label htmlFor={id} className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
         <FileText className="h-3 w-3 text-gray-400" />
-        {field.field_name}
-        {field.required && <span className="text-red-500">*</span>}
-        <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{field.field_type}</span>
+        {def.name}
+        {def.required && <span className="text-red-500">*</span>}
+        <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
       </label>
-      {makeInput(field, id, value, onChange)}
+      {makeInput(def, id, value, onChange, 3)}
     </div>
   );
 }
 
 function makeInput(
-  field: EntityField,
+  def: ResolvedField,
   id: string,
   value: string,
-  onChange: (v: string) => void
+  onChange: (v: string) => void,
+  textareaRows?: number
 ) {
   const cls = 'w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800';
-  if (field.field_type === 'select') {
+  if (def.type === 'long_text') {
+    return (
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={textareaRows ?? 3}
+        placeholder={def.placeholder || ''}
+        className={`${cls} h-full min-h-[28px] resize-none leading-snug`}
+      />
+    );
+  }
+  if (def.type === 'selection') {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {def.options.length === 0 ? (
+          <span className="text-[11px] text-gray-400">No options defined</span>
+        ) : (
+          def.options.map((o) => (
+            <label key={o} className="flex cursor-pointer items-center gap-1 text-xs text-gray-700">
+              <input
+                type="radio"
+                name={`sel-${id}`}
+                value={o}
+                checked={value === o}
+                onChange={() => onChange(o)}
+                className="accent-blue-600"
+              />
+              {o}
+            </label>
+          ))
+        )}
+      </div>
+    );
+  }
+  if (def.type === 'dropdown' || def.type === 'select') {
     return (
       <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cls}>
         <option value="">—</option>
-        {(field.select_options || []).map((o) => (
+        {(def.options || []).map((o) => (
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
@@ -319,27 +399,28 @@ function makeInput(
   return (
     <input
       id={id}
-      type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'}
+      type={def.type === 'number' ? 'number' : def.type === 'date' ? 'date' : 'text'}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={field.field_type === 'entity_reference' ? 'linked entity id' : ''}
+      placeholder={def.type === 'entity_reference' ? 'linked entity id' : def.placeholder || ''}
       className={cls}
     />
   );
 }
 
-function toCustomFields(values: Record<string, string>, fields: EntityField[]): Record<string, unknown> {
-  const byName = new Map(fields.map((f) => [f.field_name, f]));
+function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): Record<string, unknown> {
+  const byKey = new Map(defs.map((d) => [d.key, d]));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
-    const trimmed = v.trim();
+    const trimmed = String(v ?? '').trim();
     if (trimmed === '') continue;
-    const field = byName.get(k);
-    if (field?.field_type === 'number') {
+    const def = byKey.get(k);
+    const name = def?.name ?? k;
+    if (def?.type === 'number') {
       const n = Number(trimmed);
-      out[k] = Number.isNaN(n) ? trimmed : n;
+      out[name] = Number.isNaN(n) ? trimmed : n;
     } else {
-      out[k] = trimmed;
+      out[name] = trimmed;
     }
   }
   return out;

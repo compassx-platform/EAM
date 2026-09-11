@@ -41,7 +41,11 @@ export function FormList({ onBuild }: FormListProps) {
         for (const f of list) {
           try {
             const detail = await api.getForm(f.entity_type);
-            counts[f.entity_type] = detail.fields.length;
+            const fn = new Set((detail.fields || []).map((x) => x.field_name));
+            const placed = (detail.layout || []).filter(
+              (it) => !it.isHeader && (it.fieldType || fn.has(it.i))
+            ).length;
+            counts[f.entity_type] = placed > 0 ? placed : detail.fields.length;
           } catch {
             counts[f.entity_type] = 0;
           }

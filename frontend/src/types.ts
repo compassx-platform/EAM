@@ -47,6 +47,8 @@ export interface ValidationResult {
 
 export type WorkflowStatus = Workflow['status'];
 
+export type GenericFieldType = 'text' | 'long_text' | 'selection' | 'dropdown';
+
 export interface EntityField {
   entity_type: string;
   field_name: string;
@@ -103,6 +105,13 @@ export interface EntityFormItem {
   h: number;
   isHeader?: boolean;
   label?: string | null;
+  /** Storage key for submitted custom fields (generic form fields). */
+  fieldName?: string | null;
+  /** Generic field type — present when the item carries its own definition. */
+  fieldType?: GenericFieldType | null;
+  required?: boolean;
+  options?: string[];
+  placeholder?: string | null;
 }
 
 export interface EntityForm {

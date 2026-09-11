@@ -8,6 +8,10 @@ from backend.models.field_registry import EntityField
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
 
+GENERIC_FIELD_TYPES = ["text", "long_text", "selection", "dropdown"]
+LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
+ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + LEGACY_FIELD_TYPES
+
 class FormItem(BaseModel):
     i: str
     x: int = 0
@@ -16,6 +20,11 @@ class FormItem(BaseModel):
     h: int = 1
     isHeader: bool = False
     label: Optional[str] = None
+    fieldName: Optional[str] = None
+    fieldType: Optional[str] = None
+    required: Optional[bool] = None
+    options: Optional[List[str]] = None
+    placeholder: Optional[str] = None
 
 class EntityFormRequest(BaseModel):
     entity_type: str
@@ -96,6 +105,49 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             })
             continue
 
+        # Generic field item: carries its own inline definition (no registry lookup needed).
+        if item.fieldType:
+            ft = item.fieldType
+            if ft not in ALLOWED_FIELD_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid field_type '{ft}'. Allowed types: {ALLOWED_FIELD_TYPES}"
+                )
+            name = (item.fieldName or i).strip()
+            if not name:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field item '{i}' is missing a field name"
+                )
+
+            options = []
+            for o in item.options or []:
+                s = str(o).strip()
+                if s and s not in options:
+                    options.append(s)
+            if ft in ("selection", "dropdown") and not options:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{name}' requires at least one option"
+                )
+
+            cleaned.append({
+                "i": i,
+                "x": max(0, item.x),
+                "y": max(0, item.y),
+                "w": w,
+                "h": h,
+                "isHeader": False,
+                "label": (item.label or name).strip(),
+                "fieldName": name,
+                "fieldType": ft,
+                "required": bool(item.required),
+                "options": options,
+                "placeholder": (item.placeholder or "").strip() or None,
+            })
+            continue
+
+        # Legacy field item: references a field registered in the field registry.
         if i not in known:
             raise HTTPException(
                 status_code=400,
