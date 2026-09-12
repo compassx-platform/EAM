@@ -2,12 +2,21 @@ from datetime import datetime
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 from backend.models.field_registry import EntityField
+from backend.services.list_service import get_latest_published
 
 class FieldValidationError(Exception):
     def __init__(self, message: str, field_name: str = None):
         super().__init__(message)
         self.message = message
         self.field_name = field_name
+
+def _valid_options(field: EntityField, db: Session) -> List[str]:
+    """Options for a select field — inline list, or the published central list."""
+    if field.option_list_key:
+        published = get_latest_published(db, field.option_list_key)
+        if published:
+            return [str(item) for item in (published.items or [])]
+    return field.select_options or []
 
 def validate_custom_fields(
     db: Session,
@@ -45,7 +54,7 @@ def validate_custom_fields(
             cleaned_fields[f.field_name] = str(val)
             
         elif f.field_type == "select":
-            valid_options = f.select_options or []
+            valid_options = _valid_options(f, db)
             if valid_options and str(val) not in valid_options:
                 raise FieldValidationError(
                     f"Invalid option '{val}' for field '{f.field_name}'. Allowed: {valid_options}",

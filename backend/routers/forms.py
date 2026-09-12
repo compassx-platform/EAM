@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.forms import EntityForm
 from backend.models.field_registry import EntityField
+from backend.services import list_service
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
 
@@ -23,10 +24,12 @@ GENERIC_FIELD_TYPES = [
     "dropdown",
     "boolean",
     "table",
+    "checklist",
 ]
 LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
 ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + [t for t in LEGACY_FIELD_TYPES if t not in GENERIC_FIELD_TYPES]
 OPTION_REQUIRED_TYPES = ("selection", "checkbox_group", "dropdown", "table")
+LIST_REQUIRED_TYPES = ("checklist",)
 
 class FormItem(BaseModel):
     i: str
@@ -40,6 +43,7 @@ class FormItem(BaseModel):
     fieldType: Optional[str] = None
     required: Optional[bool] = None
     options: Optional[List[str]] = None
+    options_list: Optional[str] = None  # Central list_key reference (published snapshot)
     placeholder: Optional[str] = None
 
 class EntityFormRequest(BaseModel):
@@ -141,10 +145,47 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 s = str(o).strip()
                 if s and s not in options:
                     options.append(s)
-            if ft in OPTION_REQUIRED_TYPES and not options:
+
+            options_list = (item.options_list or "").strip().lower() or None
+
+            if ft in LIST_REQUIRED_TYPES:
+                if not options_list:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Field '{name}' of type '{ft}' requires a shared checklist list (options_list)"
+                    )
+                published = list_service.get_latest_published(db, options_list)
+                if not published:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"List '{options_list}' has no published version — publish it before referencing it"
+                    )
+                if published.kind != "checklist":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"List '{options_list}' is kind '{published.kind}'; a checklist field needs a 'checklist' list"
+                    )
+            elif options_list:
+                published = list_service.get_latest_published(db, options_list)
+                if not published:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"List '{options_list}' has no published version — publish it before referencing it"
+                    )
+                if published.kind != "options":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"List '{options_list}' is kind '{published.kind}'; option fields need an 'options' list"
+                    )
+                if ft not in OPTION_REQUIRED_TYPES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"options_list is only supported for {OPTION_REQUIRED_TYPES} field types"
+                    )
+            elif ft in OPTION_REQUIRED_TYPES and not options:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Field '{name}' requires at least one option"
+                    detail=f"Field '{name}' requires at least one option (or a shared options_list)"
                 )
 
             cleaned.append({
@@ -159,6 +200,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 "fieldType": ft,
                 "required": bool(item.required),
                 "options": options,
+                "options_list": options_list,
                 "placeholder": (item.placeholder or "").strip() or None,
             })
             continue

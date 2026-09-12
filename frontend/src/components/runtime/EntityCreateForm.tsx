@@ -5,7 +5,7 @@ import 'react-resizable/css/styles.css';
 import { ArrowLeft, CheckCircle2, Loader2, Heading, Plus, X, Zap } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
-import type { EntityField, EntityFormItem } from '../../types';
+import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList } from '../../types';
 
 interface EntityCreateFormProps {
   entityType: string;
@@ -22,6 +22,8 @@ interface ResolvedField {
   type: string;
   required: boolean;
   options: string[];
+  /** Tasks when the field is a checklist referencing a published list. */
+  checklistItems?: ChecklistItem[];
   placeholder?: string;
 }
 
@@ -54,6 +56,7 @@ function useContainerSize(active: boolean) {
 export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) {
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
+  const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
@@ -70,10 +73,23 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       try {
         const form = await api.getForm(entityType);
         if (cancelled) return;
-        setItems(form.layout || []);
-        setFields(form.fields || []);
+        const layout = ((form.layout || []) as Array<EntityFormItem & { options_list?: string | null }>).map(
+          (it) => ({ ...it, optionsList: it.options_list ?? it.optionsList, options_list: undefined })
+        );
+        const formFields = form.fields || [];
+        setItems(layout);
+        setFields(formFields);
         setCols(form.cols || 12);
         setRowHeight(form.row_height || 40);
+        const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
+        const fieldKeys = formFields
+          .map((f) => f.option_list_key)
+          .filter((k): k is string => Boolean(k));
+        const keys = [...new Set([...layoutKeys, ...fieldKeys])];
+        if (keys.length > 0) {
+          const r = await api.resolveLists(keys);
+          if (!cancelled) setResolved(r.resolved);
+        }
       } catch (e: any) {
         if (cancelled) return;
         setErr(e.message);
@@ -91,24 +107,38 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const resolveItem = (it: EntityFormItem): ResolvedField | null => {
     if (it.isHeader) return null;
     if (it.fieldType) {
+      const list = it.optionsList ? resolved[it.optionsList] : undefined;
+      let options = it.options || [];
+      let checklistItems: ChecklistItem[] | undefined;
+      if (list) {
+        if (list.kind === 'options') options = list.items as string[];
+        else if (list.kind === 'checklist') checklistItems = list.items as ChecklistItem[];
+      }
       return {
         key: it.i,
         name: it.fieldName || it.i,
         label: it.label ?? undefined,
         type: it.fieldType,
         required: Boolean(it.required),
-        options: it.options || [],
+        options,
+        checklistItems,
         placeholder: it.placeholder ?? undefined,
       };
     }
     const f = byName.get(it.i);
     if (!f) return null;
+    let options = f.select_options || [];
+    if (f.option_list_key && resolved[f.option_list_key]) {
+      const list = resolved[f.option_list_key];
+      if (list.kind === 'options') options = list.items as string[];
+    }
     return {
       key: it.i,
       name: f.field_name,
       type: f.field_type,
       required: f.required,
-      options: f.select_options || [],
+      options,
+      checklistItems: undefined,
     };
   };
 
@@ -118,6 +148,14 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const fallbackFields =
     !hasLayout && fields.length > 0 ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name)) : [];
 
+  const fieldOptions = (f: EntityField): string[] => {
+    if (f.option_list_key && resolved[f.option_list_key]) {
+      const list = resolved[f.option_list_key];
+      if (list.kind === 'options') return list.items as string[];
+    }
+    return f.select_options || [];
+  };
+
   const submit = async () => {
     setSaving(true);
     setErr(null);
@@ -125,8 +163,22 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     try {
       const defs = [
         ...visibleItems.filter((it) => resolveItem(it) !== null).map((it) => resolveItem(it)!),
-        ...fallbackFields.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] })),
+        ...fallbackFields.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) })),
       ];
+      const pending: string[] = [];
+      for (const d of defs) {
+        if (d.type === 'checklist' && d.checklistItems) {
+          const checked = new Set(parseCheckedList(values[d.key] ?? ''));
+          for (const t of d.checklistItems.filter((t) => t.required && !checked.has(t.label))) {
+            pending.push(`${d.label || d.name}: ${t.label}`);
+          }
+        }
+      }
+      if (pending.length > 0) {
+        setErr(`Required checklist items not completed: ${pending.join('; ')}`);
+        setSaving(false);
+        return;
+      }
       const custom = toCustomFields(values, defs);
       const res = await api.createEntity(entityType, { custom_fields: custom });
       setSuccess(true);
@@ -231,7 +283,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                   {fallbackFields.map((f) => (
                     <FieldRow
                       key={`fallback-${f.field_name}`}
-                      def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: f.select_options || [] }}
+                      def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) }}
                       value={values[f.field_name] ?? ''}
                       onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
                     />
@@ -398,6 +450,49 @@ function makeInput(
     );
   }
 
+  if (def.type === 'checklist') {
+    const tasks = def.checklistItems ?? [];
+    if (tasks.length === 0) {
+      return <span className="text-[11px] text-gray-400">No tasks defined for this checklist</span>;
+    }
+    const checked = new Set(parseCheckedList(value));
+    const toggle = (label: string) => {
+      const next = new Set(checked);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      onChange(JSON.stringify([...next]));
+    };
+    return (
+      <div className="flex w-full flex-col gap-1">
+        {tasks.map((t) => {
+          const done = checked.has(t.label);
+          const pendingReq = !done && t.required;
+          return (
+            <label
+              key={t.label}
+              className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${
+                done ? 'border-indigo-200 bg-indigo-50/50' : pendingReq ? 'border-amber-200 bg-amber-50/40' : 'border-gray-200 bg-white'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={done}
+                onChange={() => toggle(t.label)}
+                className="accent-indigo-600"
+              />
+              <span className={done ? 'text-gray-500 line-through' : 'text-gray-800'}>{t.label}</span>
+              {t.required && (
+                <span className="ml-auto shrink-0 text-[10px] font-medium text-amber-600">
+                  {done ? 'required ✓' : 'required'}
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
+
   if (def.type === 'table') {
     return <DynamicTable def={def} value={value} onChange={onChange} />;
   }
@@ -438,6 +533,18 @@ function toggleMulti(current: string, option: string): string {
   if (set.has(option)) set.delete(option);
   else set.add(option);
   return [...set].join(',');
+}
+
+/** Parse the JSON-array value of a checklist field into checked task labels. */
+function parseCheckedList(value: string): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map((s) => String(s)).filter(Boolean);
+  } catch {
+    /* fall through */
+  }
+  return [];
 }
 
 /**
@@ -567,6 +674,8 @@ function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): 
       out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
     } else if (def?.type === 'table') {
       out[name] = parseTableRows(trimmed);
+    } else if (def?.type === 'checklist') {
+      out[name] = parseCheckedList(trimmed);
     } else {
       out[name] = trimmed;
     }

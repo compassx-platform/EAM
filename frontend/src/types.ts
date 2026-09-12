@@ -88,7 +88,8 @@ export type GenericFieldType =
   | 'checkbox_group'
   | 'dropdown'
   | 'boolean'
-  | 'table';
+  | 'table'
+  | 'checklist';
 
 export interface EntityField {
   entity_type: string;
@@ -96,6 +97,8 @@ export interface EntityField {
   field_type: 'text' | 'number' | 'date' | 'select' | 'entity_reference';
   required: boolean;
   select_options: string[];
+  /** Central published list referenced for a select field's options. */
+  option_list_key?: string | null;
   reference_entity_type?: string | null;
 }
 
@@ -154,6 +157,8 @@ export interface EntityFormItem {
   fieldType?: GenericFieldType | null;
   required?: boolean;
   options?: string[];
+  /** Central published list referenced for options / checklist items. */
+  optionsList?: string | null;
   placeholder?: string | null;
 }
 
@@ -164,4 +169,53 @@ export interface EntityForm {
   cols: number;
   row_height: number;
   updated_at?: string | null;
+}
+
+export type ListKind = 'options' | 'checklist';
+
+export interface OptionListSummary {
+  list_key: string;
+  kind: ListKind;
+  description: string | null;
+  item_count: number;
+  status: 'draft' | 'published' | 'deprecated';
+  published_version: string | null;
+  draft_item_count: number;
+  has_draft: boolean;
+  created_at?: string | null;
+  published_at?: string | null;
+}
+
+export interface ListDefinition {
+  id: string;
+  list_key: string;
+  kind: ListKind;
+  description: string | null;
+  version_label: string;
+  status: 'draft' | 'published' | 'deprecated';
+  /** Options kind: string[]; checklist kind: {label, required, assigned_role?}[] */
+  items: Array<string | ChecklistItem>;
+  created_at?: string | null;
+  published_at?: string | null;
+}
+
+export interface ChecklistItem {
+  label: string;
+  required: boolean;
+  assigned_role?: string | null;
+}
+
+export interface ResolvedList {
+  list_key: string;
+  kind: ListKind;
+  version_label: string;
+  items: Array<string | ChecklistItem>;
+}
+
+export interface ListUsage {
+  list_key: string;
+  fields: Array<{ entity_type: string; field_name: string }>;
+  form_items: Array<{ entity_type: string; item_id: string }>;
+  field_count: number;
+  form_item_count: number;
 }

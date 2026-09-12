@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.field_registry import EntityField
+from backend.services import list_service
 
 router = APIRouter(prefix="/fields", tags=["Entity Fields Registry"])
 
@@ -13,6 +14,7 @@ class EntityFieldRequest(BaseModel):
     field_type: str  # 'text' | 'number' | 'date' | 'select' | 'entity_reference'
     required: bool = False
     select_options: Optional[List[str]] = []
+    option_list_key: Optional[str] = None
     reference_entity_type: Optional[str] = None
 
 @router.get("")
@@ -38,6 +40,25 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
             detail="reference_entity_type is required when field_type is 'entity_reference'"
         )
 
+    option_list_key = (req.option_list_key or "").strip().lower() or None
+    if option_list_key:
+        if req.field_type != "select":
+            raise HTTPException(
+                status_code=400,
+                detail="option_list_key is only supported for field_type 'select'"
+            )
+        published = list_service.get_latest_published(db, option_list_key)
+        if not published:
+            raise HTTPException(
+                status_code=400,
+                detail=f"List '{option_list_key}' has no published version — publish it before referencing it"
+            )
+        if published.kind != "options":
+            raise HTTPException(
+                status_code=400,
+                detail=f"List '{option_list_key}' is kind '{published.kind}'; a select field needs an 'options' list"
+            )
+
     entity_type = req.entity_type.lower()
     field = db.query(EntityField).filter(
         EntityField.entity_type == entity_type,
@@ -47,7 +68,8 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
     if field:
         field.field_type = req.field_type
         field.required = req.required
-        field.select_options = req.select_options
+        field.select_options = req.select_options if not option_list_key else None
+        field.option_list_key = option_list_key
         field.reference_entity_type = req.reference_entity_type
     else:
         field = EntityField(
@@ -55,7 +77,8 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
             field_name=req.field_name,
             field_type=req.field_type,
             required=req.required,
-            select_options=req.select_options,
+            select_options=req.select_options if not option_list_key else None,
+            option_list_key=option_list_key,
             reference_entity_type=req.reference_entity_type,
         )
         db.add(field)

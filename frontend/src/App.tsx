@@ -5,11 +5,13 @@ import { EntityConsole } from './components/runtime/EntityConsole';
 import { EntityCreateForm } from './components/runtime/EntityCreateForm';
 import { FormList } from './components/forms/FormList';
 import { FormBuilder } from './components/forms/FormBuilder';
+import { ListsView } from './components/lists/ListsView';
+import { ListEditor } from './components/lists/ListEditor';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool } from 'lucide-react';
+import { GitBranch, Layers, PenTool, ListChecks } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
-type Tab = 'workflows' | 'entities' | 'forms';
+type Tab = 'workflows' | 'entities' | 'forms' | 'lists';
 
 function App() {
   const route = useHashRoute();
@@ -21,17 +23,21 @@ function App() {
     ? 'entities'
     : route.path.startsWith('/forms')
       ? 'forms'
-      : 'workflows';
+      : route.path.startsWith('/lists')
+        ? 'lists'
+        : 'workflows';
 
   const switchTab = (t: Tab) => {
     if (t === 'entities') navigate('/entities');
     else if (t === 'forms') navigate('/forms');
+    else if (t === 'lists') navigate('/lists');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
 
   const builderId = route.path === '/workflows/new' ? null : route.path.startsWith('/workflows/') ? route.id : undefined;
   const formType = route.path.startsWith('/forms/') ? route.id : null;
+  const listKey = route.path.startsWith('/lists/') ? route.id : null;
 
   const navBtn = (t: Tab, label: string, Icon: typeof GitBranch) => (
     <button
@@ -54,6 +60,7 @@ function App() {
           {navBtn('workflows', 'Workflows', GitBranch)}
           {navBtn('entities', 'Entities', Layers)}
           {navBtn('forms', 'Forms', PenTool)}
+          {navBtn('lists', 'Lists', ListChecks)}
         </nav>
 
         {tab === 'entities' && route.path === '/entities/new' && (
@@ -69,6 +76,11 @@ function App() {
         {tab === 'forms' && formType !== null && (
           <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
             Form Builder · {formType}
+          </span>
+        )}
+        {tab === 'lists' && (
+          <span className="ml-auto rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            {listKey === 'new' ? 'New List' : listKey ? `List · ${listKey}` : 'Central Lists'}
           </span>
         )}
       </header>
@@ -98,6 +110,22 @@ function App() {
           ) : (
             <div key={listTick} className="h-full overflow-y-auto">
               <FormList onBuild={(t) => navigate(`/forms/${encodeURIComponent(t)}`)} />
+            </div>
+          )
+        ) : tab === 'lists' ? (
+          listKey !== null ? (
+            <ListEditor
+              key={listKey}
+              listKey={listKey}
+              onBack={() => navigate('/lists')}
+              onChanged={refreshList}
+            />
+          ) : (
+            <div key={listTick} className="h-full overflow-y-auto">
+              <ListsView
+                tick={listTick}
+                onEdit={(k) => navigate(`/lists/${encodeURIComponent(k)}`)}
+              />
             </div>
           )
         ) : builderId !== undefined ? (

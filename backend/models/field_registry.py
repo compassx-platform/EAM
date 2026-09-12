@@ -12,6 +12,7 @@ class EntityField(Base):
     field_type = Column(String(30), nullable=False)  # 'text' | 'number' | 'date' | 'select' | 'entity_reference'
     required = Column(Boolean, default=False, nullable=False)
     select_options = Column(JSON, nullable=True)  # List of string options for 'select'
+    option_list_key = Column(String(100), nullable=True)  # Central list reference (published snapshot)
     reference_entity_type = Column(String(50), nullable=True)  # Target entity_type for 'entity_reference'
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
@@ -22,6 +23,7 @@ class EntityField(Base):
             "field_type": self.field_type,
             "required": self.required,
             "select_options": self.select_options or [],
+            "option_list_key": self.option_list_key,
             "reference_entity_type": self.reference_entity_type,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

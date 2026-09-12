@@ -6,6 +6,7 @@ from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
 from backend.models.entities import WorkOrder, Permit, PMSchedule
+from backend.models.lists import ListDefinition
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
 
@@ -630,8 +631,68 @@ def seed_all(db: Session):
 
     db.commit()
 
+    # 5f. Seed central option/checklist lists and wire the permit_type field to one
+    seed_lists(db)
+
     # 6. Seed Sample Live Entities if none exist
     seed_sample_entities(db)
+
+
+def seed_lists(db: Session):
+    """Seeds central option/checklist lists and wires the permit_type registry field to one."""
+    lists_data = [
+        {
+            "list_key": "wo_priority",
+            "kind": "options",
+            "description": "Work order priority levels",
+            "items": ["Low", "Medium", "High", "Critical"],
+        },
+        {
+            "list_key": "permit_type",
+            "kind": "options",
+            "description": "Permit to Work types",
+            "items": ["Hot Work", "Confined Space", "Electrical Isolation", "Working at Heights", "Chemical Handling"],
+        },
+        {
+            "list_key": "permit_safety_checklist",
+            "kind": "checklist",
+            "description": "Pre-work safety checks required before a permit goes active",
+            "items": [
+                {"label": "Fire watch assigned", "required": True, "assigned_role": "Safety Officer"},
+                {"label": "Extinguisher within reach", "required": True, "assigned_role": None},
+                {"label": "Area cordoned / signage up", "required": True, "assigned_role": None},
+                {"label": "Gas monitoring active", "required": False, "assigned_role": "Safety Officer"},
+            ],
+        },
+    ]
+
+    for entry in lists_data:
+        key = entry["list_key"]
+        existing = db.query(ListDefinition).filter(ListDefinition.list_key == key).first()
+        if not existing:
+            published = ListDefinition(
+                id=generate_uuid(),
+                list_key=key,
+                kind=entry["kind"],
+                description=entry["description"],
+                version_label="v1",
+                status="published",
+                items=entry["items"],
+                created_at=utc_now(),
+                published_at=utc_now(),
+            )
+            db.add(published)
+
+    # Wire the existing permit_type registry field to the permit_type list so the
+    # demo shows the list-driven select (validation now resolves from the list).
+    permit_field = db.query(EntityField).filter(
+        EntityField.entity_type == "permit",
+        EntityField.field_name == "permit_type",
+    ).first()
+    if permit_field and not permit_field.option_list_key:
+        permit_field.option_list_key = "permit_type"
+
+    db.commit()
 
 
 def seed_legacy_workflow_if_absent(db: Session, entity_type: str, version_label: str, definition: dict):

@@ -10,6 +10,12 @@ import type {
   GateTraceItem,
   EntityForm,
   EntityFormItem,
+  OptionListSummary,
+  ListDefinition,
+  ResolvedList,
+  ListUsage,
+  ListKind,
+  ChecklistItem,
 } from '../types';
 
 const API_BASE = '/api';
@@ -114,6 +120,7 @@ export const api = {
     field_type: string;
     required?: boolean;
     select_options?: string[];
+    option_list_key?: string | null;
     reference_entity_type?: string | null;
   }): Promise<EntityField> {
     return request<EntityField>('/fields', { method: 'POST', body: JSON.stringify(input) });
@@ -137,7 +144,55 @@ export const api = {
     cols?: number;
     row_height?: number;
   }): Promise<EntityForm> {
-    return request<EntityForm>('/forms', { method: 'POST', body: JSON.stringify(input) });
+    return request<EntityForm>('/forms', {
+      method: 'POST',
+      body: JSON.stringify({
+        entity_type: input.entity_type,
+        cols: input.cols,
+        row_height: input.row_height,
+        layout: input.layout.map((it) => ({ ...it, options_list: it.optionsList ?? null })),
+      }),
+    });
+  },
+
+  listLists(): Promise<OptionListSummary[]> {
+    return request('/lists');
+  },
+
+  getList(listKey: string): Promise<ListDefinition> {
+    return request(`/lists/${encodeURIComponent(listKey)}`);
+  },
+
+  listListVersions(listKey: string): Promise<ListDefinition[]> {
+    return request(`/lists/${encodeURIComponent(listKey)}/versions`);
+  },
+
+  getListUsage(listKey: string): Promise<ListUsage> {
+    return request(`/lists/${encodeURIComponent(listKey)}/usages`);
+  },
+
+  saveListDraft(input: {
+    list_key: string;
+    kind: ListKind;
+    description?: string;
+    items: Array<string | ChecklistItem>;
+  }): Promise<ListDefinition> {
+    return request<ListDefinition>('/lists/draft', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  publishList(listKey: string): Promise<{ published: boolean; list: ListDefinition }> {
+    return request(`/lists/${encodeURIComponent(listKey)}/publish`, { method: 'POST' });
+  },
+
+  deleteList(listKey: string): Promise<{ deleted: boolean; list_key: string }> {
+    return request(`/lists/${encodeURIComponent(listKey)}`, { method: 'DELETE' });
+  },
+
+  resolveLists(listKeys: string[]): Promise<{ resolved: Record<string, ResolvedList> }> {
+    const keys = [...new Set(listKeys.map((k) => k.trim()).filter(Boolean))];
+    if (keys.length === 0) return Promise.resolve({ resolved: {} });
+    const q = `?keys=${encodeURIComponent(keys.join(','))}`;
+    return request(`/lists/resolved${q}`);
   },
 
   deleteForm(entityType: string): Promise<{ deleted: boolean; entity_type: string }> {

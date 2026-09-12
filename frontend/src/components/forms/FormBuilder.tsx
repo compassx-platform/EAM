@@ -40,7 +40,14 @@ import {
   Upload,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import type { EntityField, EntityFormItem, GenericFieldType } from '../../types';
+import type {
+  EntityField,
+  EntityFormItem,
+  GenericFieldType,
+  ChecklistItem,
+  ResolvedList,
+  OptionListSummary,
+} from '../../types';
 
 interface FormBuilderProps {
   entityType: string;
@@ -72,6 +79,7 @@ const FIELD_TYPE_DEFS: FieldTypeDef[] = [
   { type: 'dropdown', label: 'Dropdown', hint: 'Pick from a list', defaultFieldName: 'dropdown_field', defaultOptions: ['Option 1', 'Option 2'], defaultHeight: 1 },
   { type: 'boolean', label: 'Yes / No', hint: 'Single checkbox toggle', defaultFieldName: 'boolean_field', defaultOptions: [], defaultHeight: 1 },
   { type: 'table', label: 'Table', hint: 'Dynamic row grid (columns added here, rows added at fill)', defaultFieldName: 'table_field', defaultOptions: ['Column 1', 'Column 2'], defaultHeight: 3 },
+  { type: 'checklist', label: 'Checklist', hint: 'Pre-work checklist from a shared list (required tasks must be ticked)', defaultFieldName: 'checklist_field', defaultOptions: [], defaultHeight: 4 },
 ];
 
 function fieldIcon(type?: string) {
@@ -104,6 +112,8 @@ function fieldIcon(type?: string) {
       return ToggleRight;
     case 'table':
       return Table2;
+    case 'checklist':
+      return ListChecks;
     default:
       return FileText;
   }
@@ -139,6 +149,8 @@ function iconColor(type?: string) {
       return 'text-orange-600';
     case 'table':
       return 'text-rose-600';
+    case 'checklist':
+      return 'text-indigo-600';
     default:
       return 'text-gray-400';
   }
@@ -208,17 +220,26 @@ function ControlPreview({
   type,
   options,
   placeholder,
+  resolved,
   height = 3,
 }: {
   type?: string;
   options?: string[];
   placeholder?: string | null;
+  resolved?: ResolvedList | null;
   height?: number;
 }) {
   const inputCls =
     'pointer-events-none w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 select-none';
   const choiceCls = 'flex items-center gap-1 text-xs text-gray-700';
   const choiceInput = 'pointer-events-none accent-blue-600';
+
+  const resolvedStrings = resolved && resolved.kind === 'options'
+    ? (resolved.items as string[])
+    : [];
+  const displayedOptions = resolved && resolved.kind === 'options'
+    ? resolvedStrings
+    : (options ?? []);
 
   if (type === 'long_text') {
     return (
@@ -227,6 +248,34 @@ function ControlPreview({
         placeholder={placeholder || ''}
         className={`${inputCls} h-full min-h-[30px] resize-none leading-snug`}
       />
+    );
+  }
+
+  if (type === 'checklist') {
+    const tasks = resolved && resolved.kind === 'checklist'
+      ? (resolved.items as ChecklistItem[])
+      : null;
+    return (
+      <div className="pointer-events-none w-full select-none rounded-md border border-gray-300 bg-white">
+        {!tasks || tasks.length === 0 ? (
+          <span className="block px-2 py-1.5 text-[11px] text-gray-400">
+            Pick a published checklist list in the inspector
+          </span>
+        ) : (
+          <div className="flex flex-col divide-y divide-gray-100">
+            {tasks.map((t) => (
+              <span key={t.label} className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-gray-700">
+                <input type="checkbox" className={choiceInput} />
+                <span className={t.required ? 'font-semibold text-gray-800' : ''}>{t.label}</span>
+                {t.required && <span className="text-[9px] font-bold text-red-500">required</span>}
+                {t.assigned_role && (
+                  <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{t.assigned_role}</span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -252,12 +301,12 @@ function ControlPreview({
   }
 
   if (type === 'selection' || type === 'checkbox_group') {
-    if (!options || options.length === 0) {
+    if (!displayedOptions || displayedOptions.length === 0) {
       return <span className="text-[11px] text-gray-400">No options defined</span>;
     }
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {options.map((o) => (
+        {displayedOptions.map((o) => (
           <label key={o} className={choiceCls}>
             <input
               type={type === 'selection' ? 'radio' : 'checkbox'}
@@ -267,6 +316,11 @@ function ControlPreview({
             {o}
           </label>
         ))}
+        {resolved?.version_label && (
+          <span className="rounded bg-emerald-50 px-1 font-mono text-[9px] text-emerald-600">
+            {resolved.list_key} · {resolved.version_label}
+          </span>
+        )}
       </div>
     );
   }
@@ -283,7 +337,7 @@ function ControlPreview({
     return (
       <select className={inputCls}>
         <option>—</option>
-        {(options || []).map((o) => (
+        {(displayedOptions || []).map((o) => (
           <option key={o}>{o}</option>
         ))}
       </select>
@@ -335,6 +389,9 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
+  const [publishedLists, setPublishedLists] = useState<OptionListSummary[]>([]);
+
   const { width, containerRef, mounted } = useContainerWidth();
 
   useEffect(() => {
@@ -343,10 +400,14 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       try {
         const form = await api.getForm(entityType);
         if (cancelled) return;
-        setItems((form.layout || []) as EntityFormItem[]);
+        const layout = ((form.layout || []) as Array<EntityFormItem & { options_list?: string | null }>).map(
+          (it) => ({ ...it, optionsList: it.options_list ?? it.optionsList, options_list: undefined })
+        );
+        setItems(layout);
         setFields(form.fields || []);
         setCols(form.cols || 12);
         setRowHeight(form.row_height || 40);
+        ensureResolved(layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k)));
       } catch (e: any) {
         if (cancelled) return;
         setNotice({ kind: 'err', text: e.message });
@@ -358,6 +419,37 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       cancelled = true;
     };
   }, [entityType]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const lists = await api.listLists();
+        if (!cancelled) setPublishedLists(lists.filter((l) => l.published_version));
+      } catch {
+        /* list pickers just stay empty */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ensureResolved = (keys: string[]) => {
+    const missing = [...new Set(keys.map((k) => k.trim()).filter((k) => k && !resolved[k]))];
+    if (missing.length === 0) return;
+    api.resolveLists(missing).then((r) => {
+      setResolved((prev) => {
+        const next = { ...prev };
+        for (const k of missing) if (!next[k]) next[k] = r.resolved[k];
+        else if (r.resolved[k]) next[k] = r.resolved[k];
+        return next;
+      });
+    }).catch(() => {});
+  };
+
+  const resolvedFor = (it: EntityFormItem): ResolvedList | null =>
+    it.optionsList ? resolved[it.optionsList] ?? null : null;
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setNotice({ kind, text });
@@ -505,6 +597,9 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   };
 
   const selectedItem = selected ? items.find((it) => it.i === selected) : null;
+
+  const optionLists = publishedLists.filter((l) => l.kind === 'options');
+  const checklistLists = publishedLists.filter((l) => l.kind === 'checklist');
 
   const currentDefinition = () => ({
     entity_type: entityType,
@@ -771,7 +866,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                           </span>
                         )}
                         <div className="min-w-0 flex-1">
-                          <ControlPreview type={type} options={it.options} placeholder={it.placeholder} height={it.h} />
+                          <ControlPreview type={type} options={it.options} placeholder={it.placeholder} resolved={resolvedFor(it)} height={it.h} />
                         </div>
                       </>
                     )}
@@ -876,39 +971,132 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   selectedItem.fieldType === 'checkbox_group' ||
                   selectedItem.fieldType === 'dropdown' ||
                   selectedItem.fieldType === 'table') && (
-                  <InspectorField
-                    label={selectedItem.fieldType === 'table' ? 'Columns' : 'Options'}
-                    hint={
-                      selectedItem.fieldType === 'table'
-                        ? 'Add the columns the dynamic row table will show.'
-                        : undefined
-                    }
-                  >
-                    <div className="flex flex-col gap-1.5">
-                      {(selectedItem.options || []).map((o, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5">
-                          <input
-                            value={o}
-                            onChange={(e) => patchOption(selectedItem.i, idx, e.target.value)}
-                            className={`${INSPECTOR_INPUT} flex-1`}
-                          />
+                  <>
+                    <InspectorField
+                      label="Options source"
+                      hint="Inline options are stored on the form. A shared list renders the latest published
+                        snapshot from the Lists tab, so options stay in sync everywhere."
+                    >
+                      <select
+                        value={selectedItem.optionsList ? 'list' : 'inline'}
+                        onChange={(e) => {
+                          if (e.target.value === 'list' && !selectedItem.optionsList) {
+                            patchItem(selectedItem.i, { optionsList: '' });
+                          } else if (e.target.value === 'inline') {
+                            patchItem(selectedItem.i, { optionsList: null });
+                          }
+                        }}
+                        className={INSPECTOR_INPUT}
+                      >
+                        <option value="inline">Inline options</option>
+                        <option value="list">Shared list</option>
+                      </select>
+                    </InspectorField>
+
+                    {selectedItem.optionsList !== undefined && selectedItem.optionsList !== null ? (
+                      <InspectorField
+                        label={selectedItem.fieldType === 'table' ? 'Shared list' : 'Shared list'}
+                        hint="Saved form items reference the list key — the newest published version wins."
+                      >
+                        <select
+                          value={selectedItem.optionsList}
+                          onChange={(e) => {
+                            patchItem(selectedItem.i, { optionsList: e.target.value || '' });
+                            ensureResolved([e.target.value]);
+                          }}
+                          className={INSPECTOR_INPUT}
+                        >
+                          <option value="">Pick a published list…</option>
+                          {optionLists.map((l) => (
+                            <option key={l.list_key} value={l.list_key}>
+                              {l.list_key} ({l.published_version})
+                            </option>
+                          ))}
+                        </select>
+                        {resolvedFor(selectedItem) ? (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
+                            {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
+                            {resolvedFor(selectedItem)!.items.length} item(s)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">
+                            {optionLists.length === 0
+                              ? 'No published options lists yet — create one in the Lists tab.'
+                              : 'Resolving…'}
+                          </span>
+                        )}
+                      </InspectorField>
+                    ) : (
+                      <InspectorField
+                        label={selectedItem.fieldType === 'table' ? 'Columns' : 'Options'}
+                        hint={
+                          selectedItem.fieldType === 'table'
+                            ? 'Add the columns the dynamic row table will show.'
+                            : undefined
+                        }
+                      >
+                        <div className="flex flex-col gap-1.5">
+                          {(selectedItem.options || []).map((o, idx) => (
+                            <div key={idx} className="flex items-center gap-1.5">
+                              <input
+                                value={o}
+                                onChange={(e) => patchOption(selectedItem.i, idx, e.target.value)}
+                                className={`${INSPECTOR_INPUT} flex-1`}
+                              />
+                              <button
+                                onClick={() => removeOption(selectedItem.i, idx)}
+                                className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                title="Remove column"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
                           <button
-                            onClick={() => removeOption(selectedItem.i, idx)}
-                            className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                            title="Remove column"
+                            onClick={() => addOption(selectedItem.i)}
+                            className="flex items-center justify-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                           >
-                            <X className="h-3.5 w-3.5" />
+                            <Plus className="h-3.5 w-3.5" />
+                            {selectedItem.fieldType === 'table' ? 'Add column' : 'Add option'}
                           </button>
                         </div>
+                      </InspectorField>
+                    )}
+                  </>
+                )}
+
+                {selectedItem.fieldType === 'checklist' && (
+                  <InspectorField
+                    label="Checklist list"
+                    hint="Checks the tasks from a published checklist list. Required tasks must all be ticked before the form can submit."
+                  >
+                    <select
+                      value={selectedItem.optionsList ?? ''}
+                      onChange={(e) => {
+                        patchItem(selectedItem.i, { optionsList: e.target.value || '' });
+                        ensureResolved([e.target.value]);
+                      }}
+                      className={INSPECTOR_INPUT}
+                    >
+                      <option value="">Pick a published checklist list…</option>
+                      {checklistLists.map((l) => (
+                        <option key={l.list_key} value={l.list_key}>
+                          {l.list_key} ({l.published_version})
+                        </option>
                       ))}
-                      <button
-                        onClick={() => addOption(selectedItem.i)}
-                        className="flex items-center justify-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        {selectedItem.fieldType === 'table' ? 'Add column' : 'Add option'}
-                      </button>
-                    </div>
+                    </select>
+                    {resolvedFor(selectedItem) ? (
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
+                        {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
+                        {resolvedFor(selectedItem)!.items.length} task(s)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-gray-400">
+                        {checklistLists.length === 0
+                          ? 'No published checklist lists yet — create one in the Lists tab.'
+                          : 'Resolving…'}
+                      </span>
+                    )}
                   </InspectorField>
                 )}
 

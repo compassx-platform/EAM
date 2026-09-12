@@ -21,6 +21,7 @@ from backend.routers import (
     system_router,
     forms_router,
     actions_router,
+    lists_router,
 )
 
 async def periodic_expiry_checker():
@@ -74,6 +75,7 @@ app.include_router(gates_router, prefix=settings.API_PREFIX)
 app.include_router(workflows_router, prefix=settings.API_PREFIX)
 app.include_router(forms_router, prefix=settings.API_PREFIX)
 app.include_router(actions_router, prefix=settings.API_PREFIX)
+app.include_router(lists_router, prefix=settings.API_PREFIX)
 app.include_router(system_router, prefix=settings.API_PREFIX)
 app.include_router(entities_router)  # Includes /api/{entity_type}/...
 

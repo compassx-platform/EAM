@@ -22,6 +22,7 @@ import type {
   ValidTransition,
   EntityField,
   GateTraceItem,
+  ResolvedList,
 } from '../../types';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -66,6 +67,7 @@ export function EntityConsole() {
   const [error, setError] = useState<string | null>(null);
 
   const [fields, setFields] = useState<EntityField[]>([]);
+  const [fieldLists, setFieldLists] = useState<Record<string, ResolvedList>>({});
   const [gateMap, setGateMap] = useState<Record<string, { label: string; gate_type: string }>>({});
 
   const [detail, setDetail] = useState<{ entity: EntityRecord; events: EntityEvent[] } | null>(null);
@@ -99,7 +101,20 @@ export function EntityConsole() {
       for (const g of gates) map[g.id] = { label: g.label, gate_type: g.gate_type };
       setGateMap(map);
     }).catch(() => setGateMap({}));
-    api.listFields(type).then(setFields).catch(() => setFields([]));
+    api.listFields(type).then(async (fs) => {
+      setFields(fs);
+      const keys = [...new Set(fs.map((f) => f.option_list_key).filter((k): k is string => Boolean(k)))];
+      if (keys.length === 0) {
+        setFieldLists({});
+        return;
+      }
+      try {
+        const r = await api.resolveLists(keys);
+        setFieldLists(r.resolved);
+      } catch {
+        setFieldLists({});
+      }
+    }).catch(() => setFields([]));
   }, [type]);
 
   const loadList = useCallback(() => {
@@ -304,6 +319,7 @@ export function EntityConsole() {
           entity={detail.entity}
           transition={fire}
           fields={fields}
+          fieldLists={fieldLists}
           gateMap={gateMap}
           onClose={() => setFire(null)}
           onDone={() => {
@@ -510,6 +526,7 @@ function FireTransitionModal({
   entity,
   transition,
   fields,
+  fieldLists,
   gateMap,
   onClose,
   onDone,
@@ -518,6 +535,7 @@ function FireTransitionModal({
   entity: EntityRecord;
   transition: ValidTransition;
   fields: EntityField[];
+  fieldLists: Record<string, ResolvedList>;
   gateMap: Record<string, { label: string; gate_type: string }>;
   onClose: () => void;
   onDone: () => void;
@@ -577,9 +595,19 @@ function FireTransitionModal({
         <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
           Update fields (optional, sent as delta)
         </label>
-        {fields.map((f) => (
-          <FieldRow key={f.field_name} field={f} value={values[f.field_name] ?? ''} onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))} />
-        ))}
+        {fields.map((f) => {
+          const list = f.option_list_key ? fieldLists[f.option_list_key] : undefined;
+          const listOptions = list && list.kind === 'options' ? (list.items as string[]) : null;
+          return (
+            <FieldRow
+              key={f.field_name}
+              field={f}
+              value={values[f.field_name] ?? ''}
+              onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
+              listOptions={listOptions}
+            />
+          );
+        })}
         <input
           value={comment}
           onChange={(e) => setComment(e.target.value)}
@@ -715,7 +743,7 @@ function toCustomFields(values: Record<string, string>, fields: EntityField[]): 
   return out;
 }
 
-function FieldRow({ field, value, onChange }: { field: EntityField; value: string; onChange: (v: string) => void }) {
+function FieldRow({ field, value, onChange, listOptions }: { field: EntityField; value: string; onChange: (v: string) => void; listOptions?: string[] | null }) {
   const id = useId();
   const label = (
     <label htmlFor={id} className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
@@ -726,6 +754,8 @@ function FieldRow({ field, value, onChange }: { field: EntityField; value: strin
     </label>
   );
 
+  const options = (listOptions ?? field.select_options) || [];
+
   const input =
     field.field_type === 'select' ? (
       <select
@@ -735,7 +765,7 @@ function FieldRow({ field, value, onChange }: { field: EntityField; value: strin
         className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800"
       >
         <option value="">—</option>
-        {(field.select_options || []).map((o) => (
+        {options.map((o) => (
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
