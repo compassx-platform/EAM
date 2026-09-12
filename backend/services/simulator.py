@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from backend.models.entities import get_entity_models
 from backend.models.workflow import WorkflowDefinition
 from backend.services.gate_evaluator import evaluate_transition_gates, GateEvaluationResult
+from backend.services.command_handler import _resolve_transition_target, NoConditionSatisfiedError
 
 def simulate_transition(
     db: Session,
@@ -88,7 +89,7 @@ def simulate_transition(
         }
 
     to_state = matching_transition.get("to")
-    gate_ids = matching_transition.get("gates", [])
+    gate_ids = matching_transition.get("gates", []) or []
 
     all_passed, results, failing = evaluate_transition_gates(
         db=db,
@@ -99,13 +100,44 @@ def simulate_transition(
         actor_roles=actor_roles,
     )
 
+    trace = [r.model_dump() for r in results]
+
+    # Resolve conditional routing target (choices) without writing anything.
+    routing = None
+    choice_trace = []
+    try:
+        resolved_to, choice_index, choice_trace, _ = _resolve_transition_target(
+            db=db,
+            transition=matching_transition,
+            custom_fields=custom_fields,
+            actor_context={"actor_id": actor_id, "actor_type": actor_type, "actor_roles": actor_roles},
+        )
+        if resolved_to is not None:
+            to_state = resolved_to
+        if choice_index is not None:
+            routing = {"choice_index": choice_index, "choices": choice_trace}
+    except NoConditionSatisfiedError as ncs:
+        return {
+            "accepted": False,
+            "from_state": current_status,
+            "to_state": None,
+            "event_type": event_type,
+            "workflow_version": workflow_version,
+            "error": ncs.message,
+            "reason": ncs.message,
+            "gate_trace": trace,
+            "routing": {"choices": ncs.details.get("choice_trace", [])},
+        }
+
+    accepted = all_passed and to_state is not None
     return {
-        "accepted": all_passed,
+        "accepted": accepted,
         "from_state": current_status,
         "to_state": to_state,
         "event_type": event_type,
         "workflow_version": workflow_version,
         "gate_failed": failing.label if failing else None,
-        "reason": failing.reason if failing else ("All gates passed" if all_passed else None),
-        "gate_trace": [r.model_dump() for r in results],
+        "reason": failing.reason if failing else ("All gates passed" if accepted else None),
+        "gate_trace": trace,
+        "routing": routing,
     }

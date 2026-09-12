@@ -25,6 +25,7 @@ def test_full_spec_checkpoint_scenario(test_db):
         db=test_db,
         entity_type="permit",
         actor_id="charlie.tech@compassx.io",
+        workflow_version="permit_v1",
         custom_fields={
             "title": "Boiler Inspection Hot Work Permit",
             "permit_type": "Hot Work",
@@ -74,6 +75,7 @@ def test_full_spec_checkpoint_scenario(test_db):
         db=test_db,
         entity_type="workorder",
         actor_id="charlie.tech@compassx.io",
+        workflow_version="standard_v1",
         custom_fields={
             "title": "Repair Boiler Steam Pipe Flange",
             "priority": "High",

@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Layers,
   FileText,
+  Check,
+  Workflow,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
@@ -397,7 +399,7 @@ function EntityDetail({
                     <span className="flex-1">
                       <span className="block font-mono text-xs font-bold text-blue-800">{t.event_type}</span>
                       <span className="flex items-center gap-1 text-[11px] text-blue-600">
-                        {entity.status} <ArrowRight className="h-3 w-3" /> {t.to_state}
+                        {entity.status} <ArrowRight className="h-3 w-3" /> {transitionTarget(t)}
                       </span>
                     </span>
                     <span className="flex gap-0.5">
@@ -442,6 +444,7 @@ function EntityDetail({
 function EventRow({ ev }: { ev: EntityEvent }) {
   const [open, setOpen] = useState(false);
   const gateTrace = (ev.payload?.gate_trace as GateTraceItem[] | undefined) ?? null;
+  const routing = ev.payload?.routing as RoutingSummary | undefined;
   return (
     <div>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -467,6 +470,21 @@ function EventRow({ ev }: { ev: EntityEvent }) {
             >
               {g.effective_pass ? <ShieldCheck className="h-2.5 w-2.5" /> : <ShieldX className="h-2.5 w-2.5" />}
               {g.label} — {g.reason}
+            </span>
+          ))}
+        </div>
+      )}
+      {routing && (
+        <div className="mt-1 flex flex-wrap items-center gap-0.5">
+          {routing.choices.map((c) => (
+            <span
+              key={c.choice_index}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                c.matched ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-400 line-through'
+              }`}
+            >
+              {c.matched ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
+              c{String(c.choice_index)}→{c.to}
             </span>
           ))}
         </div>
@@ -508,12 +526,12 @@ function FireTransitionModal({
   const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [lastTrace, setLastTrace] = useState<GateTraceItem[] | null>(null);
+  const [lastResult, setLastResult] = useState<TransitionResponse | null>(null);
 
   const submit = async () => {
     setSaving(true);
     setErr(null);
-    setLastTrace(null);
+    setLastResult(null);
     try {
       const res = await api.transition(entityType, {
         entity_id: entity.id,
@@ -521,11 +539,11 @@ function FireTransitionModal({
         custom_fields_delta: toCustomFields(values, fields),
         payload: comment.trim() ? { comment: comment.trim() } : undefined,
       });
-      setLastTrace(res.gate_trace);
-      window.setTimeout(onDone, 700);
+      setLastResult(res);
+      window.setTimeout(onDone, 900);
     } catch (e: any) {
       setErr(e.message);
-      setLastTrace((e.body?.details?.gate_trace as GateTraceItem[] | undefined) ?? null);
+      setLastResult({ new_status: '', gate_trace: e.body?.details?.gate_trace ?? [] });
     } finally {
       setSaving(false);
     }
@@ -536,7 +554,7 @@ function FireTransitionModal({
   return (
     <Modal
       title={`${transition.event_type}`}
-      subtitle={`${entity.status} → ${transition.to_state}`}
+      subtitle={`${entity.status} → ${transitionTarget(transition)}`}
       onClose={onClose}
     >
       {gateIds.length > 0 && (
@@ -572,20 +590,80 @@ function FireTransitionModal({
 
       {err && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
 
-      {lastTrace && (
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Gate results</label>
-          {lastTrace.map((g) => (
-            <span
-              key={g.gate_id}
-              className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
-                g.effective_pass ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
-              }`}
-            >
-              {g.effective_pass ? <ShieldCheck className="h-3 w-3" /> : <ShieldX className="h-3 w-3" />}
-              {g.label} — {g.reason}
-            </span>
-          ))}
+      {lastResult && (
+        <div className="flex flex-col gap-1.5">
+          {lastResult.gate_trace.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Gate results</label>
+              {lastResult.gate_trace.map((g) => (
+                <span
+                  key={g.gate_id}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
+                    g.effective_pass ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {g.effective_pass ? <ShieldCheck className="h-3 w-3" /> : <ShieldX className="h-3 w-3" />}
+                  {g.label} — {g.reason}
+                </span>
+              ))}
+            </div>
+          )}
+          {lastResult.routing && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Branch routing</label>
+              {lastResult.routing.choices.map((c, i) => (
+                <span
+                  key={c.choice_index}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] ${
+                    c.matched
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : i === lastResult.routing!.choice_index
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-gray-200 bg-gray-50 text-gray-500'
+                  }`}
+                >
+                  {c.matched && <Check className="h-3 w-3" />}
+                  c{String(c.choice_index)}: {c.to}
+                  {c.when.length > 0 ? ` when ${c.when.join(', ')}` : ' (default)'}
+                </span>
+              ))}
+            </div>
+          )}
+          {lastResult.side_effects && lastResult.side_effects.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Side effects</label>
+              {lastResult.side_effects.map((s, i) => (
+                <span
+                  key={i}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
+                    s.success ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {s.success ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                  {s.type}
+                  {s.message ? ` — ${s.message}` : ''}
+                </span>
+              ))}
+            </div>
+          )}
+          {lastResult.settled && lastResult.settled.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Auto-settled</label>
+              {lastResult.settled.map((s, i) => (
+                <span
+                  key={i}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] ${
+                    s.success ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
+                >
+                  {s.success ? <Workflow className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                  {s.event}
+                  {s.to ? `: ${s.from} → ${s.to}` : ''}
+                  {s.error ? ` — ${s.error}` : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -602,6 +680,23 @@ function FireTransitionModal({
 }
 
 // ---- Shared helpers ---------------------------------------------------------
+
+type RoutingChoice = { choice_index: number; to: string; when: string[]; matched: boolean };
+type RoutingSummary = { choice_index: number; to?: string; choices: RoutingChoice[] };
+
+interface TransitionResponse {
+  new_status: string;
+  gate_trace: GateTraceItem[];
+  routing?: RoutingSummary;
+  side_effects?: Array<{ type: string; success: boolean; message?: string; [k: string]: unknown }>;
+  settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;
+}
+
+function transitionTarget(t: ValidTransition): string {
+  if (t.to_state) return t.to_state;
+  const targets = (t.choices || []).map((c) => c.to).filter(Boolean);
+  return targets.length ? targets.join(' | ') : '…';
+}
 
 function toCustomFields(values: Record<string, string>, fields: EntityField[]): Record<string, unknown> {
   const byName = new Map(fields.map((f) => [f.field_name, f]));

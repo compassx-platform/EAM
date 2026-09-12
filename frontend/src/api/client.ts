@@ -97,6 +97,12 @@ export const api = {
     return request('/gates/types');
   },
 
+  listActionTypes(): Promise<
+    Array<{ type: string; name: string; description: string }>
+  > {
+    return request('/actions/types');
+  },
+
   listFields(entityType?: string): Promise<EntityField[]> {
     const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : '';
     return request<EntityField[]>(`/fields${q}`);
@@ -167,6 +173,7 @@ export const api = {
     current_status: string;
     workflow_version: string;
     valid_transitions: ValidTransition[];
+    auto_transitions_pending: Array<{ from: string; event: string; when: string[] }>;
   }> {
     return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/valid-transitions`);
   },
@@ -189,6 +196,9 @@ export const api = {
     new_status: string;
     event_id: string;
     gate_trace: GateTraceItem[];
+    routing?: { choice_index: number; choices: Array<{ choice_index: number; to: string; when: string[]; matched: boolean }> };
+    side_effects?: Array<{ type: string; success: boolean; [k: string]: unknown }>;
+    settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;
   }> {
     return request(`/${encodeURIComponent(entityType)}/transition`, { method: 'POST', body: JSON.stringify(input) });
   },
@@ -197,4 +207,5 @@ export const api = {
 export const ENTITY_TYPES: Array<{ value: string; label: string }> = [
   { value: 'workorder', label: 'Work Order' },
   { value: 'permit', label: 'Permit to Work' },
+  { value: 'pm_schedule', label: 'PM Schedule' },
 ];

@@ -56,6 +56,28 @@ GATE_TYPES_CATALOG = [
             {"name": "required_status", "label": "Required Target Status", "type": "string", "required": True}
         ]
     },
+    {
+        "gate_type": "attribute_condition",
+        "name": "Attribute Condition",
+        "description": "Generic declarative comparison on any entity field: equality, ordering, membership, substring, emptiness. Numeric values compare numerically; text/select/boolean values compare as strings (case-insensitive by default).",
+        "parameters": [
+            {"name": "field", "label": "Field Name", "type": "field_select", "required": True},
+            {"name": "operator", "label": "Operator", "type": "select", "options": ["eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "contains", "starts_with", "ends_with", "is_empty", "is_not_empty"], "required": True},
+            {"name": "value", "label": "Value", "type": "string", "required": False, "description": "Compared value (list for in/not_in). Unused for is_empty/is_not_empty."},
+            {"name": "case_sensitive", "label": "Case Sensitive", "type": "boolean", "required": False, "default": False}
+        ]
+    },
+    {
+        "gate_type": "expression_threshold",
+        "name": "Expression Threshold",
+        "description": "Evaluates a whitelisted arithmetic expression over entity fields (e.g. ($estlabcost + $estmatcost)) and compares the result against a literal value (or a second expression). Powers computed conditions such as cost sums and cost variance.",
+        "parameters": [
+            {"name": "expression", "label": "Expression", "type": "string", "required": True, "description": "Arithmetic over $field or {field} references, e.g. ($estlabcost + $estmatcost) / $estlabcost"},
+            {"name": "operator", "label": "Operator", "type": "select", "options": ["<=", "<", ">=", ">", "=", "!="], "required": True},
+            {"name": "value", "label": "Threshold Value", "type": "number", "required": False},
+            {"name": "compare_expression", "label": "Compare Expression (alternative to value)", "type": "string", "required": False}
+        ]
+    },
 ]
 
 class GateInstanceRequest(BaseModel):

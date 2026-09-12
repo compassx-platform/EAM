@@ -239,11 +239,21 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
 
     for t in transitions:
         if t.get("from") == entity.status:
-            valid_transitions.append({
+            entry: Dict[str, Any] = {
                 "event_type": t.get("event"),
                 "to_state": t.get("to"),
-                "gates": t.get("gates", []),
-            })
+                "gates": t.get("gates", []) or [],
+            }
+            if t.get("choices"):
+                entry["choices"] = t.get("choices")
+            if t.get("on_after"):
+                entry["on_after"] = t.get("on_after")
+            valid_transitions.append(entry)
+
+    auto_pending = []
+    for a in (wf.definition or {}).get("auto_transitions", []) or []:
+        if a.get("from") == entity.status:
+            auto_pending.append(a)
 
     return {
         "entity_id": id,
@@ -251,6 +261,7 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
         "current_status": entity.status,
         "workflow_version": entity.workflow_version,
         "valid_transitions": valid_transitions,
+        "auto_transitions_pending": auto_pending,
     }
 
 

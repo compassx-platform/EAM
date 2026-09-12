@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.models.workflow import GateInstance
 from backend.models.users import AppUser
 from backend.models.entities import get_entity_models
+from backend.services.expression import evaluate_arithmetic, ExpressionError
 
 class GateEvaluationResult(BaseModel):
     gate_id: str
@@ -14,6 +15,85 @@ class GateEvaluationResult(BaseModel):
     reason: str
     failure_policy: str  # 'block' | 'allow'
     effective_pass: bool  # True if passed OR (not passed and failure_policy == 'allow')
+
+# Comparison operators understood by the generic attribute_condition gate.
+_ATTR_OPS = {"eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "contains", "starts_with", "ends_with", "is_empty", "is_not_empty"}
+_NUMERIC_OPS = {"lt", "le", "gt", "ge"}
+_STRING_OPS = {"eq", "ne", "contains", "starts_with", "ends_with", "in", "not_in"}
+
+
+def _as_bool(value: Any) -> Optional[bool]:
+    """Coerces a configured 'true'/'false' or Python bool to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        low = value.strip().lower()
+        if low in ("true", "yes", "1"):
+            return True
+        if low in ("false", "no", "0"):
+            return False
+    return None
+
+
+def _as_number(value: Any) -> Optional[float]:
+    """Coerces a value to float when it is numeric-looking; None otherwise."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_string_op(op: str, field_value: Any, expected: Any, case_sensitive: bool = False) -> bool:
+    """Case-insensitive (by default) string comparison for the text/select/boolean ops."""
+    left = field_value if isinstance(field_value, str) else ("" if field_value is None else str(field_value))
+    right = expected if isinstance(expected, str) else ("" if expected is None else str(expected))
+    if op in ("eq", "ne"):
+        a, b = (left, right)
+        if not case_sensitive:
+            a, b = a.strip().lower(), b.strip().lower()
+        return (a == b) if op == "eq" else (a != b)
+    if op == "contains":
+        needle = right.lower() if not case_sensitive else right
+        hay = left.lower() if not case_sensitive else left
+        return needle in hay
+    if op == "starts_with":
+        return left.lower().startswith(right.lower()) if not case_sensitive else left.startswith(right)
+    if op == "ends_with":
+        return left.lower().endswith(right.lower()) if not case_sensitive else left.endswith(right)
+    if op == "in":
+        opts = expected if isinstance(expected, list) else [expected]
+        pool = [str(o).strip().lower() if not case_sensitive else str(o) for o in opts]
+        needle = left.strip().lower() if not case_sensitive else left.strip()
+        return needle in pool
+    if op == "not_in":
+        opts = expected if isinstance(expected, list) else [expected]
+        pool = [str(o).strip().lower() if not case_sensitive else str(o) for o in opts]
+        needle = left.strip().lower() if not case_sensitive else left.strip()
+        return needle not in pool
+    return False
+
+
+def _apply_numeric_op(op: str, left: float, right: float) -> bool:
+    if op == "lt":
+        return left < right
+    if op == "le":
+        return left <= right
+    if op == "gt":
+        return left > right
+    if op == "ge":
+        return left >= right
+    if op == "eq":
+        return left == right
+    if op == "ne":
+        return left != right
+    return False
+
 
 def evaluate_single_gate(
     db: Session,
@@ -189,6 +269,96 @@ def evaluate_single_gate(
                 except Exception as ex:
                     passed = False
                     reason = f"Failed to check related entity status: {str(ex)}"
+
+        elif gate_type == "attribute_condition":
+            # 6. attribute_condition: generic declarative comparison on any field.
+            #    Operators: eq, ne, lt, le, gt, ge, in, not_in, contains,
+            #    starts_with, ends_with, is_empty, is_not_empty. Numeric values
+            #    compare numerically; everything else compares as strings.
+            field = params.get("field")
+            op = str(params.get("operator", "eq")).lower()
+            expected = params.get("value")
+            case_sensitive = bool(params.get("case_sensitive", False))
+
+            if not field:
+                passed = False
+                reason = "No 'field' configured for attribute_condition gate"
+            elif op not in _ATTR_OPS:
+                passed = False
+                reason = f"Unsupported operator '{op}'. Allowed: {sorted(_ATTR_OPS)}"
+            else:
+                val = custom_fields.get(field)
+                if op in ("is_empty", "is_not_empty"):
+                    empty = val is None or (isinstance(val, str) and not val.strip()) or val == [] or val == {}
+                    passed = empty if op == "is_empty" else not empty
+                    reason = f"Field '{field}' is {'' if empty else 'not '}empty -> {'Pass' if passed else 'Fail'}"
+                else:
+                    if val is None or (isinstance(val, str) and not val.strip()):
+                        passed = False
+                        reason = f"Field '{field}' is empty or missing (required for operator '{op}')"
+                    else:
+                        left_num = _as_number(val)
+                        right_num = _as_number(expected)
+                        if op in _NUMERIC_OPS:
+                            if left_num is None or right_num is None:
+                                # Fall back to numeric-ish string compare not possible -> fail with reason
+                                passed = False
+                                reason = f"Operator '{op}' requires numeric values; field '{field}'={val!r}, value={expected!r}"
+                            else:
+                                passed = _apply_numeric_op(op, left_num, right_num)
+                                reason = f"Field '{field}' ({left_num}) {op} value ({right_num}) -> {'Pass' if passed else 'Fail'}"
+                        elif op in ("eq", "ne"):
+                            # Prefer numeric comparison when both sides look numeric; else boolean/string.
+                            if left_num is not None and right_num is not None and not isinstance(expected, bool):
+                                passed = _apply_numeric_op(op, left_num, right_num)
+                                reason = f"Field '{field}' ({left_num}) {op} value ({right_num}) -> {'Pass' if passed else 'Fail'}"
+                            else:
+                                b_expected = _as_bool(expected)
+                                b_val = _as_bool(val)
+                                if b_expected is not None:
+                                    passed = _apply_string_op(op, str(b_val).lower(), str(b_expected).lower(), case_sensitive=True)
+                                    reason = f"Field '{field}' ({val!r}) {op} boolean ({b_expected}) -> {'Pass' if passed else 'Fail'}"
+                                else:
+                                    passed = _apply_string_op(op, val, expected, case_sensitive=case_sensitive)
+                                    reason = f"Field '{field}' ({val!r}) {op} value ({expected!r}) -> {'Pass' if passed else 'Fail'}"
+                        else:  # in, not_in, contains, starts_with, ends_with
+                            passed = _apply_string_op(op, val, expected, case_sensitive=case_sensitive)
+                            reason = f"Field '{field}' ({val!r}) {op} ({expected!r}) -> {'Pass' if passed else 'Fail'}"
+
+        elif gate_type == "expression_threshold":
+            # 7. expression_threshold: evaluates a whitelisted arithmetic
+            #    expression against custom_fields and compares the result to
+            #    a literal value (or a second expression when compare_expression
+            #    is configured). Example: ($estlabcost + $estmatcost) > 5000
+            expression = params.get("expression")
+            op = str(params.get("operator", ">")).lower().strip()
+            op = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "=": "eq", "==": "eq", "!=": "ne", "≥": "ge", "≤": "le"}.get(op, op)
+            threshold = params.get("value")
+            compare_expression = params.get("compare_expression")
+
+            if not expression:
+                passed = False
+                reason = "No 'expression' configured for expression_threshold gate"
+            else:
+                try:
+                    left = evaluate_arithmetic(str(expression), custom_fields)
+                    if compare_expression is not None:
+                        right = evaluate_arithmetic(str(compare_expression), custom_fields)
+                        right_label = str(compare_expression)
+                    else:
+                        right = _as_number(threshold)
+                        right_label = str(threshold)
+                        if right is None:
+                            passed = False
+                            reason = f"Configured threshold '{threshold}' is not numeric"
+                            right_label = ""
+                    if right is not None:
+                        passed = _apply_numeric_op(op, left, right)
+                        reason = f"Expression '{expression}' = {left} {op} threshold ({right_label}) -> {'Pass' if passed else 'Fail'}"
+                except ExpressionError as ex:
+                    passed = False
+                    reason = f"Expression error: {ex.message}"
+
         else:
             passed = False
             reason = f"Unknown gate type '{gate_type}'"

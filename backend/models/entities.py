@@ -24,6 +24,16 @@ class Permit(EntityBaseMixin, Base):
 class PermitEvent(EntityEventBaseMixin, Base):
     __tablename__ = "permit_event"
 
+class PMSchedule(EntityBaseMixin, Base):
+    __tablename__ = "pm_schedule"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.entity_type = "pm_schedule"
+
+class PMScheduleEvent(EntityEventBaseMixin, Base):
+    __tablename__ = "pm_schedule_event"
+
 # Entity Registry to map dynamic entity_type parameter to physical models
 ENTITY_REGISTRY = {
     "workorder": {
@@ -35,6 +45,11 @@ ENTITY_REGISTRY = {
         "model": Permit,
         "event_model": PermitEvent,
         "display_name": "Permit to Work",
+    },
+    "pm_schedule": {
+        "model": PMSchedule,
+        "event_model": PMScheduleEvent,
+        "display_name": "PM Schedule",
     },
 }
 

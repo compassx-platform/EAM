@@ -5,7 +5,7 @@ from backend.models.users import AppUser, AppRole
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
-from backend.models.entities import WorkOrder, WorkOrderEvent, Permit, PermitEvent
+from backend.models.entities import WorkOrder, Permit, PMSchedule
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
 
@@ -48,7 +48,7 @@ def seed_all(db: Session):
 
     # 3. Seed Entity Fields (Section 3.2)
     fields_data = [
-        # WorkOrder fields
+        # ---- WorkOrder fields ----
         {
             "entity_type": "workorder",
             "field_name": "title",
@@ -75,8 +75,96 @@ def seed_all(db: Session):
         },
         {
             "entity_type": "workorder",
+            "field_name": "worktype",
+            "field_type": "select",
+            "required": False,
+            "select_options": ["EM", "CM", "PM", "BM", "DM"],
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "hazardous",
+            "field_type": "select",
+            "required": False,
+            "select_options": ["Yes", "No"],
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
             "field_name": "estimated_cost",
             "field_type": "number",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "estlabcost",
+            "field_type": "number",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "estmatcost",
+            "field_type": "number",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "actlabcost",
+            "field_type": "number",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "actmatcost",
+            "field_type": "number",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "failurecode",
+            "field_type": "text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "failure_class",
+            "field_type": "text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "failure_problem",
+            "field_type": "text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "failure_cause",
+            "field_type": "text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "failure_remedy",
+            "field_type": "text",
             "required": False,
             "select_options": None,
             "reference_entity_type": None,
@@ -97,7 +185,23 @@ def seed_all(db: Session):
             "select_options": None,
             "reference_entity_type": "permit",
         },
-        # Permit fields
+        {
+            "entity_type": "workorder",
+            "field_name": "linked_pm_id",
+            "field_type": "entity_reference",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": "pm_schedule",
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "next_wo_id",
+            "field_type": "entity_reference",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": "workorder",
+        },
+        # ---- Permit fields ----
         {
             "entity_type": "permit",
             "field_name": "title",
@@ -154,6 +258,39 @@ def seed_all(db: Session):
             "select_options": ["Low", "Medium", "High"],
             "reference_entity_type": None,
         },
+        # ---- PM Schedule fields (Step 6 PM records) ----
+        {
+            "entity_type": "pm_schedule",
+            "field_name": "name",
+            "field_type": "text",
+            "required": True,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "pm_schedule",
+            "field_name": "asset",
+            "field_type": "text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "pm_schedule",
+            "field_name": "next_due_date",
+            "field_type": "date",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "pm_schedule",
+            "field_name": "last_completion_date",
+            "field_type": "date",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
     ]
 
     for f_info in fields_data:
@@ -166,8 +303,9 @@ def seed_all(db: Session):
             db.add(f)
     db.commit()
 
-    # 4. Seed Gate Instances (Section 3.6 & Section 7.2)
+    # 4. Seed Gate Instances (Section 3.6) — v1 + v2 flows
     gates_data = [
+        # --- Permit gates (v1 + v2) ---
         {
             "id": "gate_role_safety_officer",
             "entity_type": "permit",
@@ -184,6 +322,7 @@ def seed_all(db: Session):
             "params": {"field": "hazards_identified"},
             "failure_policy": "block",
         },
+        # --- WorkOrder gates (v1 lifecycle) ---
         {
             "id": "gate_role_supervisor",
             "entity_type": "workorder",
@@ -212,6 +351,119 @@ def seed_all(db: Session):
             },
             "failure_policy": "block",
         },
+        # --- WorkOrder gates (standard_v2 realistic flow) ---
+        {
+            "id": "gate_wo_role_manager",
+            "entity_type": "workorder",
+            "gate_type": "role_check",
+            "label": "Requires Manager Role",
+            "params": {"role": "Manager"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_is_emergency",
+            "entity_type": "workorder",
+            "gate_type": "attribute_condition",
+            "label": "WORKTYPE is Emergency (EM)",
+            "params": {"field": "worktype", "operator": "eq", "value": "EM"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_cost_high",
+            "entity_type": "workorder",
+            "gate_type": "expression_threshold",
+            "label": "Estimate > $5,000 (needs manager approval)",
+            "params": {"expression": "($estlabcost + $estmatcost)", "operator": ">", "value": 5000},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_permit_required",
+            "entity_type": "workorder",
+            "gate_type": "attribute_condition",
+            "label": "Safety Permit Required (hazardous = Yes)",
+            "params": {"field": "hazardous", "operator": "eq", "value": "Yes"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_permit_linked",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Work Permit Must Be Linked",
+            "params": {"field": "linked_permit_id"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_linked_permit_approved",
+            "entity_type": "workorder",
+            "gate_type": "related_entity_status_check",
+            "label": "Linked Permit must be APPROVED",
+            "params": {
+                "relationship_field": "linked_permit_id",
+                "target_entity_type": "permit",
+                "required_status": "Approved"
+            },
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_variance_over",
+            "entity_type": "workorder",
+            "gate_type": "expression_threshold",
+            "label": "Actual vs Estimate Variance > 15%",
+            "params": {
+                "expression": "($actlabcost + $actmatcost) / ($estlabcost + $estmatcost)",
+                "operator": ">",
+                "value": 1.15,
+            },
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_failure_recorded",
+            "entity_type": "workorder",
+            "gate_type": "attribute_condition",
+            "label": "Failure Recorded (FAILURECODE set)",
+            "params": {"field": "failurecode", "operator": "is_not_empty"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_failure_class",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Failure Class Required",
+            "params": {"field": "failure_class"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_failure_problem",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Failure Problem Required",
+            "params": {"field": "failure_problem"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_failure_cause",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Failure Cause Required",
+            "params": {"field": "failure_cause"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_failure_remedy",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Failure Remedy Required",
+            "params": {"field": "failure_remedy"},
+            "failure_policy": "block",
+        },
+        {
+            "id": "gate_wo_pm_linked",
+            "entity_type": "workorder",
+            "gate_type": "field_not_empty",
+            "label": "Linked to a PM Schedule",
+            "params": {"field": "linked_pm_id"},
+            "failure_policy": "block",
+        },
     ]
 
     for g_info in gates_data:
@@ -221,151 +473,303 @@ def seed_all(db: Session):
             db.add(g)
     db.commit()
 
-    # 5. Seed Workflow Definitions (Section 3.4 & Section 6)
-    # WorkOrder Workflow Definition
-    wo_wf = db.query(WorkflowDefinition).filter(
-        WorkflowDefinition.entity_type == "workorder",
-        WorkflowDefinition.version_label == "standard_v1"
-    ).first()
-    if not wo_wf:
-        wo_wf = WorkflowDefinition(
-            id=generate_uuid(),
-            entity_type="workorder",
-            version_label="standard_v1",
-            status="published",
-            created_by="system",
-            created_at=utc_now(),
-            published_at=utc_now(),
-            definition={
-                "entity_type": "workorder",
-                "version_label": "standard_v1",
-                "states": ["Draft", "Submitted", "SupervisorApproved", "InProgress", "Completed", "Closed", "Rejected", "Cancelled"],
-                "transitions": [
-                    {"from": "Draft", "event": "SUBMITTED", "to": "Submitted", "gates": []},
-                    {"from": "Submitted", "event": "APPROVED", "to": "SupervisorApproved", "gates": ["gate_role_supervisor", "gate_cost_threshold"]},
-                    {"from": "Submitted", "event": "REJECTED", "to": "Rejected", "gates": ["gate_role_supervisor"]},
-                    {"from": "SupervisorApproved", "event": "STARTED", "to": "InProgress", "gates": ["gate_linked_permit_active"]},
-                    {"from": "InProgress", "event": "COMPLETED", "to": "Completed", "gates": []},
-                    {"from": "Completed", "event": "CLOSED", "to": "Closed", "gates": []},
-                    {"from": "Completed", "event": "REOPENED", "to": "InProgress", "gates": []},
-                    {"from": "Draft", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                    {"from": "Submitted", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                    {"from": "SupervisorApproved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                ]
-            }
-        )
-        db.add(wo_wf)
+    # 5a. WorkOrder standard_v1 (legacy lifecycle — kept for bound instances & coexistence tests)
+    seed_legacy_workflow_if_absent(db, "workorder", "standard_v1", {
+        "entity_type": "workorder",
+        "version_label": "standard_v1",
+        "states": ["Draft", "Submitted", "SupervisorApproved", "InProgress", "Completed", "Closed", "Rejected", "Cancelled"],
+        "terminal_states": ["Closed", "Cancelled", "Rejected"],
+        "transitions": [
+            {"from": "Draft", "event": "SUBMITTED", "to": "Submitted", "gates": []},
+            {"from": "Submitted", "event": "APPROVED", "to": "SupervisorApproved", "gates": ["gate_role_supervisor", "gate_cost_threshold"]},
+            {"from": "Submitted", "event": "REJECTED", "to": "Rejected", "gates": ["gate_role_supervisor"]},
+            {"from": "SupervisorApproved", "event": "STARTED", "to": "InProgress", "gates": ["gate_linked_permit_active"]},
+            {"from": "InProgress", "event": "COMPLETED", "to": "Completed", "gates": []},
+            {"from": "Completed", "event": "CLOSED", "to": "Closed", "gates": []},
+            {"from": "Completed", "event": "REOPENED", "to": "InProgress", "gates": []},
+            {"from": "Draft", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Submitted", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "SupervisorApproved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+        ]
+    })
 
-    # Permit Workflow Definition (Section 6)
-    permit_wf = db.query(WorkflowDefinition).filter(
-        WorkflowDefinition.entity_type == "permit",
-        WorkflowDefinition.version_label == "permit_v1"
-    ).first()
-    if not permit_wf:
-        permit_wf = WorkflowDefinition(
-            id=generate_uuid(),
-            entity_type="permit",
-            version_label="permit_v1",
-            status="published",
-            created_by="system",
-            created_at=utc_now(),
-            published_at=utc_now(),
-            definition={
-                "entity_type": "permit",
-                "version_label": "permit_v1",
-                "states": ["Requested", "RiskAssessed", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
-                "transitions": [
-                    {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "gates": ["gate_permit_hazards_not_empty"]},
-                    {"from": "RiskAssessed", "event": "ISSUED", "to": "Issued", "gates": ["gate_role_safety_officer"]},
-                    {"from": "Issued", "event": "ACTIVATED", "to": "Active", "gates": []},
-                    {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "gates": []},
-                    {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "gates": []},
-                    {"from": "Active", "event": "EXPIRED", "to": "Expired", "gates": []},
-                    {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                    {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                    {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                    {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-                ]
-            }
-        )
-        db.add(permit_wf)
+    # 5b. WorkOrder standard_v2 — the realistic Maximo-style flow (all configurable)
+    seed_legacy_workflow_if_absent(db, "workorder", "standard_v2", {
+        "entity_type": "workorder",
+        "version_label": "standard_v2",
+        "states": ["WAPPR", "MGR_APPR", "APPR", "PRMT_PEND", "INPRG", "VR_REVIEW", "COMP", "FAILURE", "CLOSING", "CLOSED", "CANCELED"],
+        "terminal_states": ["CLOSED", "CANCELED"],
+        "transitions": [
+            # Step 1/2 — Waiting for approval (WAPPR): supervisor decision node
+            {"from": "WAPPR", "event": "SUP_AUTHORIZE",
+             "gates": ["gate_role_supervisor"],
+             "choices": [
+                 {"to": "MGR_APPR", "when": ["gate_wo_cost_high"]},       # > $5k -> second approval layer
+                 {"to": "APPR", "when": []},                              # below threshold -> auto-approve path
+             ]},
+            {"from": "WAPPR", "event": "SUP_REJECT", "to": "WAPPR", "gates": ["gate_role_supervisor"]},
+            {"from": "WAPPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
+            # Emergency auto-route event (fired by auto_transitions when WORKTYPE=EM)
+            {"from": "WAPPR", "event": "AUTO_EMR", "to": "INPRG", "gates": []},
+
+            # Step 2 sub-node — Manager Approval
+            {"from": "MGR_APPR", "event": "MGR_AUTHORIZE", "to": "APPR", "gates": ["gate_wo_role_manager"]},
+            {"from": "MGR_APPR", "event": "MGR_REJECT", "to": "WAPPR", "gates": ["gate_wo_role_manager"]},
+            {"from": "MGR_APPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
+
+            # Step 3 — approved: permit-pending cross-object gate or straight to work
+            {"from": "APPR", "event": "START_WORK",
+             "choices": [
+                 {"to": "PRMT_PEND", "when": ["gate_wo_permit_required"]},  # hazardous -> permit pending
+                 {"to": "INPRG", "when": []},
+             ]},
+            {"from": "PRMT_PEND", "event": "START_WORK", "to": "INPRG",
+             "gates": ["gate_wo_permit_linked", "gate_wo_linked_permit_approved"]},  # cross-object gate
+            {"from": "APPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
+            {"from": "PRMT_PEND", "event": "CANCEL", "to": "CANCELED", "gates": []},
+
+            # Step 4 — in progress: variance review on completion
+            {"from": "INPRG", "event": "COMPLETE_WORK",
+             "choices": [
+                 {"to": "VR_REVIEW", "when": ["gate_wo_variance_over"]},   # over tolerance -> supervisor sign-off
+                 {"to": "COMP", "when": []},
+             ]},
+            {"from": "VR_REVIEW", "event": "SUP_SIGNOFF", "to": "COMP", "gates": ["gate_role_supervisor"]},
+            {"from": "INPRG", "event": "CANCEL", "to": "CANCELED", "gates": []},
+
+            # Step 5 — completion decision: failure-driven work needs RCA
+            {"from": "COMP", "event": "FINALIZE",
+             "choices": [
+                 {"to": "FAILURE", "when": ["gate_wo_failure_recorded"]},  # FAILURECODE set -> RCA required
+                 {"to": "CLOSING", "when": []},
+             ]},
+            {"from": "FAILURE", "event": "RCA_COMPLETE", "to": "CLOSING",
+             "gates": ["gate_wo_failure_class", "gate_wo_failure_problem", "gate_wo_failure_cause", "gate_wo_failure_remedy"]},
+
+            # Step 6 — close: PM-linked work triggers declarative side effects
+            {"from": "CLOSING", "event": "CLOSE_WO",
+             "choices": [
+                 {"to": "CLOSED", "when": ["gate_wo_pm_linked"],
+                  "on_after": [
+                      {"type": "update_related_entity_field", "params": {
+                          "relationship_field": "linked_pm_id",
+                          "target_entity_type": "pm_schedule",
+                          "field": "last_completion_date",
+                          "value": "now",
+                      }},
+                      {"type": "create_related_entity", "params": {
+                          "target_entity_type": "workorder",
+                          "relationship_field": "next_wo_id",
+                          "template": {
+                              "title": "{{title}} (Next PM)",
+                              "worktype": "{{worktype}}",
+                              "priority": "{{priority}}",
+                              "linked_pm_id": "{{linked_pm_id}}",
+                          },
+                      }},
+                  ]},
+                 {"to": "CLOSED", "when": []},
+             ]},
+        ],
+        "auto_transitions": [
+            {"from": "WAPPR", "event": "AUTO_EMR", "when": ["gate_wo_is_emergency"]},
+        ],
+    })
+
+    # 5c. Permit standard_v1 (legacy lifecycle — kept for bound instances & coexistence tests)
+    seed_legacy_workflow_if_absent(db, "permit", "permit_v1", {
+        "entity_type": "permit",
+        "version_label": "permit_v1",
+        "states": ["Requested", "RiskAssessed", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
+        "terminal_states": ["Closed", "Cancelled", "Expired"],
+        "transitions": [
+            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "gates": ["gate_permit_hazards_not_empty"]},
+            {"from": "RiskAssessed", "event": "ISSUED", "to": "Issued", "gates": ["gate_role_safety_officer"]},
+            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "gates": []},
+            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "gates": []},
+            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "gates": []},
+            {"from": "Active", "event": "EXPIRED", "to": "Expired", "gates": []},
+            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+        ]
+    })
+
+    # 5d. Permit standard_v2 — adds the APPROVED state the WO permit gate depends on
+    seed_legacy_workflow_if_absent(db, "permit", "permit_v2", {
+        "entity_type": "permit",
+        "version_label": "permit_v2",
+        "states": ["Requested", "RiskAssessed", "Approved", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
+        "terminal_states": ["Closed", "Cancelled", "Expired"],
+        "transitions": [
+            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "gates": ["gate_permit_hazards_not_empty"]},
+            {"from": "RiskAssessed", "event": "APPROVED", "to": "Approved", "gates": ["gate_role_safety_officer"]},
+            {"from": "Approved", "event": "ISSUED", "to": "Issued", "gates": ["gate_role_safety_officer"]},
+            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "gates": []},
+            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "gates": []},
+            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "gates": []},
+            {"from": "Active", "event": "EXPIRED", "to": "Expired", "gates": []},
+            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Approved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+        ]
+    })
+
+    # 5e. PM Schedule — create-only tracking workflow (Step 6 PM records)
+    seed_legacy_workflow_if_absent(db, "pm_schedule", "pm_schedule_v1", {
+        "entity_type": "pm_schedule",
+        "version_label": "pm_schedule_v1",
+        "states": ["Scheduled"],
+        "terminal_states": ["Scheduled"],
+        "transitions": [],
+        "auto_transitions": [],
+    })
 
     db.commit()
 
     # 6. Seed Sample Live Entities if none exist
-    if db.query(Permit).count() == 0:
-        # Sample Permit 1 (Active)
-        p1_expiry = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
-        res_p1 = create_entity(
-            db=db,
-            entity_type="permit",
-            actor_id="charlie.tech@compassx.io",
-            custom_fields={
-                "title": "Main Turbines Hot Work Permit",
-                "permit_type": "Hot Work",
-                "location": "Turbine Hall Bay 4",
-                "hazards_identified": "Sparks near gas manifold line",
-                "safety_precautions": "Fire watch on duty, dual extinguishers mounted",
-                "expiry_date": p1_expiry,
-                "risk_level": "High"
-            },
-            payload={"comment": "Emergency maintenance hot work authorization requested"}
-        )
-        p1_id = res_p1["entity_id"]
-        # Progress p1: Requested -> RiskAssessed -> Issued -> Active
-        propose_transition(db, "permit", p1_id, "RISK_ASSESSMENT_COMPLETED", "charlie.tech@compassx.io", payload={"comment": "Risk assessment completed with JSA"})
-        propose_transition(db, "permit", p1_id, "ISSUED", "alice.safety@compassx.io", actor_roles=["Safety Officer"], payload={"comment": "Issued after site inspection"})
-        propose_transition(db, "permit", p1_id, "ACTIVATED", "charlie.tech@compassx.io", payload={"comment": "Workforce on site and permit activated"})
+    seed_sample_entities(db)
 
-        # Sample Permit 2 (Requested - newly created)
-        p2_expiry = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
-        create_entity(
-            db=db,
-            entity_type="permit",
-            actor_id="charlie.tech@compassx.io",
-            custom_fields={
-                "title": "Substation B Confined Space Entry",
-                "permit_type": "Confined Space",
-                "location": "Substation B Transformer Pit",
-                "hazards_identified": "Atmospheric oxygen depletion risk",
-                "safety_precautions": "Continuous 4-gas monitoring and extraction fan active",
-                "expiry_date": p2_expiry,
-                "risk_level": "High"
-            },
-            payload={"comment": "Annual inspection of transformer isolation chambers"}
-        )
 
-        # Sample Work Order 1 (linked to Active Permit 1)
-        res_wo1 = create_entity(
-            db=db,
-            entity_type="workorder",
-            actor_id="charlie.tech@compassx.io",
-            custom_fields={
-                "title": "Replace Turbine Impeller Shaft Seals",
-                "description": "Remove worn seal rings on turbine #4 and install high-temp graphite packing",
-                "priority": "High",
-                "estimated_cost": 8500,
-                "assigned_to": "Charlie Stone",
-                "linked_permit_id": p1_id,
-            },
-            payload={"comment": "Work order created for outage repair"}
-        )
-        wo1_id = res_wo1["entity_id"]
-        propose_transition(db, "workorder", wo1_id, "SUBMITTED", "charlie.tech@compassx.io", payload={"comment": "Ready for supervisor sign-off"})
-        propose_transition(db, "workorder", wo1_id, "APPROVED", "bob.supervisor@compassx.io", actor_roles=["Supervisor"], payload={"comment": "Budget and schedule approved"})
+def seed_legacy_workflow_if_absent(db: Session, entity_type: str, version_label: str, definition: dict):
+    existing = db.query(WorkflowDefinition).filter(
+        WorkflowDefinition.entity_type == entity_type,
+        WorkflowDefinition.version_label == version_label
+    ).first()
+    if existing:
+        return
+    wf = WorkflowDefinition(
+        id=generate_uuid(),
+        entity_type=entity_type,
+        version_label=version_label,
+        status="published",
+        created_by="system",
+        created_at=utc_now(),
+        published_at=utc_now(),
+        definition=definition,
+    )
+    db.add(wf)
 
-        # Sample Work Order 2 (Unlinked Standalone Draft)
-        create_entity(
-            db=db,
-            entity_type="workorder",
-            actor_id="admin@compassx.io",
-            custom_fields={
-                "title": "HVAC Filter Replacement & Sensor Calibration",
-                "description": "Quarterly preventative maintenance for Control Room air conditioning",
-                "priority": "Medium",
-                "estimated_cost": 1200,
-                "assigned_to": "Maintenance Crew A",
-                "linked_permit_id": None,
-            },
-            payload={"comment": "Scheduled quarterly maintenance routine"}
-        )
+
+def seed_sample_entities(db: Session):
+    if db.query(Permit).count() > 0:
+        return
+
+    # --- Sample Permit 1: hot-work permit walked through permit_v2 to ACTIVE ---
+    p1_expiry = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    res_p1 = create_entity(
+        db=db,
+        entity_type="permit",
+        actor_id="charlie.tech@compassx.io",
+        custom_fields={
+            "title": "Main Turbines Hot Work Permit",
+            "permit_type": "Hot Work",
+            "location": "Turbine Hall Bay 4",
+            "hazards_identified": "Sparks near gas manifold line",
+            "safety_precautions": "Fire watch on duty, dual extinguishers mounted",
+            "expiry_date": p1_expiry,
+            "risk_level": "High"
+        },
+        payload={"comment": "Emergency maintenance hot work authorization requested"}
+    )
+    p1_id = res_p1["entity_id"]
+    propose_transition(db, "permit", p1_id, "RISK_ASSESSMENT_COMPLETED", "charlie.tech@compassx.io", payload={"comment": "Risk assessment completed with JSA"})
+    propose_transition(db, "permit", p1_id, "APPROVED", "alice.safety@compassx.io", actor_roles=["Safety Officer"], payload={"comment": "Approved after site inspection"})
+    propose_transition(db, "permit", p1_id, "ISSUED", "alice.safety@compassx.io", actor_roles=["Safety Officer"], payload={"comment": "Permit issued"})
+    propose_transition(db, "permit", p1_id, "ACTIVATED", "charlie.tech@compassx.io", payload={"comment": "Workforce on site and permit activated"})
+
+    # --- Sample Permit 2: confined-space permit sitting at APPROVED (WO gate demo) ---
+    p2_expiry = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
+    res_p2 = create_entity(
+        db=db,
+        entity_type="permit",
+        actor_id="charlie.tech@compassx.io",
+        custom_fields={
+            "title": "Substation B Confined Space Entry",
+            "permit_type": "Confined Space",
+            "location": "Substation B Transformer Pit",
+            "hazards_identified": "Atmospheric oxygen depletion risk",
+            "safety_precautions": "Continuous 4-gas monitoring and extraction fan active",
+            "expiry_date": p2_expiry,
+            "risk_level": "High"
+        },
+        payload={"comment": "Annual inspection of transformer isolation chambers"}
+    )
+    p2_id = res_p2["entity_id"]
+    propose_transition(db, "permit", p2_id, "RISK_ASSESSMENT_COMPLETED", "charlie.tech@compassx.io", payload={"comment": "JSA complete"})
+    propose_transition(db, "permit", p2_id, "APPROVED", "alice.safety@compassx.io", actor_roles=["Safety Officer"], payload={"comment": "Approved pending issuance"})
+
+    # --- Sample PM schedule (Step 6 target) ---
+    res_pm = create_entity(
+        db=db,
+        entity_type="pm_schedule",
+        actor_id="admin@compassx.io",
+        custom_fields={
+            "name": "Compressor Vane Quarterly PM",
+            "asset": "COMP-004",
+            "next_due_date": (datetime.now(timezone.utc) + timedelta(days=21)).isoformat(),
+        },
+        payload={"comment": "Quarterly preventive maintenance program"}
+    )
+    pm_id = res_pm["entity_id"]
+
+    # --- Sample Work Order 1: high-estimate, non-emergency -> parked at WAPPR ---
+    create_entity(
+        db=db,
+        entity_type="workorder",
+        actor_id="charlie.tech@compassx.io",
+        custom_fields={
+            "title": "Replace Turbine Impeller Shaft Seals",
+            "description": "Remove worn seal rings on turbine #4 and install high-temp graphite packing",
+            "priority": "High",
+            "worktype": "CM",
+            "hazardous": "No",
+            "estlabcost": 12000,
+            "estmatcost": 6000,
+            "assigned_to": "Charlie Stone",
+            "linked_permit_id": p1_id,
+        },
+        payload={"comment": "Work order created for outage repair (cost high -> manager approval layer)"}
+    )
+
+    # --- Sample Work Order 2: EMERGENCY worktype -> auto-routes WAPPR -> INPRG ---
+    create_entity(
+        db=db,
+        entity_type="workorder",
+        actor_id="charlie.tech@compassx.io",
+        custom_fields={
+            "title": "Cooling Water Line Burst — Urgent Isolation",
+            "description": "Pipe burst on cooling water main; isolate and repair",
+            "priority": "Critical",
+            "worktype": "EM",
+            "hazardous": "No",
+            "estlabcost": 1500,
+            "estmatcost": 800,
+            "assigned_to": "Shift Crew A",
+        },
+        payload={"comment": "Emergency work order — routed straight to INPRG"}
+    )
+
+    # --- Sample Work Order 3: hazardous + linked approved permit, parked at WAPPR ---
+    create_entity(
+        db=db,
+        entity_type="workorder",
+        actor_id="charlie.tech@compassx.io",
+        custom_fields={
+            "title": "Substation B Transformer Inspection",
+            "description": "Annual inspection of transformer isolation chambers",
+            "priority": "Medium",
+            "worktype": "CM",
+            "hazardous": "Yes",
+            "estlabcost": 2500,
+            "estmatcost": 900,
+            "assigned_to": "Maintenance Crew B",
+            "linked_permit_id": p2_id,
+        },
+        payload={"comment": "Hazardous work — will require approved permit before INPRG"}
+    )
+
+    db.commit()

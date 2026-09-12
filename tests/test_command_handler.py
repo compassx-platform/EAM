@@ -14,6 +14,7 @@ def test_create_and_transition_workorder(test_db):
         db=test_db,
         entity_type="workorder",
         actor_id="tech@compassx.io",
+        workflow_version="standard_v1",
         custom_fields={
             "title": "Fix Valve A1",
             "priority": "Medium",
@@ -56,6 +57,7 @@ def test_optimistic_concurrency_stale_write(test_db):
         db=test_db,
         entity_type="workorder",
         actor_id="tech@compassx.io",
+        workflow_version="standard_v1",
         custom_fields={"title": "Test Concurrency", "priority": "Low"},
     )
     wo_id = res_create["entity_id"]
@@ -82,6 +84,7 @@ def test_projector_event_replay(test_db):
         db=test_db,
         entity_type="workorder",
         actor_id="tech@compassx.io",
+        workflow_version="standard_v1",
         custom_fields={"title": "Replay Test", "priority": "High"},
     )
     wo_id = res_create["entity_id"]

@@ -1,8 +1,31 @@
+export interface WorkflowAction {
+  type: string;
+  params: Record<string, unknown>;
+}
+
+export interface WorkflowChoice {
+  to: string;
+  /** Gate IDs that must all pass for this branch to be taken ([] = unconditional default). */
+  when?: string[];
+  on_after?: WorkflowAction[];
+}
+
 export interface WorkflowTransition {
   from: string;
   event: string;
-  to: string;
-  gates: string[];
+  /** Absent/null for decision nodes that use `choices`. */
+  to?: string | null;
+  gates?: string[];
+  /** Conditional routing branches; the first whose `when` passes wins. */
+  choices?: WorkflowChoice[];
+  on_after?: WorkflowAction[];
+}
+
+export interface WorkflowAutoTransition {
+  from: string;
+  event: string;
+  /** Gate IDs that gate the automatic routing ([] = always route). */
+  when?: string[];
 }
 
 export interface WorkflowNodeMeta {
@@ -17,6 +40,10 @@ export interface WorkflowDefinition {
   states: string[];
   transitions: WorkflowTransition[];
   nodes?: WorkflowNodeMeta[];
+  /** States from which the workflow can no longer advance (terminal outcomes). */
+  terminal_states?: string[];
+  /** Data-driven routing fired automatically after a transition commits. */
+  auto_transitions?: WorkflowAutoTransition[];
 }
 
 export interface Workflow {
@@ -99,6 +126,8 @@ export interface ValidTransition {
   event_type: string;
   to_state: string;
   gates: string[];
+  choices?: WorkflowChoice[];
+  on_after?: WorkflowAction[];
 }
 
 export interface GateTraceItem {

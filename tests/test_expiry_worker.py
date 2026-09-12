@@ -11,6 +11,7 @@ def test_permit_auto_expiry_system_actor(test_db):
         db=test_db,
         entity_type="permit",
         actor_id="charlie.tech@compassx.io",
+        workflow_version="permit_v1",
         custom_fields={
             "title": "Expired Test Permit",
             "permit_type": "Electrical Isolation",

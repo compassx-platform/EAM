@@ -13,13 +13,13 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react';
-import { ArrowLeft, CheckCircle2, Pencil, Rocket, Save, Trash2, Loader2, AlertTriangle, Plus } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Pencil, Rocket, Save, Trash2, Loader2, AlertTriangle, Plus, LayoutGrid } from 'lucide-react';
 import { api } from '../../api/client';
-import type { Workflow } from '../../types';
+import type { Workflow, WorkflowAction, WorkflowAutoTransition } from '../../types';
 import StateNode from './StateNode';
 import EventEdge from './EventEdge';
 import { NodePalette } from './NodePalette';
-import { definitionToFlow, flowToDefinition, nextStateLabel, NODE_KINDS } from './flowModel';
+import { autoArrangePositions, definitionToFlow, flowToDefinition, nextStateLabel, NODE_KINDS } from './flowModel';
 import type { WorkflowFlowNode, WorkflowFlowEdge, NodeKind } from './flowModel';
 
 const nodeTypes = { state: StateNode };
@@ -34,7 +34,7 @@ interface BuilderInnerProps {
 }
 
 function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) {
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
 
   const [id, setId] = useState<string | null>(workflowId);
   const [entityType, setEntityType] = useState('workorder');
@@ -45,6 +45,8 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const [selection, setSelection] = useState<Selection>(null);
   const [gates, setGates] = useState<Array<{ id: string; label: string }>>([]);
   const [knownTypes, setKnownTypes] = useState<string[]>([]);
+  const [terminalStates, setTerminalStates] = useState<string[]>([]);
+  const [autoTransitions, setAutoTransitions] = useState<WorkflowAutoTransition[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -70,6 +72,8 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           const flow = definitionToFlow(wf.definition);
           setNodes(hydrateNodes(flow.nodes));
           setEdges(hydrateEdges(flow.edges));
+          setTerminalStates(wf.definition.terminal_states || []);
+          setAutoTransitions(wf.definition.auto_transitions || []);
         })
         .catch((err) => setNotice({ kind: 'err', text: err.message }))
         .finally(() => setLoading(false));
@@ -94,6 +98,14 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
 
   const [showGateForm, setShowGateForm] = useState(false);
   const [gateTypes, setGateTypes] = useState<Array<{ gate_type: string; name: string; description: string }>>([]);
+  const [actionTypes, setActionTypes] = useState<Array<{ type: string; name: string }>>([]);
+
+  useEffect(() => {
+    api
+      .listActionTypes()
+      .then((types) => setActionTypes(types.map((t) => ({ type: t.type, name: t.name }))))
+      .catch(() => setActionTypes([]));
+  }, []);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setNotice({ kind, text });
@@ -116,6 +128,8 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
     data: {
       event: edge.data?.event ?? 'EVENT',
       gates: edge.data?.gates ?? [],
+      choices: edge.data?.choices,
+      on_after: edge.data?.on_after,
       onRenameEvent: handleRenameEvent,
     },
   });
@@ -192,7 +206,18 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   async function handleRenameEvent(edgeId: string, event: string) {
     setEdges((eds) =>
       eds.map((e) =>
-        e.id === edgeId ? { ...e, data: { event, gates: e.data?.gates ?? [], onRenameEvent: handleRenameEvent } } : e
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                event,
+                gates: e.data?.gates ?? [],
+                choices: e.data?.choices,
+                on_after: e.data?.on_after,
+                onRenameEvent: handleRenameEvent,
+              },
+            }
+          : e
       )
     );
     setDirty(true);
@@ -214,7 +239,58 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   function handleSetEdgeGates(edgeId: string, gatesList: string[]) {
     setEdges((eds) =>
       eds.map((e) =>
-        e.id === edgeId ? { ...e, data: { event: e.data?.event ?? 'EVENT', gates: gatesList, onRenameEvent: handleRenameEvent } } : e
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                event: e.data?.event ?? 'EVENT',
+                gates: gatesList,
+                choices: e.data?.choices,
+                on_after: e.data?.on_after,
+                onRenameEvent: handleRenameEvent,
+              },
+            }
+          : e
+      )
+    );
+    setDirty(true);
+  }
+
+  function handleSetEdgeChoices(edgeId: string, choices: any[]) {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                event: e.data?.event ?? 'EVENT',
+                gates: e.data?.gates ?? [],
+                choices,
+                on_after: e.data?.on_after,
+                onRenameEvent: handleRenameEvent,
+              },
+            }
+          : e
+      )
+    );
+    setDirty(true);
+  }
+
+  function handleSetEdgeOnAfter(edgeId: string, on_after: WorkflowAction[]) {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                event: e.data?.event ?? 'EVENT',
+                gates: e.data?.gates ?? [],
+                choices: e.data?.choices,
+                on_after,
+                onRenameEvent: handleRenameEvent,
+              },
+            }
+          : e
       )
     );
     setDirty(true);
@@ -232,8 +308,23 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
     setDirty(true);
   }
 
+  // ---- auto arrange -------------------------------------------------------
+  function handleAutoArrange() {
+    setNodes((nds) => {
+      const positions = autoArrangePositions(nds, edges);
+      return nds.map((n) => ({ ...n, position: positions[n.id] ?? n.position }));
+    });
+    setDirty(true);
+    setNotice(null);
+    window.requestAnimationFrame(() => fitView({ maxZoom: 1, padding: 0.15 }));
+  }
+
   // ---- persistence ---------------------------------------------------------
-  const buildDefinition = () => flowToDefinition(nodes, edges, entityType, versionLabel);
+  const buildDefinition = () =>
+    flowToDefinition(nodes, edges, entityType, versionLabel, {
+      terminal_states: terminalStates,
+      auto_transitions: autoTransitions,
+    });
 
   const handleSave = async () => {
     if (nodes.length === 0) {
@@ -379,6 +470,15 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           )}
 
           <button
+            onClick={handleAutoArrange}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            <span className="flex items-center gap-1.5">
+              <LayoutGrid className="h-4 w-4" /> Auto Arrange
+            </span>
+          </button>
+
+          <button
             onClick={handleValidate}
             disabled={saving}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
@@ -462,9 +562,8 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         </div>
 
         {/* Inspector */}
-        {(selectedNode || selectedEdge) && (
-          <div className="w-72 shrink-0 border-l border-gray-200 bg-white">
-            {selectedNode && (
+        <div className="w-72 shrink-0 border-l border-gray-200 bg-white">
+          {selectedNode && (
               <div className="flex flex-col gap-3 p-4">
                 <h3 className="text-sm font-bold text-gray-800">Node Inspector</h3>
                 <div className="flex flex-col gap-1">
@@ -557,6 +656,21 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
                   )}
                 </div>
 
+                <ChoicesEditor
+                  key={`${selectedEdge.id}-choices`}
+                  edge={selectedEdge}
+                  nodeLabels={nodes.map((n) => n.data.label)}
+                  gateOptions={gates.map((g) => g.id)}
+                  onChange={(choices) => handleSetEdgeChoices(selectedEdge.id, choices)}
+                />
+
+                <OnAfterEditor
+                  key={`${selectedEdge.id}-onAfter`}
+                  value={selectedEdge.data?.on_after || []}
+                  availableTypes={actionTypes.map((a) => a.type)}
+                  onChange={(on_after) => handleSetEdgeOnAfter(selectedEdge.id, on_after)}
+                />
+
                 <button
                   onClick={() => handleDeleteEdge(selectedEdge.id)}
                   className="flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
@@ -565,8 +679,23 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
                 </button>
               </div>
             )}
+
+            {!selectedNode && !selectedEdge && (
+              <WorkflowSettingsPanel
+                terminalStates={terminalStates}
+                autoTransitions={autoTransitions}
+                nodeLabels={nodes.map((n) => n.data.label)}
+                onTerminalStatesChange={(v) => {
+                  setTerminalStates(v);
+                  setDirty(true);
+                }}
+                onAutoTransitionsChange={(v) => {
+                  setAutoTransitions(v);
+                  setDirty(true);
+                }}
+              />
+            )}
           </div>
-        )}
       </div>
     </div>
   );
@@ -609,15 +738,27 @@ function GateRegisterForm({
 }) {
   const [label, setLabel] = useState('');
   const [gateType, setGateType] = useState(gateTypes[0]?.gate_type ?? '');
+  const [paramsText, setParamsText] = useState('{}');
+  const [paramsErr, setParamsErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const selectedType = gateTypes.find((t) => t.gate_type === gateType);
+
   const submit = async () => {
     if (!label.trim() || !gateType) return;
+    let params: Record<string, unknown>;
+    try {
+      params = JSON.parse(paramsText || '{}');
+    } catch {
+      setParamsErr('params must be valid JSON');
+      return;
+    }
     setSaving(true);
     setErr(null);
+    setParamsErr(null);
     try {
-      await api.createGate({ entity_type: entityType, gate_type: gateType, label: label.trim() });
+      await api.createGate({ entity_type: entityType, gate_type: gateType, label: label.trim(), params });
       onSaved();
     } catch (e: any) {
       setErr(e.message);
@@ -631,7 +772,12 @@ function GateRegisterForm({
       {gateTypes.length > 0 && (
         <select
           value={gateType || gateTypes[0].gate_type}
-          onChange={(e) => setGateType(e.target.value)}
+          onChange={(e) => {
+            setGateType(e.target.value);
+            const t = gateTypes.find((x) => x.gate_type === e.target.value);
+            if (t && /attribute_condition|expression_threshold/.test(t.gate_type)) setParamsText('{\n  "field": "",\n  "operator": ""\n}');
+            else setParamsText('{}');
+          }}
           className="rounded-md border border-gray-300 px-1.5 py-1 text-xs text-gray-700"
         >
           {gateTypes.map((t) => (
@@ -641,6 +787,9 @@ function GateRegisterForm({
           ))}
         </select>
       )}
+      {selectedType?.description && (
+        <p className="text-[11px] leading-snug text-gray-500">{selectedType.description}</p>
+      )}
       <input
         value={label}
         onChange={(e) => setLabel(e.target.value)}
@@ -648,6 +797,15 @@ function GateRegisterForm({
         onKeyDown={(e) => e.key === 'Enter' && submit()}
         className="rounded-md border border-gray-300 px-1.5 py-1 text-xs text-gray-800 placeholder:text-gray-400"
       />
+      <textarea
+        value={paramsText}
+        onChange={(e) => setParamsText(e.target.value)}
+        rows={4}
+        spellCheck={false}
+        placeholder='JSON params, e.g. {"field":"worktype","operator":"eq","value":"EM"}'
+        className="rounded-md border border-gray-300 px-1.5 py-1 font-mono text-[11px] text-gray-700 placeholder:text-gray-400"
+      />
+      {paramsErr && <p className="text-[11px] text-red-600">{paramsErr}</p>}
       {err && <p className="text-[11px] text-red-600">{err}</p>}
       <button
         onClick={submit}
@@ -656,6 +814,239 @@ function GateRegisterForm({
       >
         {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} Create gate
       </button>
+    </div>
+  );
+}
+
+function ChoicesEditor({
+  edge,
+  nodeLabels,
+  gateOptions,
+  onChange,
+}: {
+  edge: WorkflowFlowEdge;
+  nodeLabels: string[];
+  gateOptions: string[];
+  onChange: (choices: any[]) => void;
+}) {
+  const choices = edge.data?.choices || [];
+  const [err, setErr] = useState<string | null>(null);
+
+  const commit = (next: any[]) => {
+    try {
+      onChange(next.map((c) => (c && typeof c === 'object' ? c : JSON.parse(String(c)))));
+      setErr(null);
+    } catch {
+      setErr('Invalid JSON — applied nothing.');
+    }
+  };
+
+  const updateRow = (i: number, patch: Record<string, unknown>) => {
+    const next = choices.map((c, idx) => (idx === i ? { ...c, ...patch } : c));
+    commit(next);
+  };
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-gray-100 pt-2">
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          Conditional branches (choices)
+        </label>
+        <button
+          onClick={() => commit([...choices, { to: '', when: [] }])}
+          className="rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700"
+        >
+          + branch
+        </button>
+      </div>
+      <p className="text-[11px] leading-snug text-gray-400">
+        First branch whose <span className="font-mono">when</span> gates all pass wins. Empty{' '}
+        <span className="font-mono">when</span> = unconditional default.
+      </p>
+      {choices.length === 0 && <p className="text-[11px] text-gray-400">None — plain transition to target.</p>}
+      {choices.map((c, i) => {
+        const when = (c.when || []).join(', ');
+        return (
+          <div key={i} className="flex flex-col gap-1 rounded-md border border-gray-200 bg-gray-50 p-2">
+            <div className="flex items-center gap-1.5">
+              <select
+                value={c.to || ''}
+                onChange={(e) => updateRow(i, { to: e.target.value })}
+                className="min-w-0 flex-1 rounded-md border border-gray-300 px-1.5 py-1 text-xs text-gray-700"
+              >
+                <option value="">→ target…</option>
+                {nodeLabels.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => commit(choices.filter((_, idx) => idx !== i))}
+                className="text-red-500 hover:text-red-700"
+                title="Remove branch"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <input
+              value={when}
+              onChange={(e) =>
+                updateRow(i, {
+                  when: e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder={`when: ${gateOptions.slice(0, 3).join(', ')}${gateOptions.length > 3 ? ', …' : ''}`}
+              list="choice-gate-ids"
+              className="rounded-md border border-gray-300 px-1.5 py-1 font-mono text-[11px] text-gray-700"
+            />
+            <datalist id="choice-gate-ids">
+              {gateOptions.map((g) => (
+                <option key={g} value={g} />
+              ))}
+            </datalist>
+          </div>
+        );
+      })}
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+    </div>
+  );
+}
+
+function OnAfterEditor({
+  value,
+  availableTypes,
+  onChange,
+}: {
+  value: WorkflowAction[];
+  availableTypes: string[];
+  onChange: (on_after: WorkflowAction[]) => void;
+}) {
+  const [text, setText] = useState(JSON.stringify(value, null, 2));
+  const [err, setErr] = useState<string | null>(null);
+
+  const currentRaw = () => {
+    try {
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) throw new Error('must be a JSON array');
+      return parsed;
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  };
+
+  const apply = () => {
+    const parsed = currentRaw();
+    if ('error' in parsed) {
+      setErr(parsed.error);
+      return;
+    }
+    onChange(parsed);
+    setErr(null);
+  };
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-gray-100 pt-2">
+      <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+        Side effects on arrival (on_after)
+      </label>
+      <p className="text-[11px] leading-snug text-gray-400">
+        Types: {availableTypes.length ? availableTypes.join(', ') : 'update_related_entity_field, create_related_entity, transition_related_entity'}
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={5}
+        spellCheck={false}
+        className="rounded-md border border-gray-300 p-1.5 font-mono text-[11px] text-gray-700 focus:border-blue-500 focus:outline-none"
+      />
+      <button
+        onClick={apply}
+        className="self-start rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700"
+      >
+        Apply
+      </button>
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+    </div>
+  );
+}
+
+function WorkflowSettingsPanel({
+  terminalStates,
+  autoTransitions,
+  nodeLabels,
+  onTerminalStatesChange,
+  onAutoTransitionsChange,
+}: {
+  terminalStates: string[];
+  autoTransitions: WorkflowAutoTransition[];
+  nodeLabels: string[];
+  onTerminalStatesChange: (v: string[]) => void;
+  onAutoTransitionsChange: (v: WorkflowAutoTransition[]) => void;
+}) {
+  const [autoText, setAutoText] = useState(JSON.stringify(autoTransitions, null, 2));
+  const [err, setErr] = useState<string | null>(null);
+
+  const applyAuto = () => {
+    try {
+      const parsed = JSON.parse(autoText);
+      if (!Array.isArray(parsed)) throw new Error('must be a JSON array');
+      onAutoTransitionsChange(parsed);
+      setErr(null);
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <h3 className="text-sm font-bold text-gray-800">Workflow Settings</h3>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Terminal states</label>
+        <input
+          value={terminalStates.join(', ')}
+          onChange={(e) =>
+            onTerminalStatesChange(
+              e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            )
+          }
+          placeholder={nodeLabels.slice(0, 4).join(', ') || 'e.g. CLOSED, CANCELED'}
+          className="rounded-md border border-gray-300 px-2 py-1.5 font-mono text-sm text-gray-700"
+        />
+        <p className="text-[11px] leading-snug text-gray-400">
+          Terminal states cannot advance; the UI stops offering transitions there.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          Automatic conditional routing (auto_transitions)
+        </label>
+        <p className="text-[11px] leading-snug text-gray-400">
+          Fired automatically after any transition as the <span className="font-mono">system:workflow-engine</span> actor.
+        </p>
+        <textarea
+          value={autoText}
+          onChange={(e) => setAutoText(e.target.value)}
+          rows={6}
+          spellCheck={false}
+          className="rounded-md border border-gray-300 p-1.5 font-mono text-[11px] text-gray-700 focus:border-blue-500 focus:outline-none"
+        />
+        <button
+          onClick={applyAuto}
+          className="self-start rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:text-blue-700"
+        >
+          Apply
+        </button>
+        {err && <p className="text-[11px] text-red-600">{err}</p>}
+      </div>
     </div>
   );
 }

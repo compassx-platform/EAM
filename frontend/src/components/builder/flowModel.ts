@@ -1,5 +1,11 @@
 import type { Node, Edge } from '@xyflow/react';
-import type { WorkflowDefinition, WorkflowTransition } from '../../types';
+import type {
+  WorkflowDefinition,
+  WorkflowTransition,
+  WorkflowChoice,
+  WorkflowAction,
+  WorkflowAutoTransition,
+} from '../../types';
 
 export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'end';
 
@@ -19,9 +25,29 @@ export type WorkflowFlowNode = Node<
   'state'
 >;
 export type WorkflowFlowEdge = Edge<
-  { event: string; gates: string[]; onRenameEvent?: (edgeId: string, event: string) => void },
+  {
+    event: string;
+    gates: string[];
+    choices?: WorkflowChoice[];
+    on_after?: WorkflowAction[];
+    onRenameEvent?: (edgeId: string, event: string) => void;
+  },
   'event'
 >;
+
+export interface WorkflowDefinitionExtras {
+  terminal_states?: string[];
+  auto_transitions?: WorkflowAutoTransition[];
+}
+
+/** Display target for a transition: explicit `to`, or the default branch target. */
+export function transitionTargetLabel(t: WorkflowTransition): string | null {
+  if (t.to) return t.to;
+  const choices = t.choices || [];
+  const unconditional = choices.find((c) => !c.when || c.when.length === 0);
+  if (unconditional) return unconditional.to;
+  return choices.length > 0 ? choices[0].to : null;
+}
 
 export const NODE_KINDS: Array<{ kind: NodeKind; label: string; description: string }> = [
   { kind: 'start', label: 'Start', description: 'Entry point of the workflow' },
@@ -66,11 +92,16 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
   });
 
   const edges: WorkflowFlowEdge[] = def.transitions.map((t) => ({
-    id: `${t.from}|${t.event}|${t.to}|${Math.random().toString(36).slice(2, 7)}`,
+    id: `${t.from}|${t.event}|${t.to || ''}|${Math.random().toString(36).slice(2, 7)}`,
     type: 'event',
     source: t.from,
-    target: t.to,
-    data: { event: t.event, gates: t.gates || [] },
+    target: transitionTargetLabel(t) || '',
+    data: {
+      event: t.event,
+      gates: t.gates || [],
+      choices: t.choices,
+      on_after: t.on_after,
+    },
   }));
 
   return { nodes, edges };
@@ -80,7 +111,8 @@ export function flowToDefinition(
   nodes: WorkflowFlowNode[],
   edges: WorkflowFlowEdge[],
   entityType: string,
-  versionLabel: string
+  versionLabel: string,
+  extras?: WorkflowDefinitionExtras
 ): WorkflowDefinition {
   const states = nodes
     .map((n) => n.data.label)
@@ -92,14 +124,28 @@ export function flowToDefinition(
     position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
   }));
 
-  const transitions: WorkflowTransition[] = edges.map((e) => ({
-    from: e.source,
-    event: e.data?.event || 'EVENT',
-    to: e.target,
-    gates: e.data?.gates || [],
-  }));
+  const transitions: WorkflowTransition[] = edges.map((e) => {
+    const transition: WorkflowTransition = {
+      from: e.source,
+      event: e.data?.event || 'EVENT',
+      to: e.data?.choices?.length ? null : e.target,
+      gates: e.data?.gates || [],
+    };
+    if (e.data?.choices?.length) transition.choices = e.data.choices;
+    if (e.data?.on_after?.length) transition.on_after = e.data.on_after;
+    return transition;
+  });
 
-  return { entity_type: entityType, version_label: versionLabel, states, transitions, nodes: meta };
+  const definition: WorkflowDefinition = {
+    entity_type: entityType,
+    version_label: versionLabel,
+    states,
+    transitions,
+    nodes: meta,
+  };
+  if (extras?.auto_transitions?.length) definition.auto_transitions = extras.auto_transitions;
+  if (extras?.terminal_states?.length) definition.terminal_states = extras.terminal_states;
+  return definition;
 }
 
 export function nextStateLabel(nodes: WorkflowFlowNode[], kind: NodeKind = 'state'): string {
@@ -112,4 +158,153 @@ export function nextStateLabel(nodes: WorkflowFlowNode[], kind: NodeKind = 'stat
     i++;
   }
   return label;
+}
+
+// ---- Auto arrange (layered left→right layout) -------------------------------
+
+const ARRANGE_COL_GAP = 280;
+const ARRANGE_ROW_GAP = 120;
+const ARRANGE_X0 = 48;
+const ARRANGE_Y0 = 48;
+
+/**
+ * Layout the workflow as a left-to-right DAG so it reads like a process flow:
+ * entry states in the leftmost column, terminal states furthest right, and a
+ * barycenter heuristic within each column to minimise edge crossings.
+ *
+ * The adjacency is derived from rendered edges plus each edge's choice-branch
+ * targets (so a decision node's side branches are placed without needing a
+ * visible edge). Cycles (reject/recall/cancel loops) are handled by removing
+ * DFS back edges before computing longest-path layers, so they can never
+ * inflate the layout.
+ */
+export function autoArrangePositions(
+  nodes: WorkflowFlowNode[],
+  edges: WorkflowFlowEdge[]
+): Record<string, { x: number; y: number }> {
+  const ids = nodes.map((n) => n.id);
+  const idSet = new Set(ids);
+  const pred = new Map<string, string[]>(ids.map((id) => [id, []]));
+  const succ = new Map<string, string[]>(ids.map((id) => [id, [] as string[]]));
+  const pairSet = new Set<string>();
+  const connect = (from: string, to: string) => {
+    if (!idSet.has(from) || !idSet.has(to) || from === to) return;
+    const key = `${from}\u0000${to}`;
+    if (pairSet.has(key)) return;
+    pairSet.add(key);
+    succ.get(from)!.push(to);
+    pred.get(to)!.push(from);
+  };
+  for (const e of edges) {
+    if (e.target) connect(e.source, e.target);
+    for (const c of e.data?.choices || []) if (c.to) connect(e.source, c.to);
+  }
+  if (ids.length === 0) return {};
+
+  // Root = the entry (kind 'start') node, falling back to the first state.
+  const root = (nodes.find((n) => n.data.kind === 'start') ?? nodes[0]).id;
+
+  // Iterative DFS from the root; classify edges terminating on the current
+  // stack as back edges (they only exist in cycles) and drop them.
+  const color = new Map<string, 0 | 1 | 2>(ids.map((id) => [id, 0]));
+  const idx = new Map<string, number>(ids.map((id) => [id, 0]));
+  const backEdges = new Set<string>();
+  const stack: string[] = [root];
+  color.set(root, 1);
+  while (stack.length > 0) {
+    const u = stack[stack.length - 1];
+    const outs = succ.get(u)!;
+    let i = idx.get(u)!;
+    let advanced = false;
+    for (; i < outs.length; i++) {
+      idx.set(u, i + 1);
+      const v = outs[i];
+      if (v === u) continue;
+      const c = color.get(v)!;
+      if (c === 0) {
+        color.set(v, 1);
+        stack.push(v);
+        advanced = true;
+        break;
+      }
+      if (c === 1) backEdges.add(`${u}\u0000${v}`);
+    }
+    if (!advanced) {
+      color.set(u, 2);
+      stack.pop();
+    }
+  }
+
+  // Longest-path layers on the acyclic remainder via Kahn's algorithm.
+  const indeg = new Map<string, number>(ids.map((id) => [id, 0]));
+  succ.forEach((outs, u) => {
+    for (const v of outs) {
+      if (u !== v && !backEdges.has(`${u}\u0000${v}`)) indeg.set(v, indeg.get(v)! + 1);
+    }
+  });
+  const layer = new Map<string, number>(ids.map((id) => [id, 0]));
+  const queue = ids.filter((id) => indeg.get(id) === 0);
+  for (let qi = 0; qi < queue.length; qi++) {
+    const u = queue[qi];
+    const lu = layer.get(u)!;
+    for (const v of succ.get(u)!) {
+      if (u === v || backEdges.has(`${u}\u0000${v}`)) continue;
+      layer.set(v, Math.max(layer.get(v)!, lu + 1));
+      const d = indeg.get(v)! - 1;
+      indeg.set(v, d);
+      if (d === 0) queue.push(v);
+    }
+  }
+  // Safety net: any residual cycle members are parked after the deepest layer.
+  const deepest = Math.max(0, ...layer.values());
+  for (const id of ids) if (indeg.get(id)! > 0) layer.set(id, deepest + 1);
+
+  // Group into layers, preserving original order within each layer.
+  const layers: string[][] = [];
+  for (const id of ids) {
+    const l = layer.get(id)!;
+    while (layers.length <= l) layers.push([]);
+    layers[l].push(id);
+  }
+
+  const bary = (neighbors: string[], ranks: Map<string, number>): number => {
+    const hits = neighbors.filter((n) => ranks.has(n)).map((n) => ranks.get(n)!);
+    return hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : Number.NaN;
+  };
+  const orderBy = (group: string[], key: (id: string) => number) => {
+    group.sort((a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      if (Number.isNaN(ka)) return Number.isNaN(kb) ? 0 : 1;
+      if (Number.isNaN(kb)) return -1;
+      return ka - kb;
+    });
+  };
+
+  // Barycenter crossings reduction: sweep left→right on predecessors, then right→left on successors.
+  for (let i = 1; i < layers.length; i++) {
+    const ranks = new Map(layers[i - 1].map((id, idx) => [id, idx]));
+    orderBy(layers[i], (id) => bary(pred.get(id) || [], ranks));
+  }
+  for (let i = layers.length - 2; i >= 0; i--) {
+    const ranks = new Map(layers[i + 1].map((id, idx) => [id, idx]));
+    orderBy(layers[i], (id) => bary(succ.get(id) || [], ranks));
+  }
+
+  // Uniform grid: one row per node within a column, tall columns on the global
+  // row origin. Each column is shifted by whole rows so it is centred against
+  // the tallest column — rows therefore stay aligned across columns instead of
+  // zig-zagging, while every gap stays proportional.
+  const maxColumnHeight = Math.max(0, ...layers.map((g) => g.length));
+  const out: Record<string, { x: number; y: number }> = {};
+  layers.forEach((group, depth) => {
+    const drop = Math.round((maxColumnHeight - group.length) / 2) * ARRANGE_ROW_GAP;
+    group.forEach((id, i) => {
+      out[id] = {
+        x: ARRANGE_X0 + depth * ARRANGE_COL_GAP,
+        y: ARRANGE_Y0 + drop + i * ARRANGE_ROW_GAP,
+      };
+    });
+  });
+  return out;
 }

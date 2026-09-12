@@ -46,7 +46,7 @@ function StateNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className={`nodrag group min-w-[150px] rounded-xl border-2 bg-white shadow-sm transition-shadow ${
+      className={`group min-w-[150px] rounded-xl border-2 bg-white shadow-sm transition-shadow ${
         selected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/30' : style.ring
       }`}
     >
@@ -64,11 +64,11 @@ function StateNode({ id, data, selected }: NodeProps) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          className="w-full bg-transparent text-sm font-semibold text-gray-800 outline-none"
+          className="nodrag nopan w-full bg-transparent text-sm font-semibold text-gray-800 outline-none"
         />
         <button
           onClick={() => onDelete?.(id)}
-          className="opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+          className="nodrag nopan opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
           title="Delete"
         >
           <X className="h-3.5 w-3.5" />

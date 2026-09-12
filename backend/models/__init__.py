@@ -3,7 +3,16 @@ from backend.models.users import AppUser, AppRole, app_user_role
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
-from backend.models.entities import WorkOrder, WorkOrderEvent, Permit, PermitEvent, ENTITY_REGISTRY, get_entity_models
+from backend.models.entities import (
+    WorkOrder,
+    WorkOrderEvent,
+    Permit,
+    PermitEvent,
+    PMSchedule,
+    PMScheduleEvent,
+    ENTITY_REGISTRY,
+    get_entity_models,
+)
 
 __all__ = [
     "EntityBaseMixin",
@@ -20,6 +29,8 @@ __all__ = [
     "WorkOrderEvent",
     "Permit",
     "PermitEvent",
+    "PMSchedule",
+    "PMScheduleEvent",
     "EntityForm",
     "ENTITY_REGISTRY",
     "get_entity_models",
