@@ -492,7 +492,7 @@ def seed_all(db: Session):
             {"from": "Submitted", "event": "CANCELLED", "to": "Cancelled", "gates": []},
             {"from": "SupervisorApproved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
         ]
-    })
+    }, created_at=utc_now() - timedelta(minutes=10))
 
     # 5b. WorkOrder standard_v2 — the realistic Maximo-style flow (all configurable)
     seed_legacy_workflow_if_absent(db, "workorder", "standard_v2", {
@@ -575,7 +575,7 @@ def seed_all(db: Session):
         "auto_transitions": [
             {"from": "WAPPR", "event": "AUTO_EMR", "when": ["gate_wo_is_emergency"]},
         ],
-    })
+    }, created_at=utc_now() - timedelta(minutes=5))
 
     # 5c. Permit standard_v1 (legacy lifecycle — kept for bound instances & coexistence tests)
     seed_legacy_workflow_if_absent(db, "permit", "permit_v1", {
@@ -595,7 +595,7 @@ def seed_all(db: Session):
             {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
             {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
         ]
-    })
+    }, created_at=utc_now() - timedelta(minutes=10))
 
     # 5d. Permit standard_v2 — adds the APPROVED state the WO permit gate depends on
     seed_legacy_workflow_if_absent(db, "permit", "permit_v2", {
@@ -617,7 +617,7 @@ def seed_all(db: Session):
             {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
             {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
         ]
-    })
+    }, created_at=utc_now() - timedelta(minutes=5))
 
     # 5e. PM Schedule — create-only tracking workflow (Step 6 PM records)
     seed_legacy_workflow_if_absent(db, "pm_schedule", "pm_schedule_v1", {
@@ -627,7 +627,7 @@ def seed_all(db: Session):
         "terminal_states": ["Scheduled"],
         "transitions": [],
         "auto_transitions": [],
-    })
+    }, created_at=utc_now() - timedelta(minutes=5))
 
     db.commit()
 
@@ -695,21 +695,22 @@ def seed_lists(db: Session):
     db.commit()
 
 
-def seed_legacy_workflow_if_absent(db: Session, entity_type: str, version_label: str, definition: dict):
+def seed_legacy_workflow_if_absent(db: Session, entity_type: str, version_label: str, definition: dict, created_at: datetime = None):
     existing = db.query(WorkflowDefinition).filter(
         WorkflowDefinition.entity_type == entity_type,
         WorkflowDefinition.version_label == version_label
     ).first()
     if existing:
         return
+    ts = created_at or utc_now()
     wf = WorkflowDefinition(
         id=generate_uuid(),
         entity_type=entity_type,
         version_label=version_label,
         status="published",
         created_by="system",
-        created_at=utc_now(),
-        published_at=utc_now(),
+        created_at=ts,
+        published_at=ts,
         definition=definition,
     )
     db.add(wf)

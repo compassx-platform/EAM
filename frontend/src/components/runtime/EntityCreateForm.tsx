@@ -2,10 +2,11 @@ import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties } fr
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, CheckCircle2, Loader2, Heading, Plus, X, Zap } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
-import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList } from '../../types';
+import { isItemVisible, isItemReadOnly } from '../../lib/conditions';
+import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition } from '../../types';
 
 interface EntityCreateFormProps {
   entityType: string;
@@ -25,6 +26,10 @@ interface ResolvedField {
   /** Tasks when the field is a checklist referencing a published list. */
   checklistItems?: ChecklistItem[];
   placeholder?: string;
+  accept?: string;
+  maxFileSizeMb?: number;
+  allowMultiple?: boolean;
+  maxFiles?: number;
 }
 
 // The layout container only mounts once the form definition is loaded, so
@@ -73,9 +78,33 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       try {
         const form = await api.getForm(entityType);
         if (cancelled) return;
-        const layout = ((form.layout || []) as Array<EntityFormItem & { options_list?: string | null }>).map(
-          (it) => ({ ...it, optionsList: it.options_list ?? it.optionsList, options_list: undefined })
-        );
+        const layout = ((form.layout || []) as Array<any>).map((it) => {
+          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
+          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+          return {
+            ...it,
+            isHeader,
+            isGroup,
+            is_header: undefined,
+            is_group: undefined,
+            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
+            fieldType: it.fieldType ?? it.field_type ?? null,
+            optionsList: it.optionsList ?? it.options_list ?? null,
+            options_list: undefined,
+            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
+            hidden_options: undefined,
+            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
+            group_id: undefined,
+            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
+            group_title: undefined,
+            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
+            visibility_condition: undefined,
+            accept: it.accept ?? undefined,
+            maxFileSizeMb: it.maxFileSizeMb ?? it.max_file_size_mb ?? 10,
+            allowMultiple: it.allowMultiple ?? it.allow_multiple ?? false,
+            maxFiles: it.maxFiles ?? it.max_files ?? 5,
+          };
+        });
         const formFields = form.fields || [];
         setItems(layout);
         setFields(formFields);
@@ -105,7 +134,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const byName = new Map(fields.map((f) => [f.field_name, f]));
 
   const resolveItem = (it: EntityFormItem): ResolvedField | null => {
-    if (it.isHeader) return null;
+    if (it.isHeader || it.isGroup) return null;
     if (it.fieldType) {
       const list = it.optionsList ? resolved[it.optionsList] : undefined;
       let options = it.options || [];
@@ -113,6 +142,13 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       if (list) {
         if (list.kind === 'options') options = list.items as string[];
         else if (list.kind === 'checklist') checklistItems = list.items as ChecklistItem[];
+      }
+      const hidden = new Set(it.hiddenOptions || (it as any).hidden_options || []);
+      if (hidden.size > 0) {
+        options = options.filter((opt) => !hidden.has(opt));
+        if (checklistItems) {
+          checklistItems = checklistItems.filter((item) => !hidden.has(item.label));
+        }
       }
       return {
         key: it.i,
@@ -123,6 +159,10 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         options,
         checklistItems,
         placeholder: it.placeholder ?? undefined,
+        accept: it.accept ?? undefined,
+        maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? 10,
+        allowMultiple: it.allowMultiple ?? (it as any).allow_multiple ?? false,
+        maxFiles: it.maxFiles ?? (it as any).max_files ?? 5,
       };
     }
     const f = byName.get(it.i);
@@ -142,8 +182,28 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     };
   };
 
-  const visibleItems = items.filter((it) => it.isHeader || resolveItem(it) !== null);
-  const hasLayout = visibleItems.length > 0;
+  const handleValueChange = (it: EntityFormItem, val: string) => {
+    setValues((prev) => {
+      const next = { ...prev, [it.i]: val };
+      if (it.fieldName) {
+        next[it.fieldName] = val;
+      }
+      return next;
+    });
+  };
+
+  const handleFallbackChange = (fieldName: string, val: string) => {
+    setValues((prev) => ({ ...prev, [fieldName]: val }));
+  };
+
+  // Evaluate conditions dynamically based on current form values
+  const currentlyVisibleItems = items.filter((it) => {
+    if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
+      return false;
+    }
+    return isItemVisible(it, items, values);
+  });
+  const hasLayout = items.length > 0;
 
   const fallbackFields =
     !hasLayout && fields.length > 0 ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name)) : [];
@@ -161,14 +221,44 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     setErr(null);
     setSuccess(false);
     try {
-      const defs = [
-        ...visibleItems.filter((it) => resolveItem(it) !== null).map((it) => resolveItem(it)!),
-        ...fallbackFields.map((f) => ({ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) })),
+      const activeDefs = [
+        ...currentlyVisibleItems
+          .filter((it) => !it.isHeader && !it.isGroup && resolveItem(it) !== null)
+          .map((it) => resolveItem(it)!),
+        ...fallbackFields.map((f) => ({
+          key: f.field_name,
+          name: f.field_name,
+          label: f.field_name,
+          type: f.field_type,
+          required: f.required,
+          options: fieldOptions(f),
+        })),
       ];
+
+      // Check required fields (only for visible ones)
+      for (const d of activeDefs) {
+        if (d.required) {
+          const val = values[d.key] ?? values[d.name] ?? '';
+          if (d.type === 'file') {
+            const files = parseFileList(String(val));
+            if (files.length === 0) {
+              setErr(`Field "${d.label || d.name}" requires at least one file attachment.`);
+              setSaving(false);
+              return;
+            }
+          } else if (String(val).trim() === '') {
+            setErr(`Field "${d.label || d.name}" is required.`);
+            setSaving(false);
+            return;
+          }
+        }
+      }
+
+      // Check required checklist items (only for visible ones)
       const pending: string[] = [];
-      for (const d of defs) {
+      for (const d of activeDefs) {
         if (d.type === 'checklist' && d.checklistItems) {
-          const checked = new Set(parseCheckedList(values[d.key] ?? ''));
+          const checked = new Set(parseCheckedList(values[d.key] ?? values[d.name] ?? ''));
           for (const t of d.checklistItems.filter((t) => t.required && !checked.has(t.label))) {
             pending.push(`${d.label || d.name}: ${t.label}`);
           }
@@ -179,7 +269,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         setSaving(false);
         return;
       }
-      const custom = toCustomFields(values, defs);
+      const custom = toCustomFields(values, activeDefs);
       const res = await api.createEntity(entityType, { custom_fields: custom });
       setSuccess(true);
       window.setTimeout(
@@ -237,7 +327,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                 {mounted && hasLayout && (
                   <GridLayout
                     width={width}
-                    layout={visibleItems}
+                    layout={currentlyVisibleItems}
                     compactor={verticalCompactor}
                     gridConfig={{
                       cols,
@@ -249,25 +339,41 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                     resizeConfig={{ enabled: false }}
                     className="rounded-lg"
                   >
-                    {visibleItems.map((it) =>
-                      it.isHeader ? (
-                        <div
-                          key={it.i}
-                          className="flex h-full w-full items-center gap-1.5 rounded-md bg-indigo-50 px-3 text-sm font-bold text-indigo-700"
-                        >
-                          <Heading className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{it.label}</span>
-                        </div>
-                      ) : (
+                    {currentlyVisibleItems.map((it) => {
+                      if (it.isGroup) {
+                        return (
+                          <div
+                            key={it.i}
+                            className="flex h-full w-full items-center gap-2 rounded-md border border-purple-200 bg-purple-50/70 px-3 text-sm font-bold text-purple-900 shadow-sm"
+                          >
+                            <Layers className="h-4 w-4 shrink-0 text-purple-600" />
+                            <span className="truncate">{it.label || it.groupTitle || 'Group'}</span>
+                          </div>
+                        );
+                      }
+                      if (it.isHeader) {
+                        return (
+                          <div
+                            key={it.i}
+                            className="flex h-full w-full items-center gap-1.5 rounded-md bg-indigo-50 px-3 text-sm font-bold text-indigo-700"
+                          >
+                            <Heading className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{it.label}</span>
+                          </div>
+                        );
+                      }
+                      const isReadOnly = isItemReadOnly(it, items, values);
+                      return (
                         <FillCell
                           key={it.i}
                           def={resolveItem(it)!}
-                          value={values[it.i] ?? ''}
+                          value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
                           itemHeight={it.h}
-                          onChange={(v) => setValues((s) => ({ ...s, [it.i]: v }))}
+                          readOnly={isReadOnly}
+                          onChange={(v) => handleValueChange(it, v)}
                         />
-                      )
-                    )}
+                      );
+                    })}
                   </GridLayout>
                 )}
                 {mounted && !hasLayout && fallbackFields.length === 0 && (
@@ -285,7 +391,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                       key={`fallback-${f.field_name}`}
                       def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) }}
                       value={values[f.field_name] ?? ''}
-                      onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
+                      onChange={(v) => handleFallbackChange(f.field_name, v)}
                     />
                   ))}
                 </div>
@@ -324,22 +430,30 @@ const FillCell = forwardRef<HTMLDivElement, {
   def: ResolvedField;
   value: string;
   itemHeight?: number;
+  readOnly?: boolean;
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ def, value, itemHeight = 1, onChange, className, style }, ref) {
+}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, onChange, className, style }, ref) {
   const id = useId();
   const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
-  const input = makeInput(def, id, value, onChange, rows);
+  const input = makeInput(def, id, value, onChange, rows, readOnly);
   return (
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full items-center gap-2 px-2.5 py-1`}
+      className={`${className ?? ''} flex h-full w-full items-center gap-2 px-2.5 py-1 ${
+        readOnly ? 'opacity-90' : ''
+      }`}
     >
       <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-xs font-medium text-gray-700">
         <span className="truncate">{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
+        {readOnly && (
+          <span className="ml-0.5 text-[10px] text-amber-600" title="Read-only (disabled by condition)">
+            🔒
+          </span>
+        )}
       </label>
       <div className="min-w-0 flex-1">{input}</div>
     </div>
@@ -373,15 +487,23 @@ function makeInput(
   id: string,
   value: string,
   onChange: (v: string) => void,
-  textareaRows?: number
+  textareaRows?: number,
+  readOnly = false
 ) {
-  const cls = 'w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800';
+  const cls = `w-full rounded-md border px-2 py-1.5 text-sm ${
+    readOnly
+      ? 'border-gray-200 bg-gray-100/90 text-gray-500 cursor-not-allowed select-none'
+      : 'border-gray-300 bg-white text-gray-800'
+  }`;
+
   if (def.type === 'long_text') {
     return (
       <textarea
         id={id}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        disabled={readOnly}
+        readOnly={readOnly}
         rows={textareaRows ?? 3}
         placeholder={def.placeholder || ''}
         className={`${cls} h-full min-h-[28px] resize-none leading-snug`}
@@ -395,13 +517,19 @@ function makeInput(
           <span className="text-[11px] text-gray-400">No options defined</span>
         ) : (
           def.options.map((o) => (
-            <label key={o} className="flex cursor-pointer items-center gap-1 text-xs text-gray-700">
+            <label
+              key={o}
+              className={`flex items-center gap-1 text-xs ${
+                readOnly ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer text-gray-700'
+              }`}
+            >
               <input
                 type="radio"
                 name={`sel-${id}`}
                 value={o}
                 checked={value === o}
-                onChange={() => onChange(o)}
+                disabled={readOnly}
+                onChange={() => !readOnly && onChange(o)}
                 className="accent-blue-600"
               />
               {o}
@@ -420,11 +548,17 @@ function makeInput(
           def.options.map((o) => {
             const checked = value.split(',').map((s) => s.trim()).includes(o);
             return (
-              <label key={o} className="flex cursor-pointer items-center gap-1 text-xs text-gray-700">
+              <label
+                key={o}
+                className={`flex items-center gap-1 text-xs ${
+                  readOnly ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer text-gray-700'
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={() => onChange(toggleMulti(value, o))}
+                  disabled={readOnly}
+                  onChange={() => !readOnly && onChange(toggleMulti(value, o))}
                   className="accent-blue-600"
                 />
                 {o}
@@ -437,12 +571,19 @@ function makeInput(
   }
   if (def.type === 'boolean') {
     return (
-      <label className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+      <label
+        className={`flex w-fit items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs ${
+          readOnly
+            ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+            : 'cursor-pointer border-gray-300 bg-gray-50 text-gray-700'
+        }`}
+      >
         <input
           id={id}
           type="checkbox"
           checked={value === 'yes'}
-          onChange={(e) => onChange(e.target.checked ? 'yes' : 'no')}
+          disabled={readOnly}
+          onChange={(e) => !readOnly && onChange(e.target.checked ? 'yes' : 'no')}
           className="accent-blue-600"
         />
         Yes
@@ -457,6 +598,7 @@ function makeInput(
     }
     const checked = new Set(parseCheckedList(value));
     const toggle = (label: string) => {
+      if (readOnly) return;
       const next = new Set(checked);
       if (next.has(label)) next.delete(label);
       else next.add(label);
@@ -471,16 +613,25 @@ function makeInput(
             <label
               key={t.label}
               className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${
-                done ? 'border-indigo-200 bg-indigo-50/50' : pendingReq ? 'border-amber-200 bg-amber-50/40' : 'border-gray-200 bg-white'
+                readOnly
+                  ? 'cursor-not-allowed border-gray-200 bg-gray-100/70 text-gray-400'
+                  : done
+                  ? 'border-indigo-200 bg-indigo-50/50 cursor-pointer'
+                  : pendingReq
+                  ? 'border-amber-200 bg-amber-50/40 cursor-pointer'
+                  : 'border-gray-200 bg-white cursor-pointer'
               }`}
             >
               <input
                 type="checkbox"
                 checked={done}
+                disabled={readOnly}
                 onChange={() => toggle(t.label)}
                 className="accent-indigo-600"
               />
-              <span className={done ? 'text-gray-500 line-through' : 'text-gray-800'}>{t.label}</span>
+              <span className={done ? 'text-gray-500 line-through' : readOnly ? 'text-gray-500' : 'text-gray-800'}>
+                {t.label}
+              </span>
               {t.required && (
                 <span className="ml-auto shrink-0 text-[10px] font-medium text-amber-600">
                   {done ? 'required ✓' : 'required'}
@@ -494,11 +645,20 @@ function makeInput(
   }
 
   if (def.type === 'table') {
-    return <DynamicTable def={def} value={value} onChange={onChange} />;
+    return <DynamicTable def={def} value={value} onChange={onChange} readOnly={readOnly} />;
+  }
+  if (def.type === 'file') {
+    return <FileInput def={def} value={value} onChange={onChange} readOnly={readOnly} />;
   }
   if (def.type === 'dropdown' || def.type === 'select') {
     return (
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cls}>
+      <select
+        id={id}
+        value={value}
+        disabled={readOnly}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        className={cls}
+      >
         <option value="">—</option>
         {(def.options || []).map((o) => (
           <option key={o} value={o}>{o}</option>
@@ -520,7 +680,9 @@ function makeInput(
       id={id}
       type={nativeType[def.type] ?? 'text'}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      disabled={readOnly}
+      readOnly={readOnly}
+      onChange={(e) => !readOnly && onChange(e.target.value)}
       placeholder={def.placeholder || ''}
       className={cls}
     />
@@ -547,6 +709,259 @@ function parseCheckedList(value: string): string[] {
   return [];
 }
 
+export interface AttachedFile {
+  name: string;
+  size: number;
+  type: string;
+  dataUrl: string;
+  lastModified?: number;
+}
+
+/** Parse the JSON-array value of a file attachment field into AttachedFile items. */
+function parseFileList(value: string): AttachedFile[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((f) => f && typeof f === 'object' && f.name);
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FileInput({
+  def,
+  value,
+  onChange,
+  readOnly = false,
+}: {
+  def: ResolvedField;
+  value: string;
+  onChange: (v: string) => void;
+  readOnly?: boolean;
+}) {
+  const [files, setFiles] = useState<AttachedFile[]>(() => parseFileList(value));
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const maxMb = def.maxFileSizeMb || 10;
+  const maxBytes = maxMb * 1024 * 1024;
+  const allowMultiple = Boolean(def.allowMultiple);
+  const maxFiles = def.maxFiles || 5;
+
+  const commit = (next: AttachedFile[]) => {
+    setFiles(next);
+    onChange(JSON.stringify(next));
+  };
+
+  const processFiles = (fileList: FileList | File[]) => {
+    if (readOnly) return;
+    setError(null);
+    const incoming = Array.from(fileList);
+    if (!incoming.length) return;
+
+    if (!allowMultiple && (incoming.length > 1 || files.length >= 1)) {
+      if (incoming.length > 1) {
+        setError('Only a single file attachment is allowed.');
+        return;
+      }
+    }
+
+    if (allowMultiple && files.length + incoming.length > maxFiles) {
+      setError(`Cannot attach more than ${maxFiles} files in total.`);
+      return;
+    }
+
+    // Validate size
+    for (const f of incoming) {
+      if (f.size > maxBytes) {
+        setError(`File "${f.name}" exceeds maximum allowed size of ${maxMb} MB.`);
+        return;
+      }
+    }
+
+    const readers: Promise<AttachedFile>[] = incoming.map(
+      (f) =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            resolve({
+              name: f.name,
+              size: f.size,
+              type: f.type || 'application/octet-stream',
+              dataUrl: reader.result as string,
+              lastModified: f.lastModified,
+            });
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(f);
+        })
+    );
+
+    Promise.all(readers)
+      .then((newAttachments) => {
+        if (!allowMultiple) {
+          commit(newAttachments.slice(0, 1));
+        } else {
+          commit([...files, ...newAttachments]);
+        }
+      })
+      .catch(() => {
+        setError('Failed to read file content.');
+      });
+  };
+
+  const removeFile = (idx: number) => {
+    if (readOnly) return;
+    commit(files.filter((_, i) => i !== idx));
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(e.dataTransfer.files);
+    }
+  };
+
+  if (readOnly && files.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50/60 p-2 text-xs italic text-gray-400">
+        No file attached
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        multiple={allowMultiple}
+        accept={def.accept || undefined}
+        onChange={(e) => {
+          if (e.target.files) {
+            processFiles(e.target.files);
+            e.target.value = '';
+          }
+        }}
+        className="hidden"
+      />
+
+      {/* Dropzone area */}
+      {!readOnly && (!files.length || (allowMultiple && files.length < maxFiles)) && (
+        <div
+          onDragEnter={handleDrag}
+          onDragOver={handleDrag}
+          onDragLeave={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center transition-colors ${
+            dragActive
+              ? 'border-blue-500 bg-blue-50/80'
+              : 'border-gray-300 bg-gray-50/70 hover:border-blue-400 hover:bg-gray-100/70'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+            <Paperclip className="h-4 w-4 shrink-0 text-blue-600" />
+            <span>{def.placeholder || 'Click or drag files to attach'}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-gray-400">
+            {def.accept ? (
+              <span className="rounded bg-gray-200/70 px-1 font-mono text-gray-600">{def.accept}</span>
+            ) : (
+              <span>Any file type</span>
+            )}
+            <span>·</span>
+            <span>Max {maxMb} MB</span>
+            {allowMultiple && (
+              <>
+                <span>·</span>
+                <span>Max {maxFiles} files</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="flex items-center gap-1 text-[11px] font-medium text-red-600">
+          <X className="h-3 w-3" /> {error}
+        </p>
+      )}
+
+      {/* Attached file list */}
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {files.map((f, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 shadow-xs"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                <span className="truncate text-xs font-medium text-gray-800" title={f.name}>
+                  {f.name}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-gray-400">
+                  {formatFileSize(f.size)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {f.dataUrl && (
+                  <a
+                    href={f.dataUrl}
+                    download={f.name}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    Download
+                  </a>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(idx);
+                    }}
+                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                    title="Remove file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Dynamic-row table. Columns come from the form-builder definition (added at
  * build time); rows are added/removed by the user while filling the form.
@@ -569,29 +984,35 @@ function DynamicTable({
   def,
   value,
   onChange,
+  readOnly = false,
 }: {
   def: ResolvedField;
   value: string;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   const cols = def.options && def.options.length > 0 ? def.options : [''];
   const [rows, setRows] = useState<Record<string, string>[]>(() => parseTableRows(value));
 
   const commit = (next: Record<string, string>[]) => {
+    if (readOnly) return;
     setRows(next);
     onChange(JSON.stringify(next.filter((r) => Object.values(r).some((v) => v.trim() !== ''))));
   };
 
   const addRow = () => {
+    if (readOnly) return;
     const empty = Object.fromEntries(cols.map((c) => [c, ''])) as Record<string, string>;
     commit([...rows, empty]);
   };
 
   const removeRow = (idx: number) => {
+    if (readOnly) return;
     commit(rows.filter((_, i) => i !== idx));
   };
 
   const setCell = (rowIdx: number, col: string, cellValue: string) => {
+    if (readOnly) return;
     const next = rows.map((r, i) => (i === rowIdx ? { ...r, [col]: cellValue } : r));
     commit(next);
   };
@@ -607,14 +1028,14 @@ function DynamicTable({
                   {c}
                 </th>
               ))}
-              <th className="w-8 border-b border-gray-200" />
+              {!readOnly && <th className="w-8 border-b border-gray-200" />}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={cols.length + 1} className="px-2 py-2 text-center text-[11px] text-gray-400">
-                  No rows yet — click “Add row”.
+                <td colSpan={cols.length + (readOnly ? 0 : 1)} className="px-2 py-2 text-center text-[11px] text-gray-400">
+                  {readOnly ? 'No table rows entered.' : 'No rows yet — click “Add row”.'}
                 </td>
               </tr>
             )}
@@ -624,58 +1045,70 @@ function DynamicTable({
                   <td key={c} className="border-r border-gray-100 px-1 py-1 last:border-r-0">
                     <input
                       value={row[c] ?? ''}
-                      onChange={(e) => setCell(ri, c, e.target.value)}
-                      className="w-full rounded border border-transparent px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
+                      disabled={readOnly}
+                      readOnly={readOnly}
+                      onChange={(e) => !readOnly && setCell(ri, c, e.target.value)}
+                      className={`w-full rounded border px-1.5 py-1 text-xs ${
+                        readOnly
+                          ? 'border-transparent bg-gray-50 text-gray-600'
+                          : 'border-transparent text-gray-800 focus:border-blue-400 focus:outline-none'
+                      }`}
                     />
                   </td>
                 ))}
-                <td className="px-1 py-1 text-center">
-                  <button
-                    type="button"
-                    onClick={() => removeRow(ri)}
-                    title="Remove row"
-                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </td>
+                {!readOnly && (
+                  <td className="px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => removeRow(ri)}
+                      title="Remove row"
+                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div className="border-t border-gray-200 bg-gray-50/60 px-2 py-1.5">
-        <button
-          type="button"
-          onClick={addRow}
-          className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-        >
-          <Plus className="h-3 w-3" /> Add row
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="border-t border-gray-200 bg-gray-50/60 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={addRow}
+            className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Plus className="h-3 w-3" /> Add row
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): Record<string, unknown> {
-  const byKey = new Map(defs.map((d) => [d.key, d]));
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(values)) {
-    const trimmed = String(v ?? '').trim();
+  for (const def of defs) {
+    const rawVal = values[def.key] ?? values[def.name];
+    if (rawVal === undefined || rawVal === null) continue;
+    const trimmed = String(rawVal).trim();
     if (trimmed === '') continue;
-    const def = byKey.get(k);
-    const name = def?.name ?? k;
-    if (def?.type === 'number') {
+    const name = def.name || def.key;
+    if (def.type === 'number') {
       const n = Number(trimmed);
       out[name] = Number.isNaN(n) ? trimmed : n;
-    } else if (def?.type === 'boolean') {
+    } else if (def.type === 'boolean') {
       out[name] = trimmed === 'yes';
-    } else if (def?.type === 'checkbox_group') {
+    } else if (def.type === 'checkbox_group') {
       out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
-    } else if (def?.type === 'table') {
+    } else if (def.type === 'table') {
       out[name] = parseTableRows(trimmed);
-    } else if (def?.type === 'checklist') {
+    } else if (def.type === 'checklist') {
       out[name] = parseCheckedList(trimmed);
+    } else if (def.type === 'file') {
+      out[name] = parseFileList(trimmed);
     } else {
       out[name] = trimmed;
     }

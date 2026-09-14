@@ -89,7 +89,8 @@ export type GenericFieldType =
   | 'dropdown'
   | 'boolean'
   | 'table'
-  | 'checklist';
+  | 'checklist'
+  | 'file';
 
 export interface EntityField {
   entity_type: string;
@@ -143,6 +144,34 @@ export interface GateTraceItem {
   effective_pass: boolean;
 }
 
+export type ConditionAction = 'hide' | 'show' | 'readonly' | 'editable';
+
+export type ConditionOperator =
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains'
+  | 'is_empty'
+  | 'is_not_empty'
+  | 'greater_than'
+  | 'less_than';
+
+export interface ConditionRule {
+  field: string;
+  operator: ConditionOperator;
+  value?: string;
+}
+
+export interface VisibilityCondition {
+  action: ConditionAction; // 'hide' | 'show' | 'readonly' | 'editable'
+  matchType?: 'all' | 'any'; // 'all' (AND) or 'any' (OR), default 'all'
+  rules?: ConditionRule[];
+  /** Legacy single-rule backward compatibility */
+  field?: string;
+  operator?: ConditionOperator;
+  value?: string;
+}
+
 export interface EntityFormItem {
   i: string;
   x: number;
@@ -150,16 +179,41 @@ export interface EntityFormItem {
   w: number;
   h: number;
   isHeader?: boolean;
+  is_header?: boolean;
+  isGroup?: boolean;
+  is_group?: boolean;
   label?: string | null;
   /** Storage key for submitted custom fields (generic form fields). */
   fieldName?: string | null;
+  field_name?: string | null;
   /** Generic field type — present when the item carries its own definition. */
   fieldType?: GenericFieldType | null;
+  field_type?: GenericFieldType | null;
   required?: boolean;
   options?: string[];
   /** Central published list referenced for options / checklist items. */
   optionsList?: string | null;
+  options_list?: string | null;
+  /** Options or checklist items hidden on this specific form. */
+  hiddenOptions?: string[];
+  hidden_options?: string[];
+  /** Group membership for grouped fields. */
+  groupId?: string | null;
+  group_id?: string | null;
+  groupTitle?: string | null;
+  group_title?: string | null;
+  /** Conditional visibility rule based on another field's state. */
+  visibilityCondition?: VisibilityCondition | null;
+  visibility_condition?: VisibilityCondition | null;
   placeholder?: string | null;
+  /** File attachment configuration */
+  accept?: string | null;
+  maxFileSizeMb?: number | null;
+  max_file_size_mb?: number | null;
+  allowMultiple?: boolean;
+  allow_multiple?: boolean;
+  maxFiles?: number | null;
+  max_files?: number | null;
 }
 
 export interface EntityForm {

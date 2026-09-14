@@ -143,14 +143,41 @@ export const api = {
     layout: EntityFormItem[];
     cols?: number;
     row_height?: number;
-  }): Promise<EntityForm> {
-    return request<EntityForm>('/forms', {
+  }): Promise<EntityForm & { fields?: EntityField[] }> {
+    return request<EntityForm & { fields?: EntityField[] }>('/forms', {
       method: 'POST',
       body: JSON.stringify({
         entity_type: input.entity_type,
         cols: input.cols,
         row_height: input.row_height,
-        layout: input.layout.map((it) => ({ ...it, options_list: it.optionsList ?? null })),
+        layout: input.layout.map((it) => {
+          const isGroup = Boolean(it.isGroup ?? (it as any).is_group ?? it.i?.startsWith('group:'));
+          const isHeader = Boolean(it.isHeader ?? (it as any).is_header ?? it.i?.startsWith('header:'));
+          return {
+            ...it,
+            isGroup,
+            is_group: isGroup,
+            isHeader,
+            is_header: isHeader,
+            optionsList: it.optionsList ?? (it as any).options_list ?? null,
+            options_list: it.optionsList ?? (it as any).options_list ?? null,
+            hiddenOptions: it.hiddenOptions ?? (it as any).hidden_options ?? [],
+            hidden_options: it.hiddenOptions ?? (it as any).hidden_options ?? [],
+            groupId: it.groupId ?? (it as any).group_id ?? (isGroup ? it.i : null),
+            group_id: it.groupId ?? (it as any).group_id ?? (isGroup ? it.i : null),
+            groupTitle: it.groupTitle ?? (it as any).group_title ?? (isGroup ? (it.label || 'Group') : null),
+            group_title: it.groupTitle ?? (it as any).group_title ?? (isGroup ? (it.label || 'Group') : null),
+            visibilityCondition: it.visibilityCondition ?? (it as any).visibility_condition ?? null,
+            visibility_condition: it.visibilityCondition ?? (it as any).visibility_condition ?? null,
+            accept: it.accept ?? (it as any).accept ?? null,
+            maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? null,
+            max_file_size_mb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? null,
+            allowMultiple: Boolean(it.allowMultiple ?? (it as any).allow_multiple),
+            allow_multiple: Boolean(it.allowMultiple ?? (it as any).allow_multiple),
+            maxFiles: it.maxFiles ?? (it as any).max_files ?? null,
+            max_files: it.maxFiles ?? (it as any).max_files ?? null,
+          };
+        }),
       }),
     });
   },

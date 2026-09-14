@@ -155,7 +155,7 @@ def create_entity(
         wf = db.query(WorkflowDefinition).filter(
             WorkflowDefinition.entity_type == entity_type.lower(),
             WorkflowDefinition.status == "published"
-        ).order_by(WorkflowDefinition.created_at.desc()).first()
+        ).order_by(WorkflowDefinition.created_at.desc(), WorkflowDefinition.version_label.desc()).first()
 
         if not wf:
             raise CommandError("no_published_workflow", f"No published workflow definition found for '{entity_type}'")

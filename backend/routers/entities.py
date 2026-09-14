@@ -14,6 +14,7 @@ from backend.services.command_handler import (
     InvalidTransitionError,
     GateFailedError,
 )
+from backend.services.field_validator import FieldValidationError
 from backend.services.simulator import simulate_transition
 from backend.services.projector import rebuild_entity_from_events
 
@@ -90,6 +91,8 @@ def create_entity_endpoint(
         return result
     except CommandError as ce:
         raise HTTPException(status_code=400, detail={"error_code": ce.code, "message": ce.message, "details": ce.details})
+    except FieldValidationError as fve:
+        raise HTTPException(status_code=400, detail={"error_code": "field_validation_error", "message": fve.message, "field_name": fve.field_name})
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 
@@ -125,6 +128,8 @@ def propose_transition_endpoint(
         raise HTTPException(status_code=400, detail={"error_code": "invalid_transition", "message": ite.message, "details": ite.details})
     except CommandError as ce:
         raise HTTPException(status_code=400, detail={"error_code": ce.code, "message": ce.message, "details": ce.details})
+    except FieldValidationError as fve:
+        raise HTTPException(status_code=400, detail={"error_code": "field_validation_error", "message": fve.message, "field_name": fve.field_name})
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
 

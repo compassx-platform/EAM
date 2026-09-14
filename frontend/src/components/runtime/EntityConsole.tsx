@@ -13,6 +13,7 @@ import {
   FileText,
   Check,
   Workflow,
+  Paperclip,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
@@ -24,6 +25,7 @@ import type {
   GateTraceItem,
   ResolvedList,
 } from '../../types';
+import { EntityFormView } from './EntityFormView';
 
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -56,6 +58,46 @@ function entityTitle(e: { custom_fields: Record<string, unknown> }): string | nu
   return null;
 }
 
+function renderCustomFieldValue(v: unknown): ReactNode {
+  if (v === null || v === undefined) return <span className="text-gray-400">—</span>;
+  if (Array.isArray(v)) {
+    if (v.length > 0 && typeof v[0] === 'object' && v[0]?.name) {
+      return (
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          {v.map((f: any, idx: number) => (
+            <span
+              key={idx}
+              className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700"
+            >
+              <Paperclip className="h-3 w-3" />
+              {f.dataUrl ? (
+                <a href={f.dataUrl} download={f.name} className="hover:underline">
+                  {f.name}
+                </a>
+              ) : (
+                <span>{f.name}</span>
+              )}
+            </span>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <span className="max-w-[55%] truncate text-right text-xs font-medium text-gray-800">
+        {v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ')}
+      </span>
+    );
+  }
+  if (typeof v === 'object') {
+    return (
+      <span className="max-w-[55%] truncate text-right font-mono text-xs text-gray-700">
+        {JSON.stringify(v)}
+      </span>
+    );
+  }
+  return <span className="max-w-[55%] truncate text-right text-xs font-medium text-gray-800">{String(v)}</span>;
+}
+
 export function EntityConsole() {
   const route = useHashRoute();
   const [type, setType] = useState(() => route.query.get('type') || 'workorder');
@@ -75,6 +117,7 @@ export function EntityConsole() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [fire, setFire] = useState<ValidTransition | null>(null);
+  const [viewFormEntity, setViewFormEntity] = useState<EntityRecord | null>(null);
 
   const selectedId = route.query.get('selected');
 
@@ -286,12 +329,21 @@ export function EntityConsole() {
                     {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => patchQuery({ selected: e.id })}
-                      className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                    >
-                      Drive <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => setViewFormEntity(e)}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                        title="View filled form layout"
+                      >
+                        <FileText className="h-3.5 w-3.5 text-blue-600" /> Form
+                      </button>
+                      <button
+                        onClick={() => patchQuery({ selected: e.id })}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                      >
+                        Drive <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -310,6 +362,16 @@ export function EntityConsole() {
           onRefresh={reloadDetail}
           onClose={() => patchQuery({ selected: undefined })}
           onFire={(t) => setFire(t)}
+          onViewForm={(ent) => setViewFormEntity(ent)}
+        />
+      )}
+
+      {viewFormEntity && (
+        <EntityFormView
+          entity={viewFormEntity}
+          entityType={type}
+          isModal
+          onClose={() => setViewFormEntity(null)}
         />
       )}
 
@@ -344,6 +406,7 @@ function EntityDetail({
   onRefresh,
   onClose,
   onFire,
+  onViewForm,
 }: {
   entityType: string;
   detail: { entity: EntityRecord; events: EntityEvent[] };
@@ -353,13 +416,14 @@ function EntityDetail({
   onRefresh: () => void;
   onClose: () => void;
   onFire: (t: ValidTransition) => void;
+  onViewForm: (entity: EntityRecord) => void;
 }) {
   const { entity, events } = detail;
 
   return (
     <div className="fixed inset-0 z-20 flex justify-end bg-gray-900/30" onClick={onClose}>
       <aside
-        className="flex h-full w-[420px] flex-col overflow-y-auto bg-white shadow-xl"
+        className="flex h-full w-[440px] flex-col overflow-y-auto bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
@@ -371,16 +435,31 @@ function EntityDetail({
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+        <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-3 bg-gray-50/50">
           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(entity.status)}`}>
             {entity.status}
           </span>
           <span className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-[11px] text-blue-700">{entityType}</span>
           <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-[11px] text-gray-600">{entity.workflow_version}</span>
+          
+          <button
+            onClick={() => onViewForm(entity)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
+          >
+            <FileText className="h-3.5 w-3.5" /> View Filled Form
+          </button>
         </div>
 
         <div className="px-4 pt-3">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Custom fields</label>
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Custom fields</label>
+            <button
+              onClick={() => onViewForm(entity)}
+              className="text-[11px] font-medium text-blue-600 hover:underline"
+            >
+              Open in form layout →
+            </button>
+          </div>
           {Object.keys(entity.custom_fields || {}).length === 0 ? (
             <p className="mt-1 text-xs text-gray-400">No custom fields set.</p>
           ) : (
@@ -388,7 +467,7 @@ function EntityDetail({
               {Object.entries(entity.custom_fields).map(([k, v]) => (
                 <div key={k} className="flex items-baseline justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-1">
                   <span className="font-mono text-[11px] text-gray-500">{k}</span>
-                  <span className="max-w-[55%] truncate text-right text-xs font-medium text-gray-800">{String(v)}</span>
+                  {renderCustomFieldValue(v)}
                 </div>
               ))}
             </div>

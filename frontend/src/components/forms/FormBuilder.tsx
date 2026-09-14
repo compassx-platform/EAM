@@ -38,8 +38,16 @@ import {
   Copy,
   ClipboardCheck,
   Upload,
+  Eye,
+  EyeOff,
+  Layers,
+  FolderPlus,
+  Filter,
+  Paperclip,
+  Lock,
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { formatConditionSummary, getConditionRules } from '../../lib/conditions';
 import type {
   EntityField,
   EntityFormItem,
@@ -47,6 +55,10 @@ import type {
   ChecklistItem,
   ResolvedList,
   OptionListSummary,
+  VisibilityCondition,
+  ConditionOperator,
+  ConditionRule,
+  ConditionAction,
 } from '../../types';
 
 interface FormBuilderProps {
@@ -80,6 +92,7 @@ const FIELD_TYPE_DEFS: FieldTypeDef[] = [
   { type: 'boolean', label: 'Yes / No', hint: 'Single checkbox toggle', defaultFieldName: 'boolean_field', defaultOptions: [], defaultHeight: 1 },
   { type: 'table', label: 'Table', hint: 'Dynamic row grid (columns added here, rows added at fill)', defaultFieldName: 'table_field', defaultOptions: ['Column 1', 'Column 2'], defaultHeight: 3 },
   { type: 'checklist', label: 'Checklist', hint: 'Pre-work checklist from a shared list (required tasks must be ticked)', defaultFieldName: 'checklist_field', defaultOptions: [], defaultHeight: 4 },
+  { type: 'file', label: 'Attachment', hint: 'File / document upload', defaultFieldName: 'attachment_field', defaultOptions: [], defaultHeight: 2 },
 ];
 
 function fieldIcon(type?: string) {
@@ -114,6 +127,8 @@ function fieldIcon(type?: string) {
       return Table2;
     case 'checklist':
       return ListChecks;
+    case 'file':
+      return Paperclip;
     default:
       return FileText;
   }
@@ -151,6 +166,8 @@ function iconColor(type?: string) {
       return 'text-rose-600';
     case 'checklist':
       return 'text-indigo-600';
+    case 'file':
+      return 'text-amber-600';
     default:
       return 'text-gray-400';
   }
@@ -213,33 +230,498 @@ function SizeInputs({
   );
 }
 
+function OptionVisibilityList({
+  items,
+  hiddenOptions = [],
+  onChange,
+}: {
+  items: Array<string | ChecklistItem>;
+  hiddenOptions?: string[];
+  onChange: (hidden: string[]) => void;
+}) {
+  const hiddenSet = new Set(hiddenOptions);
+  const total = items.length;
+  const hiddenCount = items.filter((item) => {
+    const label = typeof item === 'string' ? item : item.label;
+    return hiddenSet.has(label);
+  }).length;
+  const visibleCount = total - hiddenCount;
+
+  const toggle = (label: string) => {
+    const next = new Set(hiddenSet);
+    if (next.has(label)) {
+      next.delete(label);
+    } else {
+      next.add(label);
+    }
+    onChange(Array.from(next));
+  };
+
+  const showAll = () => onChange([]);
+  const hideAll = () => {
+    onChange(items.map((it) => (typeof it === 'string' ? it : it.label)));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between text-[11px] text-gray-500">
+        <span>
+          <span className="font-semibold text-gray-700">{visibleCount}</span> of {total} visible
+          {hiddenCount > 0 && (
+            <span className="ml-1 font-medium text-amber-600">({hiddenCount} hidden)</span>
+          )}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={showAll}
+            className="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            Show all
+          </button>
+          <span className="text-gray-300">·</span>
+          <button
+            type="button"
+            onClick={hideAll}
+            className="text-[10px] font-medium text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            Hide all
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-48 divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 bg-white">
+        {items.map((rawItem) => {
+          const label = typeof rawItem === 'string' ? rawItem : rawItem.label;
+          const isChecklist = typeof rawItem !== 'string';
+          const isHidden = hiddenSet.has(label);
+
+          return (
+            <div
+              key={label}
+              onClick={() => toggle(label)}
+              className={`flex cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-xs transition-colors ${
+                isHidden
+                  ? 'bg-gray-50/80 text-gray-400 hover:bg-gray-100/80'
+                  : 'bg-white text-gray-700 hover:bg-blue-50/50'
+              }`}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className={isHidden ? 'line-through opacity-70 truncate' : 'truncate font-medium'}>
+                  {label}
+                </span>
+                {isChecklist && (rawItem as ChecklistItem).required && (
+                  <span
+                    className={`shrink-0 rounded px-1 text-[9px] font-semibold ${
+                      isHidden ? 'bg-gray-200 text-gray-400' : 'bg-red-50 text-red-600'
+                    }`}
+                  >
+                    required
+                  </span>
+                )}
+                {isChecklist && (rawItem as ChecklistItem).assigned_role && (
+                  <span className="shrink-0 rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">
+                    {(rawItem as ChecklistItem).assigned_role}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(label);
+                }}
+                title={isHidden ? 'Show this option on this form' : 'Hide this option from this form'}
+                className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                  isHidden
+                    ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {isHidden ? (
+                  <>
+                    <EyeOff className="h-3 w-3" /> Hidden
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-3 w-3 text-emerald-600" /> Visible
+                  </>
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ConditionBuilder({
+  condition,
+  availableFields,
+  onChange,
+}: {
+  condition?: VisibilityCondition | null;
+  availableFields: Array<{ name: string; label: string; type?: string; options?: string[] }>;
+  onChange: (cond: VisibilityCondition | null) => void;
+}) {
+  const rules = getConditionRules(condition);
+  const isEnabled = Boolean(condition && rules.length > 0);
+  const action: ConditionAction = condition?.action || 'show';
+  const matchType: 'all' | 'any' = condition?.matchType || 'all';
+
+  const handleToggle = (enabled: boolean) => {
+    if (!enabled) {
+      onChange(null);
+    } else {
+      const defaultField = availableFields[0]?.name || '';
+      onChange({
+        action: 'show',
+        matchType: 'all',
+        rules: [
+          {
+            field: defaultField,
+            operator: 'equals',
+            value: '',
+          },
+        ],
+      });
+    }
+  };
+
+  const handleActionChange = (newAction: ConditionAction) => {
+    const currentRules =
+      rules.length > 0
+        ? rules
+        : [{ field: availableFields[0]?.name || '', operator: 'equals' as ConditionOperator, value: '' }];
+    onChange({
+      action: newAction,
+      matchType,
+      rules: currentRules,
+    });
+  };
+
+  const handleMatchTypeChange = (newMatchType: 'all' | 'any') => {
+    onChange({
+      action,
+      matchType: newMatchType,
+      rules,
+    });
+  };
+
+  const handleAddRule = () => {
+    const nextRules: ConditionRule[] = [
+      ...rules,
+      {
+        field: availableFields[0]?.name || '',
+        operator: 'equals',
+        value: '',
+      },
+    ];
+    onChange({
+      action,
+      matchType,
+      rules: nextRules,
+    });
+  };
+
+  const handleUpdateRule = (index: number, patch: Partial<ConditionRule>) => {
+    const nextRules = rules.map((r, i) => (i === index ? { ...r, ...patch } : r));
+    onChange({
+      action,
+      matchType,
+      rules: nextRules,
+    });
+  };
+
+  const handleRemoveRule = (index: number) => {
+    const nextRules = rules.filter((_, i) => i !== index);
+    if (nextRules.length === 0) {
+      onChange(null);
+    } else {
+      onChange({
+        action,
+        matchType,
+        rules: nextRules,
+      });
+    }
+  };
+
+  if (availableFields.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50/50 p-2 text-center text-[11px] text-gray-400">
+        Add at least one other field to this form to configure conditional logic.
+      </div>
+    );
+  }
+
+  const isReadOnlyAction = action === 'readonly' || action === 'editable';
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-gray-200 bg-gray-50/70 p-2.5">
+      <div className="flex items-center justify-between">
+        <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-700">
+          <input
+            type="checkbox"
+            checked={isEnabled}
+            onChange={(e) => handleToggle(e.target.checked)}
+            className="accent-blue-600"
+          />
+          Enable Conditional Logic
+        </label>
+        {isEnabled && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="text-[10px] text-gray-400 hover:text-red-600 hover:underline"
+          >
+            Clear rules
+          </button>
+        )}
+      </div>
+
+      {isEnabled && (
+        <div className="mt-1 flex flex-col gap-2.5 border-t border-gray-200/80 pt-2">
+          {/* Action Selector */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Effect / Action</span>
+            <select
+              value={action}
+              onChange={(e) => handleActionChange(e.target.value as ConditionAction)}
+              className={INSPECTOR_INPUT}
+            >
+              <optgroup label="Visibility (Show / Hide)">
+                <option value="show">👁 Show when conditions match (hide otherwise)</option>
+                <option value="hide">🙈 Hide when conditions match (show otherwise)</option>
+              </optgroup>
+              <optgroup label="Interactivity (Read-Only / Disabled)">
+                <option value="readonly">🔒 Make Read-Only when conditions match</option>
+                <option value="editable">✏️ Make Editable only when conditions match</option>
+              </optgroup>
+            </select>
+          </div>
+
+          {/* Match Mode (AND / OR) */}
+          {rules.length > 1 && (
+            <div className="flex items-center justify-between rounded bg-gray-100/80 px-2 py-1">
+              <span className="text-[11px] font-medium text-gray-600">Combine logic:</span>
+              <div className="flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-gray-700">
+                  <input
+                    type="radio"
+                    name="matchType"
+                    checked={matchType === 'all'}
+                    onChange={() => handleMatchTypeChange('all')}
+                    className="accent-blue-600"
+                  />
+                  ALL must match (AND)
+                </label>
+                <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-gray-700">
+                  <input
+                    type="radio"
+                    name="matchType"
+                    checked={matchType === 'any'}
+                    onChange={() => handleMatchTypeChange('any')}
+                    className="accent-blue-600"
+                  />
+                  ANY can match (OR)
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Rules List */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                Conditions ({rules.length})
+              </span>
+            </div>
+            {rules.map((rule, idx) => {
+              const selectedTargetField = availableFields.find((f) => f.name === rule.field);
+              const isFirst = idx === 0;
+              return (
+                <div
+                  key={idx}
+                  className="relative flex flex-col gap-1.5 rounded-md border border-gray-200 bg-white p-2 shadow-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-gray-600">
+                      {isFirst ? 'When' : matchType === 'all' ? 'AND' : 'OR'}
+                    </span>
+                    {rules.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRule(idx)}
+                        className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        title="Remove condition clause"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Field Selector */}
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] text-gray-400">Field</label>
+                    <select
+                      value={rule.field}
+                      onChange={(e) => handleUpdateRule(idx, { field: e.target.value, value: '' })}
+                      className={INSPECTOR_INPUT}
+                    >
+                      {availableFields.map((f) => (
+                        <option key={f.name} value={f.name}>
+                          {f.label} ({f.name})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Operator */}
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] text-gray-400">Comparison</label>
+                    <select
+                      value={rule.operator}
+                      onChange={(e) => handleUpdateRule(idx, { operator: e.target.value as ConditionOperator })}
+                      className={INSPECTOR_INPUT}
+                    >
+                      <option value="equals">Equals (is equal to)</option>
+                      <option value="not_equals">Does not equal</option>
+                      <option value="contains">Contains / In group</option>
+                      <option value="not_contains">Does not contain</option>
+                      <option value="is_not_empty">Is filled / checked (not empty)</option>
+                      <option value="is_empty">Is empty / unchecked</option>
+                      <option value="greater_than">Greater than (&gt;)</option>
+                      <option value="less_than">Less than (&lt;)</option>
+                    </select>
+                  </div>
+
+                  {/* Value */}
+                  {rule.operator !== 'is_empty' && rule.operator !== 'is_not_empty' && (
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[10px] text-gray-400">Value</label>
+                      {selectedTargetField?.options && selectedTargetField.options.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          <select
+                            value={rule.value || ''}
+                            onChange={(e) => handleUpdateRule(idx, { value: e.target.value })}
+                            className={INSPECTOR_INPUT}
+                          >
+                            <option value="">Select option…</option>
+                            {selectedTargetField.options.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            value={rule.value || ''}
+                            onChange={(e) => handleUpdateRule(idx, { value: e.target.value })}
+                            placeholder="Or type custom value"
+                            className={`${INSPECTOR_INPUT} text-xs`}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          value={rule.value || ''}
+                          onChange={(e) => handleUpdateRule(idx, { value: e.target.value })}
+                          placeholder={selectedTargetField?.type === 'number' ? 'e.g. 15000' : 'e.g. Yes'}
+                          className={INSPECTOR_INPUT}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={handleAddRule}
+              className="flex items-center justify-center gap-1 rounded border border-dashed border-gray-300 py-1.5 text-[11px] font-medium text-gray-600 hover:border-blue-400 hover:bg-blue-50/50 hover:text-blue-700"
+            >
+              <Plus className="h-3 w-3" /> Add another condition clause ({matchType === 'all' ? 'AND' : 'OR'})
+            </button>
+          </div>
+
+          {/* Summary Preview */}
+          <div
+            className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1.5 text-[11px] font-medium ${
+              isReadOnlyAction ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-700'
+            }`}
+          >
+            {isReadOnlyAction ? <Lock className="h-3 w-3 shrink-0" /> : <Filter className="h-3 w-3 shrink-0" />}
+            <span className="truncate">{formatConditionSummary(condition)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Non-interactive preview of the control a field will render as in the real
 // form, using the exact same widget styling as the fill-in form.
 // pointer-events-none keeps drag/clicks from fighting the grid.
 function ControlPreview({
   type,
   options,
+  hiddenOptions = [],
   placeholder,
   resolved,
   height = 3,
+  item,
 }: {
   type?: string;
   options?: string[];
+  hiddenOptions?: string[];
   placeholder?: string | null;
   resolved?: ResolvedList | null;
   height?: number;
+  item?: EntityFormItem;
 }) {
   const inputCls =
     'pointer-events-none w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 select-none';
   const choiceCls = 'flex items-center gap-1 text-xs text-gray-700';
   const choiceInput = 'pointer-events-none accent-blue-600';
 
+  const hiddenSet = new Set(hiddenOptions || []);
+
   const resolvedStrings = resolved && resolved.kind === 'options'
     ? (resolved.items as string[])
     : [];
-  const displayedOptions = resolved && resolved.kind === 'options'
+  const allOptions = resolved && resolved.kind === 'options'
     ? resolvedStrings
     : (options ?? []);
+
+  const displayedOptions = allOptions.filter((o) => !hiddenSet.has(o));
+  const hiddenCount = allOptions.length - displayedOptions.length;
+
+  if (type === 'file') {
+    return (
+      <div className="pointer-events-none flex h-full w-full flex-col justify-center rounded-md border-2 border-dashed border-gray-300 bg-gray-50/70 p-2 text-center select-none">
+        <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-700">
+          <Paperclip className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+          <span className="truncate">{placeholder || 'Click or drag files to attach'}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
+          {item?.accept && (
+            <span className="rounded bg-gray-200/90 px-1 font-mono text-[9px] text-gray-600">
+              {item.accept}
+            </span>
+          )}
+          <span className="rounded bg-blue-50 px-1 font-mono text-[9px] text-blue-700">
+            Max {item?.maxFileSizeMb || 10} MB
+          </span>
+          {item?.allowMultiple && (
+            <span className="rounded bg-purple-50 px-1 font-mono text-[9px] text-purple-700">
+              Multiple (up to {item?.maxFiles || 5})
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (type === 'long_text') {
     return (
@@ -252,14 +734,21 @@ function ControlPreview({
   }
 
   if (type === 'checklist') {
-    const tasks = resolved && resolved.kind === 'checklist'
+    const rawTasks = resolved && resolved.kind === 'checklist'
       ? (resolved.items as ChecklistItem[])
       : null;
+    const tasks = rawTasks ? rawTasks.filter((t) => !hiddenSet.has(t.label)) : null;
+    const hiddenTasksCount = rawTasks ? rawTasks.length - (tasks?.length ?? 0) : 0;
+
     return (
       <div className="pointer-events-none w-full select-none rounded-md border border-gray-300 bg-white">
-        {!tasks || tasks.length === 0 ? (
+        {!rawTasks || rawTasks.length === 0 ? (
           <span className="block px-2 py-1.5 text-[11px] text-gray-400">
             Pick a published checklist list in the inspector
+          </span>
+        ) : tasks?.length === 0 ? (
+          <span className="block px-2 py-1.5 text-[11px] italic text-amber-600">
+            All {rawTasks.length} task(s) hidden on this form
           </span>
         ) : (
           <div className="flex flex-col divide-y divide-gray-100">
@@ -273,6 +762,11 @@ function ControlPreview({
                 )}
               </span>
             ))}
+            {hiddenTasksCount > 0 && (
+              <span className="bg-amber-50/60 px-2 py-0.5 text-[10px] text-amber-700">
+                + {hiddenTasksCount} task(s) hidden
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -280,11 +774,13 @@ function ControlPreview({
   }
 
   if (type === 'table') {
-    const cols = options && options.length > 0 ? options : ['Column 1', 'Column 2'];
+    const rawCols = options && options.length > 0 ? options : ['Column 1', 'Column 2'];
+    const cols = rawCols.filter((c) => !hiddenSet.has(c));
+    const effectiveCols = cols.length > 0 ? cols : ['(No visible columns)'];
     return (
       <div className="pointer-events-none w-full select-none overflow-hidden rounded-md border border-gray-300 bg-white text-xs text-gray-700">
         <div className="flex border-b border-gray-200 bg-gray-50">
-          {cols.map((c, i) => (
+          {effectiveCols.map((c, i) => (
             <span
               key={i}
               className="flex-1 truncate border-r border-gray-200 px-2 py-1.5 font-medium text-gray-500 last:border-r-0"
@@ -301,8 +797,15 @@ function ControlPreview({
   }
 
   if (type === 'selection' || type === 'checkbox_group') {
-    if (!displayedOptions || displayedOptions.length === 0) {
+    if (!allOptions || allOptions.length === 0) {
       return <span className="text-[11px] text-gray-400">No options defined</span>;
+    }
+    if (displayedOptions.length === 0) {
+      return (
+        <span className="text-[11px] italic text-amber-600">
+          All {allOptions.length} option(s) hidden on this form
+        </span>
+      );
     }
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -316,6 +819,11 @@ function ControlPreview({
             {o}
           </label>
         ))}
+        {hiddenCount > 0 && (
+          <span className="rounded bg-amber-50 px-1 font-mono text-[9px] text-amber-700">
+            +{hiddenCount} hidden
+          </span>
+        )}
         {resolved?.version_label && (
           <span className="rounded bg-emerald-50 px-1 font-mono text-[9px] text-emerald-600">
             {resolved.list_key} · {resolved.version_label}
@@ -400,9 +908,33 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       try {
         const form = await api.getForm(entityType);
         if (cancelled) return;
-        const layout = ((form.layout || []) as Array<EntityFormItem & { options_list?: string | null }>).map(
-          (it) => ({ ...it, optionsList: it.options_list ?? it.optionsList, options_list: undefined })
-        );
+        const layout = ((form.layout || []) as Array<any>).map((it) => {
+          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
+          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+          return {
+            ...it,
+            isHeader,
+            isGroup,
+            is_header: undefined,
+            is_group: undefined,
+            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
+            fieldType: it.fieldType ?? it.field_type ?? null,
+            optionsList: it.optionsList ?? it.options_list ?? null,
+            options_list: undefined,
+            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
+            hidden_options: undefined,
+            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
+            group_id: undefined,
+            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
+            group_title: undefined,
+            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
+            visibility_condition: undefined,
+            accept: it.accept ?? it.accept ?? null,
+            maxFileSizeMb: it.maxFileSizeMb ?? it.max_file_size_mb ?? null,
+            allowMultiple: Boolean(it.allowMultiple ?? it.allow_multiple),
+            maxFiles: it.maxFiles ?? it.max_files ?? null,
+          };
+        });
         setItems(layout);
         setFields(form.fields || []);
         setCols(form.cols || 12);
@@ -465,6 +997,29 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setDirty(true);
   };
 
+  const addGroup = () => {
+    const y = nextY(items, cols);
+    const id = nextItemId('group');
+    const groupCount = items.filter((it) => it.isGroup).length + 1;
+    const groupTitle = `Group ${groupCount}`;
+    setItems((prev) => [
+      ...prev,
+      {
+        i: id,
+        x: 0,
+        y,
+        w: cols,
+        h: 1,
+        isGroup: true,
+        groupId: id,
+        label: groupTitle,
+        groupTitle: groupTitle,
+      },
+    ]);
+    setSelected(id);
+    setDirty(true);
+  };
+
   const addField = (type: GenericFieldType) => {
     const def = FIELD_TYPE_DEFS.find((d) => d.type === type)!;
     const usedNames = new Set(items.map((it) => it.fieldName).filter((n): n is string => Boolean(n)));
@@ -487,7 +1042,11 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         fieldType: type,
         required: false,
         options: [...def.defaultOptions],
-        placeholder: '',
+        placeholder: type === 'file' ? 'Attach files or documents' : '',
+        accept: type === 'file' ? '' : undefined,
+        maxFileSizeMb: type === 'file' ? 10 : undefined,
+        allowMultiple: type === 'file' ? true : undefined,
+        maxFiles: type === 'file' ? 5 : undefined,
       },
     ]);
     setSelected(id);
@@ -564,12 +1123,42 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setSaving(true);
     setNotice(null);
     try {
-      await api.saveForm({
+      const res = await api.saveForm({
         entity_type: entityType,
         layout: items,
         cols,
         row_height: rowHeight,
       });
+      if (res && Array.isArray(res.layout)) {
+        const layout = (res.layout as Array<any>).map((it) => {
+          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
+          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+          return {
+            ...it,
+            isHeader,
+            isGroup,
+            is_header: undefined,
+            is_group: undefined,
+            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
+            fieldType: it.fieldType ?? it.field_type ?? null,
+            optionsList: it.optionsList ?? it.options_list ?? null,
+            options_list: undefined,
+            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
+            hidden_options: undefined,
+            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
+            group_id: undefined,
+            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
+            group_title: undefined,
+            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
+            visibility_condition: undefined,
+            accept: it.accept ?? (it as any).accept ?? null,
+            maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? null,
+            allowMultiple: Boolean(it.allowMultiple ?? (it as any).allow_multiple),
+            maxFiles: it.maxFiles ?? (it as any).max_files ?? null,
+          };
+        });
+        setItems(layout);
+      }
       setDirty(false);
       onChanged();
       flash('ok', 'Form layout saved.');
@@ -664,14 +1253,29 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     const nextCols = Number.isFinite(Number(obj.cols)) && Number(obj.cols) >= 1 ? Math.round(Number(obj.cols)) : cols;
     const nextRowHeight =
       Number.isFinite(Number(obj.row_height)) && Number(obj.row_height) >= 1 ? Math.round(Number(obj.row_height)) : rowHeight;
-    const normalized: EntityFormItem[] = layout.map((it) => ({
-      i: it.i,
-      x: Number.isFinite(Number(it.x)) ? Math.max(0, Math.round(Number(it.x))) : 0,
-      y: Number.isFinite(Number(it.y)) ? Math.max(0, Math.round(Number(it.y))) : 0,
-      w: Number.isFinite(Number(it.w)) ? Math.max(1, Math.min(nextCols, Math.round(Number(it.w)))) : 6,
-      h: Number.isFinite(Number(it.h)) ? Math.max(1, Math.round(Number(it.h))) : 1,
-      ...it,
-    }));
+    const normalized: EntityFormItem[] = layout.map((it) => {
+      const isGroup = Boolean(it.isGroup ?? (it as any).is_group ?? it.i?.startsWith('group:'));
+      const isHeader = Boolean(it.isHeader ?? (it as any).is_header ?? it.i?.startsWith('header:'));
+      return {
+        ...it,
+        i: it.i,
+        x: Number.isFinite(Number(it.x)) ? Math.max(0, Math.round(Number(it.x))) : 0,
+        y: Number.isFinite(Number(it.y)) ? Math.max(0, Math.round(Number(it.y))) : 0,
+        w: Number.isFinite(Number(it.w)) ? Math.max(1, Math.min(nextCols, Math.round(Number(it.w)))) : 6,
+        h: Number.isFinite(Number(it.h)) ? Math.max(1, Math.round(Number(it.h))) : 1,
+        isHeader,
+        isGroup,
+        optionsList: (it as any).options_list ?? it.optionsList ?? null,
+        hiddenOptions: (it as any).hidden_options ?? it.hiddenOptions ?? [],
+        groupId: it.groupId ?? (it as any).group_id ?? (isGroup ? it.i : null),
+        groupTitle: it.groupTitle ?? (it as any).group_title ?? (isGroup ? (it.label || 'Group') : null),
+        visibilityCondition: it.visibilityCondition ?? (it as any).visibility_condition ?? null,
+        accept: it.accept ?? (it as any).accept ?? null,
+        maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? null,
+        allowMultiple: Boolean(it.allowMultiple ?? (it as any).allow_multiple),
+        maxFiles: it.maxFiles ?? (it as any).max_files ?? null,
+      };
+    });
     setItems(normalized);
     setCols(nextCols);
     setRowHeight(nextRowHeight);
@@ -680,6 +1284,34 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setDirty(true);
     flash('ok', `Imported ${normalized.length} item(s) from JSON. Review and Save to persist.`);
   };
+
+  const availableGroups = items
+    .filter((it) => it.isGroup)
+    .map((it) => ({
+      id: it.groupId || it.i,
+      title: it.groupTitle || it.label || it.i,
+      item: it,
+    }));
+
+  const targetFieldOptions = items
+    .filter((it) => !it.isHeader && !it.isGroup && it.i !== selectedItem?.i)
+    .map((it) => {
+      const fieldName = it.fieldName || it.i;
+      const label = it.label || fieldName;
+      let opts = it.options || [];
+      if (it.optionsList && resolved[it.optionsList]?.kind === 'options') {
+        opts = resolved[it.optionsList].items as string[];
+      }
+      if (it.fieldType === 'boolean' && (!opts || opts.length === 0)) {
+        opts = ['yes', 'no'];
+      }
+      return {
+        name: fieldName,
+        label,
+        type: it.fieldType || 'text',
+        options: opts,
+      };
+    });
 
   return (
     <div className="flex h-full flex-col">
@@ -745,13 +1377,21 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         {/* Palette */}
         <div className="flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-gray-200 bg-gray-50 p-3">
           <div>
-            <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Sections</h3>
-            <button
-              onClick={addHeading}
-              className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-2.5 py-2 text-left text-sm text-gray-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
-            >
-              <Heading className="h-4 w-4 shrink-0 text-indigo-500" /> Add section heading
-            </button>
+            <h3 className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Sections & Groups</h3>
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={addHeading}
+                className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-2.5 py-2 text-left text-sm text-gray-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                <Heading className="h-4 w-4 shrink-0 text-indigo-500" /> Add section heading
+              </button>
+              <button
+                onClick={addGroup}
+                className="flex w-full items-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-2.5 py-2 text-left text-sm text-gray-600 hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700"
+              >
+                <Layers className="h-4 w-4 shrink-0 text-purple-600" /> Add form group
+              </button>
+            </div>
           </div>
 
           <div>
@@ -788,7 +1428,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
               </summary>
               <div className="px-2 pb-2">
                 {fields
-                  .filter((f) => !items.some((it) => !it.isHeader && (it.fieldName || it.i) === f.field_name))
+                  .filter((f) => !items.some((it) => !it.isHeader && !it.isGroup && (it.fieldName || it.i) === f.field_name))
                   .map((f) => (
                     <div
                       key={f.field_name}
@@ -815,7 +1455,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
               <MousePointerClick className="h-8 w-8 text-gray-300" />
               <p className="text-sm font-semibold text-gray-400">Your form is empty</p>
               <p className="max-w-xs text-xs leading-relaxed text-gray-400">
-                Drop a section heading or a field block from the palette on the left to start building this form.
+                Drop a section heading, form group, or a field block from the palette on the left to start building this form.
               </p>
             </div>
           )}
@@ -833,13 +1473,87 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
             >
               {items.map((it) => {
                 const isSelected = selected === it.i;
-                const type = it.isHeader
+                const type = it.isHeader || it.isGroup
                   ? undefined
                   : it.fieldType ?? fields.find((f) => f.field_name === it.i)?.field_type;
-                const label = it.isHeader ? it.label : it.label || it.fieldName || it.i;
+                const label = it.isHeader || it.isGroup ? it.label : it.label || it.fieldName || it.i;
                 const stateCls = isSelected
                   ? 'border-blue-400 bg-blue-50/50'
                   : 'border-transparent hover:border-gray-200 hover:bg-gray-50/70';
+
+                const groupName = it.groupId ? availableGroups.find((g) => g.id === it.groupId)?.title : null;
+
+                if (it.isGroup) {
+                  return (
+                    <div
+                      key={it.i}
+                      onClick={() => setSelected(it.i)}
+                      className={`drag-handle cursor-grab group flex h-full w-full items-center justify-between gap-2 rounded-md border border-purple-200 bg-purple-50/60 px-3 transition-colors ${
+                        isSelected ? 'border-purple-500 ring-2 ring-purple-200' : 'hover:border-purple-300 hover:bg-purple-50'
+                      }`}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <GripVertical className="h-4 w-4 shrink-0 text-purple-300 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <Layers className="h-4 w-4 shrink-0 text-purple-600" />
+                        <span className="truncate text-sm font-bold text-purple-900">{label || 'Form Group'}</span>
+                        <span className="rounded bg-purple-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800">
+                          Form Group
+                        </span>
+                      </div>
+
+                      {it.visibilityCondition && (
+                        <span
+                          className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-purple-100 text-purple-700'
+                          }`}
+                        >
+                          {it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable' ? (
+                            <Lock className="h-3 w-3" />
+                          ) : (
+                            <Filter className="h-3 w-3" />
+                          )}{' '}
+                          {formatConditionSummary(it.visibilityCondition)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (it.isHeader) {
+                  return (
+                    <div
+                      key={it.i}
+                      onClick={() => setSelected(it.i)}
+                      className={`drag-handle cursor-grab group flex h-full w-full items-center justify-between gap-2 rounded-md border border-indigo-100 bg-indigo-50/40 px-3 transition-colors ${
+                        isSelected ? 'border-indigo-500 ring-2 ring-indigo-200' : 'hover:border-indigo-200 hover:bg-indigo-50/70'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-indigo-700 truncate">
+                        <GripVertical className="h-4 w-4 shrink-0 text-indigo-300 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <Heading className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{label}</span>
+                      </span>
+                      {it.visibilityCondition && (
+                        <span
+                          className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-indigo-100 text-indigo-700'
+                          }`}
+                        >
+                          {it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable' ? (
+                            <Lock className="h-3 w-3" />
+                          ) : (
+                            <Filter className="h-3 w-3" />
+                          )}{' '}
+                          {formatConditionSummary(it.visibilityCondition)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -847,29 +1561,50 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                     onClick={() => setSelected(it.i)}
                     className={`drag-handle cursor-grab group flex h-full w-full items-center gap-2 rounded-md border px-2 transition-colors ${stateCls}`}
                   >
-                    {it.isHeader ? (
-                      <span className="flex w-full items-center gap-1.5 text-sm font-semibold text-indigo-700">
-                        <GripVertical className="h-4 w-4 shrink-0 text-indigo-300 opacity-0 transition-opacity group-hover:opacity-100" />
-                        <Heading className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{label}</span>
+                    <GripVertical className="h-4 w-4 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <div className="flex w-36 shrink-0 flex-col truncate">
+                      <span className="truncate text-xs font-medium text-gray-700">
+                        {label}
+                        {it.required && <span className="text-red-500">*</span>}
                       </span>
-                    ) : (
-                      <>
-                        <GripVertical className="h-4 w-4 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
-                        <span className="w-32 shrink-0 truncate text-xs font-medium text-gray-700">
-                          {label}
-                          {it.required && <span className="text-red-500">*</span>}
-                        </span>
-                        {type && (
-                          <span className="shrink-0 rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">
-                            {type}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {groupName && (
+                          <span className="inline-block max-w-[100px] truncate rounded bg-purple-50 px-1 font-mono text-[9px] text-purple-700">
+                            📁 {groupName}
                           </span>
                         )}
-                        <div className="min-w-0 flex-1">
-                          <ControlPreview type={type} options={it.options} placeholder={it.placeholder} resolved={resolvedFor(it)} height={it.h} />
-                        </div>
-                      </>
+                        {it.visibilityCondition && (
+                          <span
+                            className={`inline-block max-w-[120px] truncate rounded px-1 font-mono text-[9px] ${
+                              it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable'
+                                ? 'bg-amber-50 text-amber-700'
+                                : 'bg-indigo-50 text-indigo-700'
+                            }`}
+                            title={formatConditionSummary(it.visibilityCondition)}
+                          >
+                            {it.visibilityCondition.action === 'readonly' || it.visibilityCondition.action === 'editable'
+                              ? '🔒 Read-only'
+                              : '👁 Cond'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {type && (
+                      <span className="shrink-0 rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">
+                        {type}
+                      </span>
                     )}
+                    <div className="min-w-0 flex-1">
+                      <ControlPreview
+                        type={type}
+                        options={it.options}
+                        hiddenOptions={it.hiddenOptions}
+                        placeholder={it.placeholder}
+                        resolved={resolvedFor(it)}
+                        height={it.h}
+                        item={it}
+                      />
+                    </div>
                   </div>
                 );
               })}
@@ -885,7 +1620,13 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
           <div className="border-b border-gray-100 px-4 py-3">
             <h3 className="text-sm font-bold text-gray-800">Inspector</h3>
             <p className="mt-0.5 text-[11px] text-gray-400">
-              {selectedItem ? (selectedItem.isHeader ? 'Section settings' : 'Field settings') : 'Nothing selected'}
+              {selectedItem
+                ? selectedItem.isGroup
+                  ? 'Form Group settings'
+                  : selectedItem.isHeader
+                  ? 'Section settings'
+                  : 'Field settings'
+                : 'Nothing selected'}
             </p>
           </div>
 
@@ -895,9 +1636,90 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                 <MousePointerClick className="h-6 w-6 text-gray-300" />
                 <p className="text-xs font-medium text-gray-400">Nothing selected</p>
                 <p className="max-w-[190px] text-[11px] leading-relaxed text-gray-300">
-                  Click a field or section on the canvas to edit it here.
+                  Click a field, section, or form group on the canvas to edit it here.
                 </p>
               </div>
+            ) : selectedItem.isGroup ? (
+              <>
+                <InspectorField label="Group title">
+                  <input
+                    value={selectedItem.label ?? selectedItem.groupTitle ?? ''}
+                    onChange={(e) =>
+                      patchItem(selectedItem.i, { label: e.target.value, groupTitle: e.target.value })
+                    }
+                    placeholder="Group Title"
+                    className={INSPECTOR_INPUT}
+                  />
+                </InspectorField>
+
+                <InspectorField
+                  label="Member fields"
+                  hint="Fields assigned to this group in their inspector settings."
+                >
+                  <div className="flex flex-col gap-1 rounded-md border border-gray-200 bg-gray-50/70 p-2 text-xs text-gray-700">
+                    <span className="font-semibold text-gray-800">
+                      {
+                        items.filter(
+                          (it) => !it.isHeader && !it.isGroup && it.groupId === (selectedItem.groupId || selectedItem.i)
+                        ).length
+                      }{' '}
+                      field(s) in this group
+                    </span>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {items
+                        .filter(
+                          (it) => !it.isHeader && !it.isGroup && it.groupId === (selectedItem.groupId || selectedItem.i)
+                        )
+                        .map((f) => (
+                          <span
+                            key={f.i}
+                            className="rounded bg-purple-100 px-1.5 py-0.5 font-mono text-[10px] text-purple-700"
+                          >
+                            {f.label || f.fieldName || f.i}
+                          </span>
+                        ))}
+                      {items.filter(
+                        (it) => !it.isHeader && !it.isGroup && it.groupId === (selectedItem.groupId || selectedItem.i)
+                      ).length === 0 && (
+                        <span className="text-[11px] italic text-gray-400">
+                          No fields assigned yet. Select any field and assign it to this group.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </InspectorField>
+
+                <InspectorField
+                  label="Group Conditional Logic"
+                  hint="Controls dynamic visibility or read-only state for this entire group and all its member fields together."
+                >
+                  <ConditionBuilder
+                    condition={selectedItem.visibilityCondition}
+                    availableFields={targetFieldOptions}
+                    onChange={(cond) => patchItem(selectedItem.i, { visibilityCondition: cond })}
+                  />
+                </InspectorField>
+
+                <InspectorField label="Size" hint="Width in columns · height in rows.">
+                  <SizeInputs item={selectedItem} maxW={cols} onChange={(p) => patchItem(selectedItem.i, p)} />
+                </InspectorField>
+
+                <button
+                  onClick={() => {
+                    const gid = selectedItem.groupId || selectedItem.i;
+                    setItems((prev) =>
+                      prev
+                        .filter((it) => it.i !== selectedItem.i)
+                        .map((it) => (it.groupId === gid ? { ...it, groupId: null, groupTitle: null } : it))
+                    );
+                    setSelected(null);
+                    setDirty(true);
+                  }}
+                  className="mt-1 flex items-center justify-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete group
+                </button>
+              </>
             ) : selectedItem.isHeader ? (
               <>
                 <InspectorField label="Heading text">
@@ -909,9 +1731,27 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   />
                 </InspectorField>
 
+                <InspectorField
+                  label="Conditional Logic"
+                  hint="Hide or show this section header dynamically based on form conditions."
+                >
+                  <ConditionBuilder
+                    condition={selectedItem.visibilityCondition}
+                    availableFields={targetFieldOptions}
+                    onChange={(cond) => patchItem(selectedItem.i, { visibilityCondition: cond })}
+                  />
+                </InspectorField>
+
                 <InspectorField label="Size" hint="Width in columns · height in rows.">
                   <SizeInputs item={selectedItem} maxW={cols} onChange={(p) => patchItem(selectedItem.i, p)} />
                 </InspectorField>
+
+                <button
+                  onClick={() => removeItem(selectedItem.i)}
+                  className="mt-1 flex items-center justify-center gap-1.5 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" /> Delete section
+                </button>
               </>
             ) : (
               <>
@@ -956,12 +1796,24 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   selectedItem.fieldType === 'number' ||
                   selectedItem.fieldType === 'email' ||
                   selectedItem.fieldType === 'phone' ||
-                  selectedItem.fieldType === 'url') && (
-                  <InspectorField label="Placeholder" hint="Shown inside the control when it is empty.">
+                  selectedItem.fieldType === 'url' ||
+                  selectedItem.fieldType === 'file') && (
+                  <InspectorField
+                    label={selectedItem.fieldType === 'file' ? 'Upload prompt text' : 'Placeholder'}
+                    hint={
+                      selectedItem.fieldType === 'file'
+                        ? 'Shown inside the dropzone area.'
+                        : 'Shown inside the control when it is empty.'
+                    }
+                  >
                     <input
                       value={selectedItem.placeholder ?? ''}
                       onChange={(e) => patchItem(selectedItem.i, { placeholder: e.target.value })}
-                      placeholder="Optional hint text"
+                      placeholder={
+                        selectedItem.fieldType === 'file'
+                          ? 'e.g. Click or drag files to attach'
+                          : 'Optional hint text'
+                      }
                       className={INSPECTOR_INPUT}
                     />
                   </InspectorField>
@@ -983,7 +1835,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                           if (e.target.value === 'list' && !selectedItem.optionsList) {
                             patchItem(selectedItem.i, { optionsList: '' });
                           } else if (e.target.value === 'inline') {
-                            patchItem(selectedItem.i, { optionsList: null });
+                            patchItem(selectedItem.i, { optionsList: null, hiddenOptions: [] });
                           }
                         }}
                         className={INSPECTOR_INPUT}
@@ -994,38 +1846,53 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                     </InspectorField>
 
                     {selectedItem.optionsList !== undefined && selectedItem.optionsList !== null ? (
-                      <InspectorField
-                        label={selectedItem.fieldType === 'table' ? 'Shared list' : 'Shared list'}
-                        hint="Saved form items reference the list key — the newest published version wins."
-                      >
-                        <select
-                          value={selectedItem.optionsList}
-                          onChange={(e) => {
-                            patchItem(selectedItem.i, { optionsList: e.target.value || '' });
-                            ensureResolved([e.target.value]);
-                          }}
-                          className={INSPECTOR_INPUT}
+                      <>
+                        <InspectorField
+                          label={selectedItem.fieldType === 'table' ? 'Shared list' : 'Shared list'}
+                          hint="Saved form items reference the list key — the newest published version wins."
                         >
-                          <option value="">Pick a published list…</option>
-                          {optionLists.map((l) => (
-                            <option key={l.list_key} value={l.list_key}>
-                              {l.list_key} ({l.published_version})
-                            </option>
-                          ))}
-                        </select>
-                        {resolvedFor(selectedItem) ? (
-                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
-                            {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
-                            {resolvedFor(selectedItem)!.items.length} item(s)
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-gray-400">
-                            {optionLists.length === 0
-                              ? 'No published options lists yet — create one in the Lists tab.'
-                              : 'Resolving…'}
-                          </span>
+                          <select
+                            value={selectedItem.optionsList}
+                            onChange={(e) => {
+                              patchItem(selectedItem.i, { optionsList: e.target.value || '', hiddenOptions: [] });
+                              ensureResolved([e.target.value]);
+                            }}
+                            className={INSPECTOR_INPUT}
+                          >
+                            <option value="">Pick a published list…</option>
+                            {optionLists.map((l) => (
+                              <option key={l.list_key} value={l.list_key}>
+                                {l.list_key} ({l.published_version})
+                              </option>
+                            ))}
+                          </select>
+                          {resolvedFor(selectedItem) ? (
+                            <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
+                              {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
+                              {resolvedFor(selectedItem)!.items.length} item(s)
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">
+                              {optionLists.length === 0
+                                ? 'No published options lists yet — create one in the Lists tab.'
+                                : 'Resolving…'}
+                            </span>
+                          )}
+                        </InspectorField>
+
+                        {resolvedFor(selectedItem) && resolvedFor(selectedItem)!.items.length > 0 && (
+                          <InspectorField
+                            label="Option visibility on this form"
+                            hint="The shared list stays intact. Click any option to hide or show it for this specific form."
+                          >
+                            <OptionVisibilityList
+                              items={resolvedFor(selectedItem)!.items}
+                              hiddenOptions={selectedItem.hiddenOptions}
+                              onChange={(hidden) => patchItem(selectedItem.i, { hiddenOptions: hidden })}
+                            />
+                          </InspectorField>
                         )}
-                      </InspectorField>
+                      </>
                     ) : (
                       <InspectorField
                         label={selectedItem.fieldType === 'table' ? 'Columns' : 'Options'}
@@ -1066,39 +1933,231 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                 )}
 
                 {selectedItem.fieldType === 'checklist' && (
-                  <InspectorField
-                    label="Checklist list"
-                    hint="Checks the tasks from a published checklist list. Required tasks must all be ticked before the form can submit."
-                  >
-                    <select
-                      value={selectedItem.optionsList ?? ''}
-                      onChange={(e) => {
-                        patchItem(selectedItem.i, { optionsList: e.target.value || '' });
-                        ensureResolved([e.target.value]);
-                      }}
-                      className={INSPECTOR_INPUT}
+                  <>
+                    <InspectorField
+                      label="Checklist list"
+                      hint="Checks the tasks from a published checklist list. Required tasks must all be ticked before the form can submit."
                     >
-                      <option value="">Pick a published checklist list…</option>
-                      {checklistLists.map((l) => (
-                        <option key={l.list_key} value={l.list_key}>
-                          {l.list_key} ({l.published_version})
-                        </option>
-                      ))}
-                    </select>
-                    {resolvedFor(selectedItem) ? (
-                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
-                        {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
-                        {resolvedFor(selectedItem)!.items.length} task(s)
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-gray-400">
-                        {checklistLists.length === 0
-                          ? 'No published checklist lists yet — create one in the Lists tab.'
-                          : 'Resolving…'}
-                      </span>
+                      <select
+                        value={selectedItem.optionsList ?? ''}
+                        onChange={(e) => {
+                          patchItem(selectedItem.i, { optionsList: e.target.value || '', hiddenOptions: [] });
+                          ensureResolved([e.target.value]);
+                        }}
+                        className={INSPECTOR_INPUT}
+                      >
+                        <option value="">Pick a published checklist list…</option>
+                        {checklistLists.map((l) => (
+                          <option key={l.list_key} value={l.list_key}>
+                            {l.list_key} ({l.published_version})
+                          </option>
+                        ))}
+                      </select>
+                      {resolvedFor(selectedItem) ? (
+                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600">
+                          {resolvedFor(selectedItem)!.list_key} · {resolvedFor(selectedItem)!.version_label} ·{' '}
+                          {resolvedFor(selectedItem)!.items.length} task(s)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-400">
+                          {checklistLists.length === 0
+                            ? 'No published checklist lists yet — create one in the Lists tab.'
+                            : 'Resolving…'}
+                        </span>
+                      )}
+                    </InspectorField>
+
+                    {resolvedFor(selectedItem) && resolvedFor(selectedItem)!.items.length > 0 && (
+                      <InspectorField
+                        label="Task visibility on this form"
+                        hint="The shared list stays intact. Click any task to hide or show it for this specific form."
+                      >
+                        <OptionVisibilityList
+                          items={resolvedFor(selectedItem)!.items}
+                          hiddenOptions={selectedItem.hiddenOptions}
+                          onChange={(hidden) => patchItem(selectedItem.i, { hiddenOptions: hidden })}
+                        />
+                      </InspectorField>
                     )}
-                  </InspectorField>
+                  </>
                 )}
+
+                {selectedItem.fieldType === 'file' && (
+                  <>
+                    <InspectorField
+                      label="Accepted file types"
+                      hint="Comma-separated extensions or MIME types (e.g. .pdf,.png,.jpg or image/*)."
+                    >
+                      <input
+                        value={selectedItem.accept ?? ''}
+                        onChange={(e) => patchItem(selectedItem.i, { accept: e.target.value })}
+                        placeholder="* or .pdf,.png,.jpg,.docx"
+                        className={`${INSPECTOR_INPUT} font-mono`}
+                      />
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {[
+                          { label: 'All files', val: '' },
+                          { label: 'PDF only', val: '.pdf' },
+                          { label: 'Images', val: 'image/*,.png,.jpg,.jpeg' },
+                          { label: 'Documents', val: '.pdf,.doc,.docx,.txt' },
+                          { label: 'Spreadsheets', val: '.xlsx,.xls,.csv' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => patchItem(selectedItem.i, { accept: preset.val })}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                              (selectedItem.accept ?? '') === preset.val
+                                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </InspectorField>
+
+                    <InspectorField
+                      label="Max file size (MB)"
+                      hint="Maximum allowed size per file in megabytes."
+                    >
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={selectedItem.maxFileSizeMb ?? 10}
+                        onChange={(e) =>
+                          patchItem(selectedItem.i, {
+                            maxFileSizeMb: Math.max(1, parseInt(e.target.value, 10) || 1),
+                          })
+                        }
+                        className={INSPECTOR_INPUT}
+                      />
+                    </InspectorField>
+
+                    <InspectorField label="Multiple files">
+                      <label className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedItem.allowMultiple)}
+                          onChange={(e) =>
+                            patchItem(selectedItem.i, {
+                              allowMultiple: e.target.checked,
+                              maxFiles: selectedItem.maxFiles ?? 5,
+                            })
+                          }
+                          className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                        />
+                        <span className="text-xs font-medium text-gray-700">Allow multiple attachments</span>
+                      </label>
+                    </InspectorField>
+
+                    {selectedItem.allowMultiple && (
+                      <InspectorField
+                        label="Max number of files"
+                        hint="Maximum total files that can be attached."
+                      >
+                        <input
+                          type="number"
+                          min={2}
+                          max={50}
+                          value={selectedItem.maxFiles ?? 5}
+                          onChange={(e) =>
+                            patchItem(selectedItem.i, {
+                              maxFiles: Math.max(2, parseInt(e.target.value, 10) || 2),
+                            })
+                          }
+                          className={INSPECTOR_INPUT}
+                        />
+                      </InspectorField>
+                    )}
+                  </>
+                )}
+
+                {/* Form Group Assignment */}
+                <InspectorField
+                  label="Form Group"
+                  hint="Assign to a Form Group to organize fields and share visibility conditions."
+                >
+                  <select
+                    value={selectedItem.groupId ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__new__') {
+                        const newId = nextItemId('group');
+                        const groupCount = availableGroups.length + 1;
+                        const groupTitle = `Group ${groupCount}`;
+                        const y = nextY(items, cols);
+                        const newGroupItem: EntityFormItem = {
+                          i: newId,
+                          x: 0,
+                          y,
+                          w: cols,
+                          h: 1,
+                          isGroup: true,
+                          groupId: newId,
+                          label: groupTitle,
+                          groupTitle,
+                        };
+                        setItems((prev) => [...prev, newGroupItem]);
+                        patchItem(selectedItem.i, { groupId: newId, groupTitle });
+                      } else {
+                        const matching = availableGroups.find((g) => g.id === val);
+                        patchItem(selectedItem.i, {
+                          groupId: val || null,
+                          groupTitle: matching ? matching.title : null,
+                        });
+                      }
+                    }}
+                    className={INSPECTOR_INPUT}
+                  >
+                    <option value="">(None / Ungrouped)</option>
+                    {availableGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.title}
+                      </option>
+                    ))}
+                    <option value="__new__">+ Create new group…</option>
+                  </select>
+                  {selectedItem.groupId && (
+                    (() => {
+                      const parent = availableGroups.find((g) => g.id === selectedItem.groupId);
+                      if (parent?.item.visibilityCondition) {
+                        const pAction = parent.item.visibilityCondition.action;
+                        const isRO = pAction === 'readonly' || pAction === 'editable';
+                        return (
+                          <div
+                            className={`mt-1 rounded p-2 text-[11px] ${
+                              isRO ? 'bg-amber-50 text-amber-800' : 'bg-purple-50 text-purple-700'
+                            }`}
+                          >
+                            <span className="font-semibold">Parent Group Rule:</span>{' '}
+                            {formatConditionSummary(parent.item.visibilityCondition)}
+                            <div className="mt-0.5 text-[10px] opacity-80">
+                              {isRO
+                                ? 'This field will be made read-only whenever the group is read-only.'
+                                : 'This field will be hidden whenever the group is hidden.'}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
+                </InspectorField>
+
+                {/* Conditional Logic */}
+                <InspectorField
+                  label="Conditional Logic"
+                  hint="Control dynamic visibility (show/hide) or read-only state based on one or more field conditions."
+                >
+                  <ConditionBuilder
+                    condition={selectedItem.visibilityCondition}
+                    availableFields={targetFieldOptions}
+                    onChange={(cond) => patchItem(selectedItem.i, { visibilityCondition: cond })}
+                  />
+                </InspectorField>
 
                 <InspectorField label="Storage key" hint="The key the value is stored under on the record.">
                   <input

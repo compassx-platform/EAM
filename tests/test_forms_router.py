@@ -192,3 +192,170 @@ def test_legacy_unregistered_field_item_rejected(test_db):
         save(test_db, "workorder", layout)
     assert exc.value.status_code == 400
     assert "not registered" in str(exc.value.detail)
+
+
+def test_form_hidden_options_round_trips(test_db):
+    from backend.services.list_service import save_draft, publish_draft
+    draft = save_draft(test_db, "priority_list", "options", ["Low", "Medium", "High", "Critical"])
+    publish_draft(test_db, draft)
+    test_db.commit()
+
+    layout = [
+        {
+            "i": "field:prio",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "priority",
+            "fieldType": "selection",
+            "required": True,
+            "label": "Priority",
+            "options": [],
+            "options_list": "priority_list",
+            "hidden_options": ["Low", "Critical"],
+        },
+        {
+            "i": "field:chk",
+            "x": 0, "y": 1, "w": 6, "h": 2,
+            "fieldName": "custom_checks",
+            "fieldType": "checkbox_group",
+            "required": False,
+            "label": "Checks",
+            "options": ["Opt1", "Opt2", "Opt3"],
+            "hiddenOptions": ["Opt2"],
+        }
+    ]
+    created = save(test_db, "workorder", layout)
+    stored = {it["i"]: it for it in created["layout"]}
+    assert stored["field:prio"]["options_list"] == "priority_list"
+    assert stored["field:prio"]["hidden_options"] == ["Low", "Critical"]
+    assert stored["field:chk"]["options"] == ["Opt1", "Opt2", "Opt3"]
+    assert stored["field:chk"]["hidden_options"] == ["Opt2"]
+
+    fetched = get_form("workorder", test_db)
+    fetched_stored = {it["i"]: it for it in fetched["layout"]}
+    assert fetched_stored["field:prio"]["hidden_options"] == ["Low", "Critical"]
+    assert fetched_stored["field:chk"]["hidden_options"] == ["Opt2"]
+
+
+def test_file_attachment_field_round_trip(test_db):
+    layout = [
+        {
+            "i": "field:attach",
+            "x": 0, "y": 0, "w": 6, "h": 2,
+            "fieldName": "site_photo",
+            "fieldType": "file",
+            "required": True,
+            "label": "Site Photo / Document",
+            "accept": ".pdf,.png,.jpg",
+            "maxFileSizeMb": 15,
+            "allowMultiple": True,
+            "maxFiles": 3,
+        }
+    ]
+    created = save(test_db, "workorder", layout)
+    stored = {it["i"]: it for it in created["layout"]}
+    assert stored["field:attach"]["fieldType"] == "file"
+    assert stored["field:attach"]["accept"] == ".pdf,.png,.jpg"
+    assert stored["field:attach"]["max_file_size_mb"] == 15
+    assert stored["field:attach"]["allow_multiple"] is True
+    assert stored["field:attach"]["max_files"] == 3
+
+    fetched = get_form("workorder", test_db)
+    fetched_stored = {it["i"]: it for it in fetched["layout"]}
+    assert fetched_stored["field:attach"]["accept"] == ".pdf,.png,.jpg"
+    assert fetched_stored["field:attach"]["allow_multiple"] is True
+
+
+def test_multi_condition_and_readonly_round_trip(test_db):
+    layout = [
+        {
+            "i": "field:hazard_type",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "hazard_type",
+            "fieldType": "selection",
+            "options": ["Chemical", "Electrical", "Mechanical"],
+            "label": "Hazard Type",
+        },
+        {
+            "i": "field:ppe_required",
+            "x": 0, "y": 1, "w": 6, "h": 1,
+            "fieldName": "ppe_required",
+            "fieldType": "text",
+            "label": "PPE Required",
+            "visibility_condition": {
+                "action": "readonly",
+                "matchType": "all",
+                "rules": [
+                    {"field": "hazard_type", "operator": "equals", "value": "Chemical"},
+                    {"field": "permit_type", "operator": "not_equals", "value": "Standard"}
+                ]
+            }
+        },
+        {
+            "i": "group:high_risk",
+            "x": 0, "y": 2, "w": 12, "h": 2,
+            "isGroup": True,
+            "label": "High Risk Safety Protocol",
+            "visibilityCondition": {
+                "action": "show",
+                "matchType": "any",
+                "rules": [
+                    {"field": "hazard_type", "operator": "equals", "value": "Electrical"},
+                    {"field": "hazard_type", "operator": "equals", "value": "Chemical"}
+                ]
+            }
+        }
+    ]
+    created = save(test_db, "permit", layout)
+    stored = {it["i"]: it for it in created["layout"]}
+    cond_ppe = stored["field:ppe_required"]["visibility_condition"]
+    assert cond_ppe["action"] == "readonly"
+    assert cond_ppe["matchType"] == "all"
+    assert len(cond_ppe["rules"]) == 2
+    assert cond_ppe["rules"][0]["field"] == "hazard_type"
+    assert cond_ppe["rules"][0]["operator"] == "equals"
+
+    cond_group = stored["group:high_risk"]["visibility_condition"]
+    assert cond_group["action"] == "show"
+    assert cond_group["matchType"] == "any"
+    assert len(cond_group["rules"]) == 2
+
+    fetched = get_form("permit", test_db)
+    fetched_stored = {it["i"]: it for it in fetched["layout"]}
+    assert fetched_stored["field:ppe_required"]["visibility_condition"]["action"] == "readonly"
+    assert fetched_stored["group:high_risk"]["visibility_condition"]["matchType"] == "any"
+
+
+def test_form_aware_entity_field_validation(test_db):
+    from backend.services.field_validator import validate_custom_fields, FieldValidationError
+    # Layout with a custom dynamic form field not in field_registry
+    layout = [
+        {
+            "i": "field:dynamic_custom",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "safety_marshal_signoff",
+            "fieldType": "text",
+            "required": True,
+            "label": "Safety Marshal Sign-off",
+        }
+    ]
+    save(test_db, "workorder", layout)
+
+    # Missing required form field raises FieldValidationError
+    with pytest.raises(FieldValidationError) as exc:
+        validate_custom_fields(
+            db=test_db,
+            entity_type="workorder",
+            custom_fields={"title": "Test WO"},
+            is_create=True,
+        )
+    assert "Safety Marshal Sign-off" in str(exc.value)
+
+    # Validates cleanly because it's defined on the active form layout
+    cleaned = validate_custom_fields(
+        db=test_db,
+        entity_type="workorder",
+        custom_fields={"title": "Test WO", "safety_marshal_signoff": "Approved by Officer Alex"},
+        is_create=True,
+    )
+    assert cleaned["safety_marshal_signoff"] == "Approved by Officer Alex"
+
