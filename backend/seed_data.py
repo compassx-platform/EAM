@@ -12,7 +12,7 @@ from backend.services.command_handler import create_entity, propose_transition
 
 def seed_all(db: Session):
     """Initializes schema and seeds baseline users, roles, fields, gates, workflows, and sample entities."""
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=db.get_bind())
 
     # 1. Seed Roles
     roles_data = ["Admin", "Supervisor", "Safety Officer", "Technician", "Manager"]

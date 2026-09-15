@@ -31,7 +31,8 @@ def test_db():
     Base.metadata.drop_all(bind=engine)
 
 @pytest.fixture(scope="function")
-def client(test_db):
+def client(test_db, monkeypatch):
+    monkeypatch.setattr("backend.main.SessionLocal", lambda: test_db)
     def override_get_db():
         try:
             yield test_db

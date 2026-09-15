@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.forms import EntityForm
@@ -69,9 +69,7 @@ class FormItem(BaseModel):
     allowMultiple: Optional[bool] = None
     max_files: Optional[int] = None
     maxFiles: Optional[int] = None
-
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 class EntityFormRequest(BaseModel):
     entity_type: str

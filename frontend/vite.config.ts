@@ -6,7 +6,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     allowedHosts: true,
-    watch: { usePolling: true, interval: 100 },
+    watch: {
+      usePolling: true,
+      interval: 2000,
+      ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.cache/**'],
+    },
     hmr: { clientPort: 443 },
     port: 8080,
     proxy: {

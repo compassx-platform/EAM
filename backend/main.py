@@ -40,11 +40,14 @@ async def periodic_expiry_checker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Create tables and seed default data
-    db = SessionLocal()
     try:
-        seed_all(db)
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            seed_all(db)
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[CompassX] Database startup initialization notice: {exc}")
 
     # Start background expiry task
     expiry_task = asyncio.create_task(periodic_expiry_checker())
