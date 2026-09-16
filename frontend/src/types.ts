@@ -33,8 +33,11 @@ export interface WorkflowAutoTransition {
 
 export interface WorkflowNodeMeta {
   name: string;
-  kind: 'start' | 'state' | 'task' | 'gate' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
+  kind: 'start' | 'state' | 'task' | 'gate' | 'router' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
   position: { x: number; y: number };
+  condition_id?: string | null;
+  conditions?: string[];
+  description?: string;
 }
 
 export interface WorkflowDefinition {

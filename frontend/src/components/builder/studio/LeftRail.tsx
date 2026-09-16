@@ -1,9 +1,10 @@
-import { LayoutGrid, Settings, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail } from 'lucide-react';
+import { LayoutGrid, Settings, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail, GitFork } from 'lucide-react';
 import { NODE_KINDS, type NodeKind } from '../flowModel';
 
 const KIND_ICONS: Record<NodeKind, typeof Play> = {
   start: Play,
   state: Circle,
+  router: GitFork,
   task: ClipboardList,
   gate: ShieldCheck,
   manual: ListChecks,
@@ -16,6 +17,7 @@ const KIND_ICONS: Record<NodeKind, typeof Play> = {
 const KIND_STYLES: Record<NodeKind, string> = {
   start: 'text-emerald-700 hover:bg-emerald-50',
   state: 'text-blue-700 hover:bg-blue-50',
+  router: 'text-purple-700 hover:bg-purple-50',
   task: 'text-indigo-700 hover:bg-indigo-50',
   gate: 'text-amber-700 hover:bg-amber-50',
   manual: 'text-violet-700 hover:bg-violet-50',

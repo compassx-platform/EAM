@@ -1,12 +1,14 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { X, Copy, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail } from 'lucide-react';
+import { X, Copy, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail, GitFork } from 'lucide-react';
 import type { NodeKind } from './flowModel';
 
 export type StateNodeData = {
   label: string;
   kind: NodeKind;
   terminal?: boolean;
+  condition_id?: string | null;
+  conditions?: string[];
   onRename?: (oldLabel: string, newLabel: string) => void;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
@@ -15,6 +17,7 @@ export type StateNodeData = {
 const KIND_STYLES: Record<NodeKind, { dot: string; ring: string; text: string; signal: string }> = {
   start: { dot: 'bg-emerald-500', ring: 'border-emerald-300', text: 'text-emerald-800', signal: 'bg-emerald-200' },
   state: { dot: 'bg-blue-500', ring: 'border-blue-300', text: 'text-blue-800', signal: 'bg-blue-200' },
+  router: { dot: 'bg-purple-500', ring: 'border-purple-300', text: 'text-purple-800', signal: 'bg-purple-200' },
   task: { dot: 'bg-indigo-500', ring: 'border-indigo-300', text: 'text-indigo-800', signal: 'bg-indigo-200' },
   gate: { dot: 'bg-amber-500', ring: 'border-amber-300', text: 'text-amber-800', signal: 'bg-amber-200' },
   manual: { dot: 'bg-violet-500', ring: 'border-violet-300', text: 'text-violet-800', signal: 'bg-violet-200' },
@@ -27,6 +30,7 @@ const KIND_STYLES: Record<NodeKind, { dot: string; ring: string; text: string; s
 const KIND_LABEL: Record<NodeKind, string> = {
   start: 'start',
   state: 'step',
+  router: 'router',
   task: 'task',
   gate: 'condition',
   manual: 'manual input',
@@ -40,6 +44,8 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
   switch (kind) {
     case 'start':
       return <Play className={className} />;
+    case 'router':
+      return <GitFork className={className} />;
     case 'gate':
       return <ShieldCheck className={className} />;
     case 'task':
@@ -60,9 +66,10 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
 }
 
 function StateNode({ id, data, selected }: NodeProps) {
-  const { label, kind, terminal, onRename, onDelete, onDuplicate } = data as StateNodeData;
+  const { label, kind, terminal, condition_id, conditions, onRename, onDelete, onDuplicate } = data as StateNodeData;
   const [value, setValue] = useState(label);
   const style = KIND_STYLES[kind] || KIND_STYLES.state;
+  const activeCondition = (conditions && conditions[0]) || condition_id || null;
 
   const commit = () => {
     const next = value.trim();
@@ -72,9 +79,9 @@ function StateNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className={`group min-w-[150px] rounded-xl border-2 bg-white shadow-sm transition-shadow ${
+      className={`group relative min-w-[170px] max-w-[250px] rounded-xl border-2 bg-white shadow-sm transition-shadow ${
         selected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/30' : style.ring
-      }`}
+      } ${kind === 'router' ? 'pr-12' : ''}`}
     >
       {kind !== 'start' && (
         <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500" />
@@ -90,7 +97,7 @@ function StateNode({ id, data, selected }: NodeProps) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          className="nodrag nopan w-full bg-transparent text-sm font-semibold text-gray-800 outline-none"
+          className="nodrag nopan w-full truncate bg-transparent text-sm font-semibold text-gray-800 outline-none"
         />
         <div className="flex items-center">
           <button
@@ -109,19 +116,56 @@ function StateNode({ id, data, selected }: NodeProps) {
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-between px-3 pb-1.5">
-        <span className={`rounded px-1 text-[9px] font-bold uppercase tracking-wider text-white ${style.dot}`}>
-          {KIND_LABEL[kind] || kind}
-        </span>
+
+      <div className="flex items-center justify-between px-3 pb-1.5 gap-1">
+        <div className="flex items-center gap-1 min-w-0">
+          <span className={`rounded px-1 text-[9px] font-bold uppercase tracking-wider text-white shrink-0 ${style.dot}`}>
+            {KIND_LABEL[kind] || kind}
+          </span>
+          {kind === 'router' && activeCondition && (
+            <span className="truncate rounded bg-slate-100 border border-slate-200 px-1 text-[9px] font-mono font-medium text-slate-700" title={`Condition: ${activeCondition}`}>
+              {activeCondition}
+            </span>
+          )}
+        </div>
         {terminal && (
-          <span className="rounded bg-rose-100 px-1 text-[9px] font-bold uppercase tracking-wider text-rose-600">
+          <span className="rounded bg-rose-100 px-1 text-[9px] font-bold uppercase tracking-wider text-rose-600 shrink-0">
             ⚑ terminal
           </span>
         )}
       </div>
-      {kind !== 'end' && (
+
+      {kind === 'router' ? (
+        <>
+          <div className="absolute right-2 top-[30%] -translate-y-1/2 flex items-center pointer-events-none select-none">
+            <span className="text-[9px] font-mono font-bold text-gray-600">
+              TRUE
+            </span>
+          </div>
+          <Handle
+            id="TRUE"
+            type="source"
+            position={Position.Right}
+            style={{ top: '30%' }}
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500 hover:!scale-125 transition-transform"
+          />
+
+          <div className="absolute right-2 top-[70%] -translate-y-1/2 flex items-center pointer-events-none select-none">
+            <span className="text-[9px] font-mono font-bold text-gray-600">
+              FALSE
+            </span>
+          </div>
+          <Handle
+            id="FALSE"
+            type="source"
+            position={Position.Right}
+            style={{ top: '70%' }}
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500 hover:!scale-125 transition-transform"
+          />
+        </>
+      ) : kind !== 'end' ? (
         <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500" />
-      )}
+      ) : null}
     </div>
   );
 }

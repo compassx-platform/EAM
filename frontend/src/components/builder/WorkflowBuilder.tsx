@@ -63,6 +63,9 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const [fields, setFields] = useState<EntityField[]>([]);
 
   const [conditionModalOpen, setConditionModalOpen] = useState(false);
+  const [editingCondition, setEditingCondition] = useState<ConditionDefinition | null>(null);
+  const [targetEdgeId, setTargetEdgeId] = useState<string | null>(null);
+  const [targetNodeId, setTargetNodeId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
@@ -159,11 +162,14 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   // All declarative behaviour lives here so every node/edge carries the current
   // handlers regardless of how it was created or re-hydrated.
   function dataOf(e: WorkflowFlowEdge): WorkflowFlowEdge['data'] {
+    const sourceNode = nodesRef.current.find((n) => n.id === e.source);
+    const isRouterSource = sourceNode?.data?.kind === 'router';
     return {
       event: e.data?.event ?? 'EVENT',
       conditions: e.data?.conditions ?? [],
       choices: e.data?.choices,
       on_after: e.data?.on_after,
+      isRouterSource: isRouterSource ?? e.data?.isRouterSource,
       onRenameEvent: handleRenameEvent,
       onDelete: handleDeleteEdge,
     };
@@ -187,18 +193,64 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const hydrateEdges = (eds: WorkflowFlowEdge[]): WorkflowFlowEdge[] => eds.map(withEdgeCallbacks);
 
   const handleConnect = useCallback((connection: Connection) => {
-    const edgeId = `${connection.source}|${connection.target}|${Math.random().toString(36).slice(2, 8)}`;
+    const sourceNode = nodesRef.current.find((n) => n.id === connection.source);
+    const isRouter = sourceNode?.data?.kind === 'router';
+
+    let defaultEvent = 'EVENT';
+    let sourceHandle = connection.sourceHandle;
+
+    if (isRouter) {
+      if (sourceHandle === 'TRUE' || sourceHandle === 'FALSE') {
+        defaultEvent = sourceHandle;
+      } else {
+        const existingEdges = edgesRef.current.filter((e) => e.source === connection.source);
+        const hasTrue = existingEdges.some((e) => e.data?.event === 'TRUE');
+        const hasFalse = existingEdges.some((e) => e.data?.event === 'FALSE');
+        defaultEvent = !hasTrue ? 'TRUE' : !hasFalse ? 'FALSE' : 'TRUE';
+        sourceHandle = defaultEvent;
+      }
+
+      // Router outlets allow strictly ONE connection per branch (TRUE / FALSE)
+      const existingBranchEdge = edgesRef.current.find(
+        (e) => e.source === connection.source && e.data?.event === defaultEvent
+      );
+
+      if (existingBranchEdge) {
+        setEdges((eds) =>
+          eds.map((e) =>
+            e.id === existingBranchEdge.id
+              ? {
+                  ...e,
+                  target: connection.target as string,
+                  sourceHandle: sourceHandle || undefined,
+                  data: dataOf({ ...e, target: connection.target as string }),
+                }
+              : e
+          )
+        );
+        setSelection({ kind: 'node', id: connection.source as string });
+        setDirty(true);
+        return;
+      }
+    }
+
+    const edgeId = `${connection.source}|${defaultEvent}|${connection.target}|${Math.random().toString(36).slice(2, 8)}`;
     setEdges((eds) => {
       const newEdge = withEdgeCallbacks({
         id: edgeId,
         type: 'event',
         source: connection.source as string,
         target: connection.target as string,
-        data: { event: 'EVENT', conditions: [] },
+        sourceHandle: sourceHandle || undefined,
+        data: { event: defaultEvent, conditions: [], isRouterSource: isRouter },
       });
       return addEdge(newEdge, eds) as WorkflowFlowEdge[];
     });
-    setSelection({ kind: 'edge', id: edgeId });
+    if (isRouter) {
+      setSelection({ kind: 'node', id: connection.source as string });
+    } else {
+      setSelection({ kind: 'edge', id: edgeId });
+    }
     setDirty(true);
     setNotice(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -348,37 +400,25 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
     setDirty(true);
   }
 
-  function handleSetEdgeChoices(edgeId: string, choices: WorkflowChoice[]) {
-    setEdges((eds) =>
-      eds.map((e) => {
-        if (e.id !== edgeId) return e;
-        const fallback = choices.length
-          ? (choices.find((c) => !c.when || c.when.length === 0)?.to ?? choices[0]?.to ?? '')
-          : '';
-        return {
-          ...e,
-          target: fallback || e.target,
-          data: { ...dataOf(e), choices: choices.length ? choices : undefined },
-        };
-      })
-    );
-    setDirty(true);
-  }
-
-  function handleToggleBranching(edgeId: string, enabled: boolean) {
-    setEdges((eds) =>
-      eds.map((e) => {
-        if (e.id !== edgeId) return e;
-        if (!enabled) {
-          const branches = e.data?.choices ?? [];
-          const fallback = (branches.find((c) => !c.when || c.when.length === 0)?.to ?? branches[0]?.to) || e.target;
-          return { ...e, target: fallback, data: { ...dataOf(e), choices: undefined } };
-        }
-        return { ...e, data: { ...dataOf(e), choices: [{ to: e.target, when: [] }] } };
-      })
-    );
-    setDirty(true);
-  }
+  const handleAddRoute = useCallback(
+    (sourceId: string, targetId: string) => {
+      const id = `${sourceId}|EVENT|${targetId}|${Math.random().toString(36).slice(2, 7)}`;
+      const newEdge: WorkflowFlowEdge = withEdgeCallbacks({
+        id,
+        type: 'event',
+        source: sourceId,
+        target: targetId,
+        data: {
+          event: 'EVENT',
+          conditions: [],
+        },
+      });
+      setEdges((eds) => [...eds, newEdge]);
+      setDirty(true);
+      return id;
+    },
+    [withEdgeCallbacks]
+  );
 
   function handleSetEdgeOnAfter(edgeId: string, on_after: WorkflowAction[]) {
     setEdges((eds) => eds.map((e) => (e.id === edgeId ? { ...e, data: { ...dataOf(e), on_after } } : e)));
@@ -389,6 +429,59 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
     const ids = new Set(nodesDeleted.map((n) => n.id));
     setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)));
     setSelection(null);
+    setDirty(true);
+  }
+
+  function handleSetNodeConditions(nodeId: string, conditionIds: string[]) {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                conditions: conditionIds,
+                condition_id: conditionIds[0] || null,
+              },
+            }
+          : n
+      )
+    );
+    setDirty(true);
+  }
+
+  function handleSetRouterBranch(nodeId: string, branch: 'TRUE' | 'FALSE', targetState: string) {
+    setEdges((eds) => {
+      const existing = eds.find((e) => e.source === nodeId && e.data?.event === branch);
+      if (!targetState) {
+        return existing ? eds.filter((e) => e.id !== existing.id) : eds;
+      }
+      if (existing) {
+        return eds.map((e) =>
+          e.id === existing.id
+            ? {
+                ...e,
+                target: targetState,
+                sourceHandle: branch,
+                data: dataOf({ ...e, target: targetState }),
+              }
+            : e
+        );
+      }
+      const edgeId = `${nodeId}|${branch}|${targetState}|${Math.random().toString(36).slice(2, 7)}`;
+      const newEdge: WorkflowFlowEdge = withEdgeCallbacks({
+        id: edgeId,
+        type: 'event',
+        source: nodeId,
+        target: targetState,
+        sourceHandle: branch,
+        data: {
+          event: branch,
+          conditions: [],
+        },
+      });
+      return [...eds, newEdge];
+    });
     setDirty(true);
   }
 
@@ -539,7 +632,14 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
             onDrop={handleDrop}
             onDragOver={onDragOver}
             onNodeClick={(_, node) => setSelection({ kind: 'node', id: node.id })}
-            onEdgeClick={(_, edge) => setSelection({ kind: 'edge', id: edge.id })}
+            onEdgeClick={(_, edge) => {
+              const isRouter = nodes.find((n) => n.id === edge.source)?.data?.kind === 'router';
+              if (isRouter) {
+                setSelection({ kind: 'node', id: edge.source });
+              } else {
+                setSelection({ kind: 'edge', id: edge.id });
+              }
+            }}
             onPaneClick={() => setSelection(null)}
             onNodesDelete={handleOnNodesDelete}
             deleteKeyCode={['Backspace', 'Delete']}
@@ -566,60 +666,101 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         </div>
 
         {/* Contextual inspector */}
-        <div className="w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white">
-          {selectedNode && (
-            <NodeInspector
-              key={selectedNode.id}
-              node={selectedNode}
-              edges={edges}
-              nodeLabels={nodes.map((n) => n.data.label)}
-              conditions={conditions}
-              onKind={handleSetNodeKind}
-              onRename={handleRenameState}
-              onDuplicate={handleDuplicateNode}
-              onDelete={handleDeleteNode}
-              onTarget={handleSetEdgeTarget}
-              onConditions={handleSetEdgeConditions}
-              onEvent={handleRenameEvent}
-              onRemoveConnection={handleDeleteEdge}
-              onNewCondition={() => setConditionModalOpen(true)}
-            />
-          )}
+        {(() => {
+          const isSelectedEdgeRouterOutlet =
+            selectedEdge && nodes.find((n) => n.id === selectedEdge.source)?.data?.kind === 'router';
+          const activeNode =
+            selectedNode || (isSelectedEdgeRouterOutlet ? nodes.find((n) => n.id === selectedEdge.source) : null);
+          const activeEdge = !isSelectedEdgeRouterOutlet ? selectedEdge : null;
 
-          {selectedEdge && (
-            <ActionInspector
-              key={selectedEdge.id}
-              edge={selectedEdge}
-              nodeLabels={nodes.map((n) => n.data.label)}
-              conditions={conditions}
-              actionTypes={actionTypes}
-              onEvent={handleRenameEvent}
-              onConditions={handleSetEdgeConditions}
-              onChoices={handleSetEdgeChoices}
-              onToggleBranching={handleToggleBranching}
-              onOnAfter={handleSetEdgeOnAfter}
-              onDelete={handleDeleteEdge}
-              onNewCondition={() => setConditionModalOpen(true)}
-            />
-          )}
+          return (
+            <div className="w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white">
+              {activeNode && (
+                <NodeInspector
+                  key={activeNode.id}
+                  node={activeNode}
+                  nodes={nodes}
+                  edges={edges}
+                  nodeLabels={nodes.map((n) => n.data.label)}
+                  conditions={conditions}
+                  onKind={handleSetNodeKind}
+                  onRename={handleRenameState}
+                  onDuplicate={handleDuplicateNode}
+                  onDelete={handleDeleteNode}
+                  onTarget={handleSetEdgeTarget}
+                  onConditions={handleSetEdgeConditions}
+                  onNodeConditions={handleSetNodeConditions}
+                  onSetRouterBranch={handleSetRouterBranch}
+                  onEvent={handleRenameEvent}
+                  onRemoveConnection={handleDeleteEdge}
+                  onAddRoute={handleAddRoute}
+                  onEditCondition={(c) => {
+                    setEditingCondition(c);
+                    setConditionModalOpen(true);
+                  }}
+                  onNewCondition={(edgeId, nodeId) => {
+                    setTargetEdgeId(edgeId || null);
+                    setTargetNodeId(nodeId || null);
+                    setEditingCondition(null);
+                    setConditionModalOpen(true);
+                  }}
+                />
+              )}
 
-          {!selectedNode && !selectedEdge && (
-            <div className="flex flex-col items-start gap-3 p-5">
-              <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                <MousePointer className="h-3 w-3" /> Nothing selected
-              </p>
-              <p className="text-sm leading-snug text-gray-500">
-                Select a <span className="font-semibold text-gray-700">state</span> or{' '}
-                <span className="font-semibold text-gray-700">connection</span> on the canvas to edit it here.
-              </p>
-              <div className="flex flex-col items-start gap-1.5">
-                <DashedButton onClick={handleAutoArrange}>Auto Arrange canvas</DashedButton>
-                <DashedButton onClick={() => setSettingsOpen(true)}>Workflow settings…</DashedButton>
-                <DashedButton onClick={() => setConditionModalOpen(true)}>New condition…</DashedButton>
-              </div>
+              {!activeNode && activeEdge && (
+                <ActionInspector
+                  key={activeEdge.id}
+                  edge={activeEdge}
+                  nodeLabels={nodes.map((n) => n.data.label)}
+                  conditions={conditions}
+                  actionTypes={actionTypes}
+                  isRouterSource={false}
+                  onEvent={handleRenameEvent}
+                  onTarget={handleSetEdgeTarget}
+                  onConditions={handleSetEdgeConditions}
+                  onOnAfter={handleSetEdgeOnAfter}
+                  onDelete={handleDeleteEdge}
+                  onEditCondition={(c) => {
+                    setEditingCondition(c);
+                    setConditionModalOpen(true);
+                  }}
+                  onNewCondition={() => {
+                    setTargetEdgeId(activeEdge.id);
+                    setTargetNodeId(null);
+                    setEditingCondition(null);
+                    setConditionModalOpen(true);
+                  }}
+                />
+              )}
+
+              {!activeNode && !activeEdge && (
+                <div className="flex flex-col items-start gap-3 p-5">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    <MousePointer className="h-3 w-3" /> Nothing selected
+                  </p>
+                  <p className="text-sm leading-snug text-gray-500">
+                    Select a <span className="font-semibold text-gray-700">state</span> or{' '}
+                    <span className="font-semibold text-gray-700">connection</span> on the canvas to edit it here.
+                  </p>
+                  <div className="flex flex-col items-start gap-1.5">
+                    <DashedButton onClick={handleAutoArrange}>Auto Arrange canvas</DashedButton>
+                    <DashedButton onClick={() => setSettingsOpen(true)}>Workflow settings…</DashedButton>
+                    <DashedButton
+                      onClick={() => {
+                        setTargetEdgeId(null);
+                        setTargetNodeId(null);
+                        setEditingCondition(null);
+                        setConditionModalOpen(true);
+                      }}
+                    >
+                      New condition…
+                    </DashedButton>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
 
       {conditionModalOpen && (
@@ -627,10 +768,34 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           entityType={entityType}
           conditionTypes={conditionTypes}
           fields={fields}
-          onClose={() => setConditionModalOpen(false)}
-          onSaved={() => {
-            api.listConditions(entityType).then(setConditions).catch(() => setConditions([]));
-            flash('ok', 'Condition saved.');
+          initial={editingCondition}
+          onClose={() => {
+            setEditingCondition(null);
+            setTargetEdgeId(null);
+            setTargetNodeId(null);
+            setConditionModalOpen(false);
+          }}
+          onSaved={(savedCond) => {
+            api
+              .listConditions(entityType)
+              .then((latest) => {
+                setConditions(latest);
+                const edgeId = targetEdgeId || (selection?.kind === 'edge' ? selection.id : null);
+                const nodeId = targetNodeId || (selection?.kind === 'node' ? selection.id : null);
+                if (savedCond) {
+                  if (targetNodeId || (!targetEdgeId && selection?.kind === 'node' && nodeId)) {
+                    handleSetNodeConditions(nodeId!, [savedCond.id]);
+                  } else if (edgeId) {
+                    handleSetEdgeConditions(edgeId, [savedCond.id]);
+                  }
+                }
+                setTargetEdgeId(null);
+                setTargetNodeId(null);
+              })
+              .catch(() => setConditions([]));
+            setEditingCondition(null);
+            setConditionModalOpen(false);
+            flash('ok', `Condition "${savedCond.label}" saved.`);
           }}
         />
       )}

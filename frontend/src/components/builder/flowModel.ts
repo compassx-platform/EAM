@@ -7,12 +7,15 @@ import type {
   WorkflowAutoTransition,
 } from '../../types';
 
-export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
+export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'router' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
 
 export interface NodeMeta {
   name: string;
   kind: NodeKind;
   position: { x: number; y: number };
+  condition_id?: string | null;
+  conditions?: string[];
+  description?: string;
 }
 
 export type WorkflowFlowNode = Node<
@@ -21,6 +24,10 @@ export type WorkflowFlowNode = Node<
     kind: NodeKind;
     /** True when this state is a declared terminal state (cannot advance). */
     terminal?: boolean;
+    condition_id?: string | null;
+    condition_label?: string | null;
+    conditions?: string[];
+    description?: string;
     onRename?: (oldLabel: string, newLabel: string) => void;
     onDelete?: (id: string) => void;
     onDuplicate?: (id: string) => void;
@@ -33,6 +40,7 @@ export type WorkflowFlowEdge = Edge<
     conditions: string[];
     choices?: WorkflowChoice[];
     on_after?: WorkflowAction[];
+    isRouterSource?: boolean;
     onRenameEvent?: (edgeId: string, event: string) => void;
     onDelete?: (id: string) => void;
   },
@@ -85,9 +93,10 @@ export function transitionTargetLabel(t: WorkflowTransition): string | null {
 export const NODE_KINDS: Array<{ kind: NodeKind; label: string; description: string }> = [
   { kind: 'start', label: 'Start', description: 'Entry point — new records begin here' },
   { kind: 'state', label: 'Step', description: 'A step in the process' },
-  { kind: 'task', label: 'Task', description: 'Work by a user, e.g. an approval — routes to positive or negative outcomes' },
-  { kind: 'gate', label: 'Condition', description: 'Evaluates a condition — routes YES/NO via conditional branches' },
-  { kind: 'manual', label: 'Manual Input', description: 'Prompts the user to pick an option — each option can route differently' },
+  { kind: 'router', label: 'Router', description: 'Splits and routes to different target states based on conditions' },
+  { kind: 'task', label: 'Task', description: 'Work by a user, e.g. an approval' },
+  { kind: 'gate', label: 'Condition', description: 'Evaluates a condition' },
+  { kind: 'manual', label: 'Manual Input', description: 'Prompts the user to pick an option' },
   { kind: 'wait', label: 'Wait', description: 'Pauses the workflow until a date or condition is met' },
   { kind: 'sub', label: 'Sub-Process', description: 'Starts another workflow process as a sub-routine' },
   { kind: 'comm', label: 'Communication', description: 'Sends a message or notification when reached' },
@@ -105,7 +114,7 @@ export function kindDefaultLabel(kind: NodeKind): string {
 
 export function defaultPositionFor(kind: NodeKind, index: number) {
   const base = layoutPosition(index);
-  const offset = { start: 0, end: 0, gate: 60, task: 0, state: 0, manual: 0, wait: 0, sub: 0, comm: 0 }[kind] || 0;
+  const offset = { start: 0, end: 0, router: 50, gate: 60, task: 0, state: 0, manual: 0, wait: 0, sub: 0, comm: 0 }[kind] || 0;
   return { x: base.x + offset, y: base.y };
 }
 
@@ -121,29 +130,59 @@ export function layoutPosition(index: number) {
 
 export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] } {
   const metaByName = new Map<string, NodeMeta>((def.nodes || []).map((m) => [m.name, m]));
+  const autoByState = new Map<string, WorkflowAutoTransition[]>();
+  for (const at of def.auto_transitions || []) {
+    const list = autoByState.get(at.from) || [];
+    list.push(at);
+    autoByState.set(at.from, list);
+  }
 
   const nodes: WorkflowFlowNode[] = def.states.map((label, i) => {
     const meta = metaByName.get(label);
+    let condId = meta?.condition_id || (meta?.conditions && meta.conditions[0]) || null;
+    let conds = meta?.conditions || (condId ? [condId] : []);
+
+    if ((meta?.kind === 'router' || (!meta && autoByState.has(label))) && !condId) {
+      const autos = autoByState.get(label) || [];
+      const trueAuto = autos.find((a) => a.event === 'TRUE');
+      if (trueAuto?.when && trueAuto.when.length > 0) {
+        condId = trueAuto.when[0];
+        conds = [condId];
+      }
+    }
+
     return {
       id: label,
       type: 'state',
       position: meta?.position || layoutPosition(i),
-      data: { label, kind: meta?.kind || 'state' },
+      data: {
+        label,
+        kind: meta?.kind || 'state',
+        condition_id: condId,
+        conditions: conds,
+        description: meta?.description,
+      },
     };
   });
 
-  const edges: WorkflowFlowEdge[] = def.transitions.map((t) => ({
-    id: `${t.from}|${t.event}|${t.to || ''}|${Math.random().toString(36).slice(2, 7)}`,
-    type: 'event',
-    source: t.from,
-    target: transitionTargetLabel(t) || '',
-    data: {
-      event: t.event,
-      conditions: t.conditions ?? t.gates ?? [],
-      choices: t.choices,
-      on_after: t.on_after,
-    },
-  }));
+  const edges: WorkflowFlowEdge[] = def.transitions.map((t) => {
+    const fromNodeMeta = metaByName.get(t.from);
+    const isRouterSource = fromNodeMeta?.kind === 'router';
+    return {
+      id: `${t.from}|${t.event}|${t.to || ''}|${Math.random().toString(36).slice(2, 7)}`,
+      type: 'event',
+      source: t.from,
+      target: transitionTargetLabel(t) || '',
+      sourceHandle: isRouterSource && (t.event === 'TRUE' || t.event === 'FALSE') ? t.event : undefined,
+      data: {
+        event: t.event,
+        conditions: t.conditions ?? t.gates ?? [],
+        choices: t.choices,
+        on_after: t.on_after,
+        isRouterSource,
+      },
+    };
+  });
 
   return { nodes, edges };
 }
@@ -159,11 +198,18 @@ export function flowToDefinition(
     .map((n) => n.data.label)
     .filter((label, i, arr) => label && arr.indexOf(label) === i);
 
-  const meta: NodeMeta[] = nodes.map((n) => ({
-    name: n.data.label,
-    kind: n.data.kind || 'state',
-    position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
-  }));
+  const meta: NodeMeta[] = nodes.map((n) => {
+    const condId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
+    const conds = n.data.conditions && n.data.conditions.length > 0 ? n.data.conditions : (condId ? [condId] : []);
+    return {
+      name: n.data.label,
+      kind: n.data.kind || 'state',
+      position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      condition_id: condId,
+      conditions: conds,
+      description: n.data.description,
+    };
+  });
 
   const transitions: WorkflowTransition[] = edges.map((e) => {
     const transition: WorkflowTransition = {
@@ -177,6 +223,36 @@ export function flowToDefinition(
     return transition;
   });
 
+  // Preserve non-router auto transitions and generate router auto transitions
+  const existingAuto = (extras?.auto_transitions || []).filter(
+    (at) => !nodes.some((n) => n.data.kind === 'router' && n.data.label === at.from)
+  );
+  const routerAuto: WorkflowAutoTransition[] = [];
+  for (const n of nodes) {
+    if (n.data.kind === 'router') {
+      const condId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
+      const outgoing = edges.filter((e) => e.source === n.data.label);
+      const trueEdge = outgoing.find((e) => e.data?.event === 'TRUE');
+      const falseEdge = outgoing.find((e) => e.data?.event === 'FALSE');
+      if (trueEdge) {
+        routerAuto.push({
+          from: n.data.label,
+          event: 'TRUE',
+          when: condId ? [condId] : [],
+        });
+      }
+      if (falseEdge) {
+        routerAuto.push({
+          from: n.data.label,
+          event: 'FALSE',
+          when: [],
+        });
+      }
+    }
+  }
+
+  const combinedAuto = [...existingAuto, ...routerAuto];
+
   const definition: WorkflowDefinition = {
     entity_type: entityType,
     version_label: versionLabel,
@@ -184,7 +260,7 @@ export function flowToDefinition(
     transitions,
     nodes: meta,
   };
-  if (extras?.auto_transitions?.length) definition.auto_transitions = extras.auto_transitions;
+  if (combinedAuto.length > 0) definition.auto_transitions = combinedAuto;
   if (extras?.terminal_states?.length) definition.terminal_states = extras.terminal_states;
   return definition;
 }

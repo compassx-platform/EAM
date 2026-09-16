@@ -173,6 +173,18 @@ def validate_workflow_definition(
             if a_event and (a_from, a_event) not in seen_transitions:
                 errors.append(f"{actx}: event '{a_event}' from state '{a_from}' has no matching 'transitions' entry (auto transitions fire real workflow events)")
 
+    # Validate node condition references if nodes metadata is present
+    nodes = definition.get("nodes", []) or []
+    if isinstance(nodes, list):
+        for n in nodes:
+            if isinstance(n, dict):
+                cond_id = n.get("condition_id")
+                if cond_id and cond_id not in valid_condition_ids:
+                    errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{cond_id}' does not exist for entity type '{entity_type}'")
+                for c_id in (n.get("conditions") or []):
+                    if c_id not in valid_condition_ids:
+                        errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{c_id}' does not exist for entity type '{entity_type}'")
+
     # Terminal-state warnings use explicit config; no hardcoded names.
     for s in states:
         if s not in states_with_outgoing and s not in terminal_states:
