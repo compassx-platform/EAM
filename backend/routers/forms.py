@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.forms import EntityForm
 from backend.models.field_registry import EntityField
+from backend.models.workflow import WorkflowDefinition
 from backend.services import list_service
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
@@ -33,6 +34,36 @@ LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
 ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + [t for t in LEGACY_FIELD_TYPES if t not in GENERIC_FIELD_TYPES]
 OPTION_REQUIRED_TYPES = ("selection", "checkbox_group", "dropdown", "table")
 LIST_REQUIRED_TYPES = ("checklist",)
+
+def _published_workflow_states(db: Session, entity_type: str):
+    """Stages + initial stage from the latest published workflow for an entity type.
+
+    These make the workflow stage available to form condition rules via the
+    ``_workflow_status`` pseudo-field (stage -> form two-way binding).
+    """
+    wf = (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.entity_type == entity_type.lower(),
+            WorkflowDefinition.status == "published",
+        )
+        .order_by(WorkflowDefinition.created_at.desc(), WorkflowDefinition.version_label.desc())
+        .first()
+    )
+    if not wf:
+        return [], None
+
+    definition = wf.definition or {}
+    states = [s for s in definition.get("states", []) if isinstance(s, str) and s.strip()]
+    initial_state = states[0] if states else None
+    for t in definition.get("transitions", []):
+        # The CREATED transition is the implicit entry edge (no from-state).
+        if t.get("from") in (None, "") or t.get("event") in ("CREATED", "CREATE"):
+            to_state = t.get("to")
+            if isinstance(to_state, str) and to_state.strip():
+                initial_state = to_state
+                break
+    return states, initial_state
 
 class FormItem(BaseModel):
     i: str
@@ -101,6 +132,7 @@ def get_form(entity_type: str, db: Session = Depends(get_db)):
         db.query(EntityField).filter(EntityField.entity_type == et).order_by(EntityField.field_name).all()
     )
     with_fields = [f.to_dict() for f in fields]
+    workflow_states, initial_state = _published_workflow_states(db, et)
 
     if not form:
         return {
@@ -111,10 +143,14 @@ def get_form(entity_type: str, db: Session = Depends(get_db)):
             "row_height": 40,
             "updated_at": None,
             "fields": with_fields,
+            "workflow_states": workflow_states,
+            "initial_state": initial_state,
         }
 
     result = form.to_dict()
     result["fields"] = with_fields
+    result["workflow_states"] = workflow_states
+    result["initial_state"] = initial_state
     return result
 
 @router.post("")
@@ -310,6 +346,9 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
         db.query(EntityField).filter(EntityField.entity_type == et).order_by(EntityField.field_name).all()
     )
     result["fields"] = [f.to_dict() for f in fields]
+    workflow_states, initial_state = _published_workflow_states(db, et)
+    result["workflow_states"] = workflow_states
+    result["initial_state"] = initial_state
     return result
 
 @router.delete("/{entity_type}")

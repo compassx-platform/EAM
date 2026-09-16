@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from backend.services.command_handler import (
     create_entity,
     propose_transition,
-    GateFailedError,
+    ConditionFailedError,
 )
 from backend.models.entities import WorkOrder, Permit
 
@@ -12,7 +12,7 @@ def test_full_spec_checkpoint_scenario(test_db):
     Executes the comprehensive multi-entity scenario from Spec §13 Step 12:
     1. Create a Permit
     2. Complete risk assessment
-    3. Issue it (gated on Safety Officer role)
+    3. Issue it (conditioned on Safety Officer role)
     4. Activate it
     5. Create a linked WorkOrder
     6. Attempt to start the WorkOrder before the permit is Active (blocked, correct gate named)
@@ -48,7 +48,7 @@ def test_full_spec_checkpoint_scenario(test_db):
     assert res_ra["new_status"] == "RiskAssessed"
 
     # 3. Attempt to issue without Safety Officer role (e.g. Charlie as Technician) -> BLOCKED
-    with pytest.raises(GateFailedError) as exc_info:
+    with pytest.raises(ConditionFailedError) as exc_info:
         propose_transition(
             db=test_db,
             entity_type="permit",
@@ -99,8 +99,8 @@ def test_full_spec_checkpoint_scenario(test_db):
         actor_roles=["Supervisor"],
     )
 
-    # 5. Attempt to start the WorkOrder BEFORE Permit is Active -> BLOCKED by gate_linked_permit_active
-    with pytest.raises(GateFailedError) as exc_wo_gate:
+    # 5. Attempt to start the WorkOrder BEFORE Permit is Active -> BLOCKED by cond_linked_permit_active
+    with pytest.raises(ConditionFailedError) as exc_wo_gate:
         propose_transition(
             db=test_db,
             entity_type="workorder",

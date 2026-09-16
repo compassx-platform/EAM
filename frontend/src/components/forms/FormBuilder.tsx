@@ -47,7 +47,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { formatConditionSummary, getConditionRules } from '../../lib/conditions';
+import { formatConditionSummary, getConditionRules, WORKFLOW_STATUS_FIELD } from '../../lib/conditions';
 import type {
   EntityField,
   EntityFormItem,
@@ -899,6 +899,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [publishedLists, setPublishedLists] = useState<OptionListSummary[]>([]);
+  const [workflowStates, setWorkflowStates] = useState<string[]>([]);
 
   const { width, containerRef, mounted } = useContainerWidth();
 
@@ -939,6 +940,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         setFields(form.fields || []);
         setCols(form.cols || 12);
         setRowHeight(form.row_height || 40);
+        setWorkflowStates((form.workflow_states || []) as string[]);
         ensureResolved(layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k)));
       } catch (e: any) {
         if (cancelled) return;
@@ -1293,7 +1295,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       item: it,
     }));
 
-  const targetFieldOptions = items
+  const targetFieldOptions: Array<{ name: string; label: string; type?: string; options?: string[] }> =
+    items
     .filter((it) => !it.isHeader && !it.isGroup && it.i !== selectedItem?.i)
     .map((it) => {
       const fieldName = it.fieldName || it.i;
@@ -1312,6 +1315,16 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         options: opts,
       };
     });
+
+  if (workflowStates.length > 0) {
+    // Pseudo-field so condition rules can bind to the record's workflow stage.
+    targetFieldOptions.unshift({
+      name: WORKFLOW_STATUS_FIELD,
+      label: 'Workflow stage',
+      type: 'select',
+      options: workflowStates,
+    });
+  }
 
   return (
     <div className="flex h-full flex-col">

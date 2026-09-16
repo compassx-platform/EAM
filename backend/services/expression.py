@@ -4,7 +4,7 @@ Declarative expression evaluation for the workflow engine.
 Two related capabilities, both fixed-implementation (configurable by data only):
 
 1. ``evaluate_arithmetic`` — a tiny, whitelisted arithmetic evaluator used by
-   gates/conditions. Supports numbers, ``$field`` / ``{field}`` references into
+   conditions. Supports numbers, ``$field`` / ``{field}`` references into
    an entity's ``custom_fields``, ``+ - * /``, parentheses, and unary minus.
    No ``eval()``, no arbitrary code — only the operators below are reachable.
 

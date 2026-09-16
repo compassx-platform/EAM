@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
-from backend.models.workflow import GateInstance
+from backend.models.conditions import ConditionDefinition
 
 class WorkflowValidationError(Exception):
     def __init__(self, errors: List[str], warnings: List[str] = None):
@@ -19,7 +19,7 @@ def validate_workflow_definition(
 
     Recognizes the generic routing/action extensions:
       - ``transitions[].choices``   -> conditional routing targets ({to, when})
-      - ``transitions[].when``      -> gate ids that gate a single choice
+      - ``transitions[].when``      -> condition ids that gate a single choice
       - ``transitions[].on_after``  -> declarative post-transition actions
       - ``auto_transitions[].when`` -> data-driven automatic routing
       - ``terminal_states``         -> explicit terminal state designations
@@ -57,11 +57,11 @@ def validate_workflow_definition(
         if when is None:
             return
         if not isinstance(when, list):
-            errors.append(f"{context}: 'when' must be a list of gate IDs")
+            errors.append(f"{context}: 'when' must be a list of condition IDs")
             return
-        for gate_id in when:
-            if gate_id not in valid_gate_ids:
-                errors.append(f"{context}: Gate ID '{gate_id}' does not exist for entity type '{entity_type}'")
+        for condition_id in when:
+            if condition_id not in valid_condition_ids:
+                errors.append(f"{context}: Condition ID '{condition_id}' does not exist for entity type '{entity_type}'")
 
     def _check_actions(on_after: Any, context: str) -> None:
         from backend.services.actions import ACTION_TYPE_SET
@@ -87,15 +87,15 @@ def validate_workflow_definition(
     if invalid_transition_amount:
         warnings.append("Workflow has no human transitions (create-only / tracking entity types are valid)")
 
-    # Pre-fetch existing gate instances for this entity_type
-    gate_instances = db.query(GateInstance).filter(GateInstance.entity_type == entity_type.lower()).all()
-    valid_gate_ids = {g.id for g in gate_instances}
+    # Pre-fetch existing conditions for this entity_type
+    condition_defs = db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == entity_type.lower()).all()
+    valid_condition_ids = {c.id for c in condition_defs}
 
     for idx, t in enumerate(transitions):
         ctx = f"Transition #{idx + 1}"
         from_state = t.get("from")
         event_type = t.get("event")
-        gates = t.get("gates", [])
+        condition_ids = t.get("conditions", []) or t.get("gates", []) or []
         to_state = t.get("to")
         choices = t.get("choices") or []
         on_after = t.get("on_after")
@@ -146,12 +146,12 @@ def validate_workflow_definition(
             errors.append(f"Duplicate transition detected: from '{from_state}' on event '{event_type}'")
         seen_transitions.add(pair)
 
-        if not isinstance(gates, list):
-            errors.append(f"{ctx}: 'gates' must be a list of gate IDs")
+        if not isinstance(condition_ids, list):
+            errors.append(f"{ctx}: 'conditions' must be a list of condition IDs")
         else:
-            for gate_id in gates:
-                if gate_id not in valid_gate_ids:
-                    errors.append(f"{ctx}: Gate ID '{gate_id}' does not exist for entity type '{entity_type}'")
+            for condition_id in condition_ids:
+                if condition_id not in valid_condition_ids:
+                    errors.append(f"{ctx}: Condition ID '{condition_id}' does not exist for entity type '{entity_type}'")
 
     # Auto transitions: data-driven routing after every state change
     if not isinstance(auto_transitions, list):

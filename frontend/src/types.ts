@@ -5,7 +5,7 @@ export interface WorkflowAction {
 
 export interface WorkflowChoice {
   to: string;
-  /** Gate IDs that must all pass for this branch to be taken ([] = unconditional default). */
+  /** Condition IDs that must all pass for this branch to be taken ([] = unconditional default). */
   when?: string[];
   on_after?: WorkflowAction[];
 }
@@ -15,7 +15,10 @@ export interface WorkflowTransition {
   event: string;
   /** Absent/null for decision nodes that use `choices`. */
   to?: string | null;
+  /** Legacy alias for `conditions` (read for backward compatibility with pre-registry drafts). */
   gates?: string[];
+  /** Reusable ConditionDefinition IDs that must all pass for this transition ([] = unguarded). */
+  conditions?: string[];
   /** Conditional routing branches; the first whose `when` passes wins. */
   choices?: WorkflowChoice[];
   on_after?: WorkflowAction[];
@@ -24,13 +27,13 @@ export interface WorkflowTransition {
 export interface WorkflowAutoTransition {
   from: string;
   event: string;
-  /** Gate IDs that gate the automatic routing ([] = always route). */
+  /** Condition IDs that gate the automatic routing ([] = always route). */
   when?: string[];
 }
 
 export interface WorkflowNodeMeta {
   name: string;
-  kind: 'start' | 'state' | 'task' | 'gate' | 'end';
+  kind: 'start' | 'state' | 'task' | 'gate' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
   position: { x: number; y: number };
 }
 
@@ -57,13 +60,90 @@ export interface Workflow {
   published_at?: string | null;
 }
 
-export interface GateInstance {
+// ---- Condition registry (centralized, reusable conditions) ------------------
+
+export type ConditionAtom =
+  | {
+      type: 'attribute';
+      field: string;
+      operator: string;
+      value?: unknown;
+      case_sensitive?: boolean;
+    }
+  | { type: 'role'; role: string }
+  | { type: 'field_not_empty'; field: string }
+  | { type: 'date'; field: string; operator: string; value?: unknown }
+  | {
+      type: 'related';
+      relationship_field: string;
+      target_entity_type?: string;
+      required_status?: string;
+      target_field?: string;
+      operator?: string;
+      value?: unknown;
+    }
+  | { type: 'expression'; expression: string; operator?: string; value?: unknown };
+
+export interface ConditionGroup {
+  logic: 'AND' | 'OR';
+  negate?: boolean;
+  rules: Array<ConditionAtom | { group: ConditionGroup }>;
+}
+
+export type ConditionRuleNode = ConditionAtom | { group: ConditionGroup };
+
+export interface ConditionDefinition {
   id: string;
   entity_type: string;
-  gate_type: string;
   label: string;
-  params: Record<string, unknown>;
+  description?: string | null;
+  type: 'structured' | 'script';
+  /** Live rule-tree AST — consumers always read this, so edits propagate everywhere. */
+  definition: ConditionGroup;
+  current_version: number;
   failure_policy: 'block' | 'allow';
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ConditionVersion {
+  id: string;
+  condition_id: string;
+  version: number;
+  label: string;
+  definition: ConditionGroup;
+  failure_policy: 'block' | 'allow';
+  created_by?: string | null;
+  created_at?: string | null;
+}
+
+export interface ConditionAtomType {
+  type: string;
+  name: string;
+  description: string;
+}
+
+export interface ConditionOperatorsCatalog {
+  string: string[];
+  number: string[];
+  boolean: string[];
+  date: string[];
+  select: string[];
+}
+
+export interface ConditionTypeInfo {
+  atoms: ConditionAtomType[];
+  operators: ConditionOperatorsCatalog;
+}
+
+export interface ConditionTraceItem {
+  condition_id: string;
+  label: string;
+  passed: boolean;
+  reason: string;
+  failure_policy: string;
+  effective_pass: boolean;
 }
 
 export interface ValidationResult {
@@ -129,19 +209,9 @@ export interface EntityEvent {
 export interface ValidTransition {
   event_type: string;
   to_state: string;
-  gates: string[];
+  conditions: string[];
   choices?: WorkflowChoice[];
   on_after?: WorkflowAction[];
-}
-
-export interface GateTraceItem {
-  gate_id: string;
-  gate_type: string;
-  label: string;
-  passed: boolean;
-  reason: string;
-  failure_policy: string;
-  effective_pass: boolean;
 }
 
 export type ConditionAction = 'hide' | 'show' | 'readonly' | 'editable';
@@ -166,6 +236,8 @@ export interface VisibilityCondition {
   action: ConditionAction; // 'hide' | 'show' | 'readonly' | 'editable'
   matchType?: 'all' | 'any'; // 'all' (AND) or 'any' (OR), default 'all'
   rules?: ConditionRule[];
+  /** Optional reference to a centralized ConditionDefinition (reusable condition module). */
+  condition_id?: string | null;
   /** Legacy single-rule backward compatibility */
   field?: string;
   operator?: ConditionOperator;
@@ -223,6 +295,13 @@ export interface EntityForm {
   cols: number;
   row_height: number;
   updated_at?: string | null;
+  /**
+   * Stages of the latest published workflow for this entity type. Available to
+   * the form builder so condition rules can bind to the workflow stage.
+   */
+  workflow_states?: string[];
+  /** The workflow stage a new record starts in (used by the create form). */
+  initial_state?: string | null;
 }
 
 export type ListKind = 'options' | 'checklist';

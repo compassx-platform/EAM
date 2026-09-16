@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from backend.database import get_db, Base, engine
 from backend.models.entities import WorkOrder, WorkOrderEvent, Permit, PermitEvent, ENTITY_REGISTRY
-from backend.models.workflow import WorkflowDefinition, GateInstance
+from backend.models.workflow import WorkflowDefinition
+from backend.models.conditions import ConditionDefinition
 from backend.models.field_registry import EntityField
 from backend.models.users import AppUser, AppRole
 from backend.services.expiry_worker import check_and_expire_permits
@@ -33,7 +34,7 @@ def get_system_stats(db: Session = Depends(get_db)):
     in_progress_wo = db.query(WorkOrder).filter(WorkOrder.status == "InProgress").count()
     total_events = db.query(WorkOrderEvent).count() + db.query(PermitEvent).count()
     workflows_count = db.query(WorkflowDefinition).count()
-    gates_count = db.query(GateInstance).count()
+    conditions_count = db.query(ConditionDefinition).count()
     fields_count = db.query(EntityField).count()
     users_count = db.query(AppUser).count()
 
@@ -48,7 +49,7 @@ def get_system_stats(db: Session = Depends(get_db)):
         },
         "total_events": total_events,
         "workflows_count": workflows_count,
-        "gates_count": gates_count,
+        "conditions_count": conditions_count,
         "fields_count": fields_count,
         "users_count": users_count,
     }
@@ -89,8 +90,8 @@ def trigger_expiry_check(db: Session = Depends(get_db)):
 @router.post("/seed")
 def reseed_database(db: Session = Depends(get_db)):
     """
-    Reseeds default workflows, gates, fields, users, and sample data.
+    Reseeds default workflows, conditions, fields, users, and sample data.
     """
     from backend.seed_data import seed_all
     seed_all(db)
-    return {"message": "Database successfully seeded with default workflows, gates, users, and sample entities."}
+    return {"message": "Database successfully seeded with default workflows, conditions, users, and sample entities."}

@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from backend.database import Base, engine
 from backend.models.users import AppUser, AppRole
 from backend.models.field_registry import EntityField
-from backend.models.workflow import WorkflowDefinition, GateInstance
+from backend.models.workflow import WorkflowDefinition
+from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.forms import EntityForm
 from backend.models.entities import WorkOrder, Permit, PMSchedule
 from backend.models.lists import ListDefinition
@@ -304,174 +305,159 @@ def seed_all(db: Session):
             db.add(f)
     db.commit()
 
-    # 4. Seed Gate Instances (Section 3.6) — v1 + v2 flows
-    gates_data = [
-        # --- Permit gates (v1 + v2) ---
+    # 4. Seed Conditions (central, reusable, versioned rule registry — replaces gates)
+    conditions_data = [
+        # --- Permit conditions ---
         {
-            "id": "gate_role_safety_officer",
+            "id": "cond_role_safety_officer",
             "entity_type": "permit",
-            "gate_type": "role_check",
             "label": "Requires Safety Officer Role",
-            "params": {"role": "Safety Officer"},
+            "definition": {"logic": "AND", "rules": [{"type": "role", "role": "Safety Officer"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_permit_hazards_not_empty",
+            "id": "cond_permit_hazards_filled",
             "entity_type": "permit",
-            "gate_type": "field_not_empty",
             "label": "Hazards Identified is Required",
-            "params": {"field": "hazards_identified"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "hazards_identified"}]},
             "failure_policy": "block",
         },
-        # --- WorkOrder gates (v1 lifecycle) ---
         {
-            "id": "gate_role_supervisor",
+            "id": "cond_permit_is_isolation",
+            "entity_type": "permit",
+            "label": "Permit Type is Electrical Isolation",
+            "definition": {"logic": "AND", "rules": [{"type": "attribute", "field": "permit_type", "operator": "eq", "value": "Electrical Isolation"}]},
+            "failure_policy": "block",
+        },
+        # --- WorkOrder conditions (v1 lifecycle) ---
+        {
+            "id": "cond_role_supervisor",
             "entity_type": "workorder",
-            "gate_type": "role_check",
             "label": "Requires Supervisor Role",
-            "params": {"role": "Supervisor"},
+            "definition": {"logic": "AND", "rules": [{"type": "role", "role": "Supervisor"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_cost_threshold",
+            "id": "cond_cost_threshold",
             "entity_type": "workorder",
-            "gate_type": "numeric_threshold",
             "label": "Estimated Cost ≤ $15,000",
-            "params": {"field": "estimated_cost", "operator": "<=", "value": 15000},
+            "definition": {"logic": "AND", "rules": [{"type": "attribute", "field": "estimated_cost", "operator": "le", "value": 15000}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_linked_permit_active",
+            "id": "cond_linked_permit_active",
             "entity_type": "workorder",
-            "gate_type": "related_entity_status_check",
             "label": "Linked Permit must be Active",
-            "params": {
-                "relationship_field": "linked_permit_id",
-                "target_entity_type": "permit",
-                "required_status": "Active"
-            },
+            "definition": {"logic": "AND", "rules": [{"type": "related", "relationship_field": "linked_permit_id", "target_entity_type": "permit", "required_status": "Active"}]},
             "failure_policy": "block",
         },
-        # --- WorkOrder gates (standard_v2 realistic flow) ---
+        # --- WorkOrder conditions (standard_v2 realistic flow) ---
         {
-            "id": "gate_wo_role_manager",
+            "id": "cond_wo_role_manager",
             "entity_type": "workorder",
-            "gate_type": "role_check",
             "label": "Requires Manager Role",
-            "params": {"role": "Manager"},
+            "definition": {"logic": "AND", "rules": [{"type": "role", "role": "Manager"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_is_emergency",
+            "id": "cond_wo_is_emergency",
             "entity_type": "workorder",
-            "gate_type": "attribute_condition",
             "label": "WORKTYPE is Emergency (EM)",
-            "params": {"field": "worktype", "operator": "eq", "value": "EM"},
+            "definition": {"logic": "AND", "rules": [{"type": "attribute", "field": "worktype", "operator": "eq", "value": "EM"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_cost_high",
+            "id": "cond_wo_cost_high",
             "entity_type": "workorder",
-            "gate_type": "expression_threshold",
             "label": "Estimate > $5,000 (needs manager approval)",
-            "params": {"expression": "($estlabcost + $estmatcost)", "operator": ">", "value": 5000},
+            "definition": {"logic": "AND", "rules": [{"type": "expression", "expression": "($estlabcost + $estmatcost)", "operator": ">", "value": 5000}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_permit_required",
+            "id": "cond_wo_permit_required",
             "entity_type": "workorder",
-            "gate_type": "attribute_condition",
             "label": "Safety Permit Required (hazardous = Yes)",
-            "params": {"field": "hazardous", "operator": "eq", "value": "Yes"},
+            "definition": {"logic": "AND", "rules": [{"type": "attribute", "field": "hazardous", "operator": "eq", "value": "Yes"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_permit_linked",
+            "id": "cond_wo_permit_linked",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Work Permit Must Be Linked",
-            "params": {"field": "linked_permit_id"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "linked_permit_id"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_linked_permit_approved",
+            "id": "cond_wo_linked_permit_approved",
             "entity_type": "workorder",
-            "gate_type": "related_entity_status_check",
             "label": "Linked Permit must be APPROVED",
-            "params": {
-                "relationship_field": "linked_permit_id",
-                "target_entity_type": "permit",
-                "required_status": "Approved"
-            },
+            "definition": {"logic": "AND", "rules": [{"type": "related", "relationship_field": "linked_permit_id", "target_entity_type": "permit", "required_status": "Approved"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_variance_over",
+            "id": "cond_wo_variance_over",
             "entity_type": "workorder",
-            "gate_type": "expression_threshold",
             "label": "Actual vs Estimate Variance > 15%",
-            "params": {
-                "expression": "($actlabcost + $actmatcost) / ($estlabcost + $estmatcost)",
-                "operator": ">",
-                "value": 1.15,
-            },
+            "definition": {"logic": "AND", "rules": [{"type": "expression", "expression": "($actlabcost + $actmatcost) / ($estlabcost + $estmatcost)", "operator": ">", "value": 1.15}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_failure_recorded",
+            "id": "cond_wo_failure_recorded",
             "entity_type": "workorder",
-            "gate_type": "attribute_condition",
             "label": "Failure Recorded (FAILURECODE set)",
-            "params": {"field": "failurecode", "operator": "is_not_empty"},
+            "definition": {"logic": "AND", "rules": [{"type": "attribute", "field": "failurecode", "operator": "is_not_empty"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_failure_class",
+            "id": "cond_wo_failure_class",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Failure Class Required",
-            "params": {"field": "failure_class"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "failure_class"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_failure_problem",
+            "id": "cond_wo_failure_problem",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Failure Problem Required",
-            "params": {"field": "failure_problem"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "failure_problem"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_failure_cause",
+            "id": "cond_wo_failure_cause",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Failure Cause Required",
-            "params": {"field": "failure_cause"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "failure_cause"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_failure_remedy",
+            "id": "cond_wo_failure_remedy",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Failure Remedy Required",
-            "params": {"field": "failure_remedy"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "failure_remedy"}]},
             "failure_policy": "block",
         },
         {
-            "id": "gate_wo_pm_linked",
+            "id": "cond_wo_pm_linked",
             "entity_type": "workorder",
-            "gate_type": "field_not_empty",
             "label": "Linked to a PM Schedule",
-            "params": {"field": "linked_pm_id"},
+            "definition": {"logic": "AND", "rules": [{"type": "field_not_empty", "field": "linked_pm_id"}]},
             "failure_policy": "block",
         },
     ]
 
-    for g_info in gates_data:
-        existing = db.query(GateInstance).filter(GateInstance.id == g_info["id"]).first()
+    for c_info in conditions_data:
+        existing = db.query(ConditionDefinition).filter(ConditionDefinition.id == c_info["id"]).first()
         if not existing:
-            g = GateInstance(**g_info)
-            db.add(g)
+            cond = ConditionDefinition(**c_info, type="structured", current_version=1, created_by="admin@compassx.io")
+            db.add(cond)
+            db.add(ConditionVersion(
+                condition_id=cond.id,
+                version=1,
+                label=cond.label,
+                definition=cond.definition,
+                failure_policy=cond.failure_policy,
+                created_by="admin@compassx.io",
+            ))
     db.commit()
 
     # 5a. WorkOrder standard_v1 (legacy lifecycle — kept for bound instances & coexistence tests)
@@ -481,16 +467,16 @@ def seed_all(db: Session):
         "states": ["Draft", "Submitted", "SupervisorApproved", "InProgress", "Completed", "Closed", "Rejected", "Cancelled"],
         "terminal_states": ["Closed", "Cancelled", "Rejected"],
         "transitions": [
-            {"from": "Draft", "event": "SUBMITTED", "to": "Submitted", "gates": []},
-            {"from": "Submitted", "event": "APPROVED", "to": "SupervisorApproved", "gates": ["gate_role_supervisor", "gate_cost_threshold"]},
-            {"from": "Submitted", "event": "REJECTED", "to": "Rejected", "gates": ["gate_role_supervisor"]},
-            {"from": "SupervisorApproved", "event": "STARTED", "to": "InProgress", "gates": ["gate_linked_permit_active"]},
-            {"from": "InProgress", "event": "COMPLETED", "to": "Completed", "gates": []},
-            {"from": "Completed", "event": "CLOSED", "to": "Closed", "gates": []},
-            {"from": "Completed", "event": "REOPENED", "to": "InProgress", "gates": []},
-            {"from": "Draft", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Submitted", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "SupervisorApproved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Draft", "event": "SUBMITTED", "to": "Submitted", "conditions": []},
+            {"from": "Submitted", "event": "APPROVED", "to": "SupervisorApproved", "conditions": ["cond_role_supervisor", "cond_cost_threshold"]},
+            {"from": "Submitted", "event": "REJECTED", "to": "Rejected", "conditions": ["cond_role_supervisor"]},
+            {"from": "SupervisorApproved", "event": "STARTED", "to": "InProgress", "conditions": ["cond_linked_permit_active"]},
+            {"from": "InProgress", "event": "COMPLETED", "to": "Completed", "conditions": []},
+            {"from": "Completed", "event": "CLOSED", "to": "Closed", "conditions": []},
+            {"from": "Completed", "event": "REOPENED", "to": "InProgress", "conditions": []},
+            {"from": "Draft", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Submitted", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "SupervisorApproved", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
         ]
     }, created_at=utc_now() - timedelta(minutes=10))
 
@@ -503,54 +489,54 @@ def seed_all(db: Session):
         "transitions": [
             # Step 1/2 — Waiting for approval (WAPPR): supervisor decision node
             {"from": "WAPPR", "event": "SUP_AUTHORIZE",
-             "gates": ["gate_role_supervisor"],
+             "conditions": ["cond_role_supervisor"],
              "choices": [
-                 {"to": "MGR_APPR", "when": ["gate_wo_cost_high"]},       # > $5k -> second approval layer
+                 {"to": "MGR_APPR", "when": ["cond_wo_cost_high"]},       # > $5k -> second approval layer
                  {"to": "APPR", "when": []},                              # below threshold -> auto-approve path
              ]},
-            {"from": "WAPPR", "event": "SUP_REJECT", "to": "WAPPR", "gates": ["gate_role_supervisor"]},
-            {"from": "WAPPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
+            {"from": "WAPPR", "event": "SUP_REJECT", "to": "WAPPR", "conditions": ["cond_role_supervisor"]},
+            {"from": "WAPPR", "event": "CANCEL", "to": "CANCELED", "conditions": []},
             # Emergency auto-route event (fired by auto_transitions when WORKTYPE=EM)
-            {"from": "WAPPR", "event": "AUTO_EMR", "to": "INPRG", "gates": []},
+            {"from": "WAPPR", "event": "AUTO_EMR", "to": "INPRG", "conditions": []},
 
             # Step 2 sub-node — Manager Approval
-            {"from": "MGR_APPR", "event": "MGR_AUTHORIZE", "to": "APPR", "gates": ["gate_wo_role_manager"]},
-            {"from": "MGR_APPR", "event": "MGR_REJECT", "to": "WAPPR", "gates": ["gate_wo_role_manager"]},
-            {"from": "MGR_APPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
+            {"from": "MGR_APPR", "event": "MGR_AUTHORIZE", "to": "APPR", "conditions": ["cond_wo_role_manager"]},
+            {"from": "MGR_APPR", "event": "MGR_REJECT", "to": "WAPPR", "conditions": ["cond_wo_role_manager"]},
+            {"from": "MGR_APPR", "event": "CANCEL", "to": "CANCELED", "conditions": []},
 
             # Step 3 — approved: permit-pending cross-object gate or straight to work
             {"from": "APPR", "event": "START_WORK",
              "choices": [
-                 {"to": "PRMT_PEND", "when": ["gate_wo_permit_required"]},  # hazardous -> permit pending
+                 {"to": "PRMT_PEND", "when": ["cond_wo_permit_required"]},  # hazardous -> permit pending
                  {"to": "INPRG", "when": []},
              ]},
             {"from": "PRMT_PEND", "event": "START_WORK", "to": "INPRG",
-             "gates": ["gate_wo_permit_linked", "gate_wo_linked_permit_approved"]},  # cross-object gate
-            {"from": "APPR", "event": "CANCEL", "to": "CANCELED", "gates": []},
-            {"from": "PRMT_PEND", "event": "CANCEL", "to": "CANCELED", "gates": []},
+             "conditions": ["cond_wo_permit_linked", "cond_wo_linked_permit_approved"]},  # cross-object gate
+            {"from": "APPR", "event": "CANCEL", "to": "CANCELED", "conditions": []},
+            {"from": "PRMT_PEND", "event": "CANCEL", "to": "CANCELED", "conditions": []},
 
             # Step 4 — in progress: variance review on completion
             {"from": "INPRG", "event": "COMPLETE_WORK",
              "choices": [
-                 {"to": "VR_REVIEW", "when": ["gate_wo_variance_over"]},   # over tolerance -> supervisor sign-off
+                 {"to": "VR_REVIEW", "when": ["cond_wo_variance_over"]},   # over tolerance -> supervisor sign-off
                  {"to": "COMP", "when": []},
              ]},
-            {"from": "VR_REVIEW", "event": "SUP_SIGNOFF", "to": "COMP", "gates": ["gate_role_supervisor"]},
-            {"from": "INPRG", "event": "CANCEL", "to": "CANCELED", "gates": []},
+            {"from": "VR_REVIEW", "event": "SUP_SIGNOFF", "to": "COMP", "conditions": ["cond_role_supervisor"]},
+            {"from": "INPRG", "event": "CANCEL", "to": "CANCELED", "conditions": []},
 
             # Step 5 — completion decision: failure-driven work needs RCA
             {"from": "COMP", "event": "FINALIZE",
              "choices": [
-                 {"to": "FAILURE", "when": ["gate_wo_failure_recorded"]},  # FAILURECODE set -> RCA required
+                 {"to": "FAILURE", "when": ["cond_wo_failure_recorded"]},  # FAILURECODE set -> RCA required
                  {"to": "CLOSING", "when": []},
              ]},
             {"from": "FAILURE", "event": "RCA_COMPLETE", "to": "CLOSING",
-             "gates": ["gate_wo_failure_class", "gate_wo_failure_problem", "gate_wo_failure_cause", "gate_wo_failure_remedy"]},
+             "conditions": ["cond_wo_failure_class", "cond_wo_failure_problem", "cond_wo_failure_cause", "cond_wo_failure_remedy"]},
 
             # Step 6 — close: PM-linked work triggers declarative side effects
             {"from": "CLOSING", "event": "CLOSE_WO",
              "choices": [
-                 {"to": "CLOSED", "when": ["gate_wo_pm_linked"],
+                 {"to": "CLOSED", "when": ["cond_wo_pm_linked"],
                   "on_after": [
                       {"type": "update_related_entity_field", "params": {
                           "relationship_field": "linked_pm_id",
@@ -573,7 +559,7 @@ def seed_all(db: Session):
              ]},
         ],
         "auto_transitions": [
-            {"from": "WAPPR", "event": "AUTO_EMR", "when": ["gate_wo_is_emergency"]},
+            {"from": "WAPPR", "event": "AUTO_EMR", "when": ["cond_wo_is_emergency"]},
         ],
     }, created_at=utc_now() - timedelta(minutes=5))
 
@@ -584,16 +570,16 @@ def seed_all(db: Session):
         "states": ["Requested", "RiskAssessed", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
         "terminal_states": ["Closed", "Cancelled", "Expired"],
         "transitions": [
-            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "gates": ["gate_permit_hazards_not_empty"]},
-            {"from": "RiskAssessed", "event": "ISSUED", "to": "Issued", "gates": ["gate_role_safety_officer"]},
-            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "gates": []},
-            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "gates": []},
-            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "gates": []},
-            {"from": "Active", "event": "EXPIRED", "to": "Expired", "gates": []},
-            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "conditions": ["cond_permit_hazards_filled"]},
+            {"from": "RiskAssessed", "event": "ISSUED", "to": "Issued", "conditions": ["cond_role_safety_officer"]},
+            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "conditions": []},
+            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "conditions": []},
+            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "conditions": []},
+            {"from": "Active", "event": "EXPIRED", "to": "Expired", "conditions": []},
+            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
         ]
     }, created_at=utc_now() - timedelta(minutes=10))
 
@@ -604,20 +590,59 @@ def seed_all(db: Session):
         "states": ["Requested", "RiskAssessed", "Approved", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
         "terminal_states": ["Closed", "Cancelled", "Expired"],
         "transitions": [
-            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "gates": ["gate_permit_hazards_not_empty"]},
-            {"from": "RiskAssessed", "event": "APPROVED", "to": "Approved", "gates": ["gate_role_safety_officer"]},
-            {"from": "Approved", "event": "ISSUED", "to": "Issued", "gates": ["gate_role_safety_officer"]},
-            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "gates": []},
-            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "gates": []},
-            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "gates": []},
-            {"from": "Active", "event": "EXPIRED", "to": "Expired", "gates": []},
-            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Approved", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "gates": []},
-            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "gates": []},
+            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED", "to": "RiskAssessed", "conditions": ["cond_permit_hazards_filled"]},
+            {"from": "RiskAssessed", "event": "APPROVED", "to": "Approved", "conditions": ["cond_role_safety_officer"]},
+            {"from": "Approved", "event": "ISSUED", "to": "Issued", "conditions": ["cond_role_safety_officer"]},
+            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "conditions": []},
+            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "conditions": []},
+            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "conditions": []},
+            {"from": "Active", "event": "EXPIRED", "to": "Expired", "conditions": []},
+            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Approved", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
         ]
     }, created_at=utc_now() - timedelta(minutes=5))
+
+    # 5d2. Permit standard_v3 — field-driven routing (form value -> workflow stage) with
+    # an extra IsolationPrecheck node for Electrical Isolation permits (Section 4.2 demo).
+    seed_legacy_workflow_if_absent(db, "permit", "permit_v3", {
+        "entity_type": "permit",
+        "version_label": "permit_v3",
+        "states": ["Requested", "IsolationPrecheck", "RiskAssessed", "Approved", "Issued", "Active", "HandedBack", "Closed", "Expired", "Cancelled"],
+        "terminal_states": ["Closed", "Cancelled", "Expired"],
+        "transitions": [
+            # Create -> Requested (CREATED implicit) -> decision node.
+            # permit_type = "Electrical Isolation" routes to IsolationPrecheck for a
+            # dedicated isolation review; everything else goes straight to risk assessment.
+            {"from": "Requested", "event": "RISK_ASSESSMENT_COMPLETED",
+             "conditions": ["cond_permit_hazards_filled"],
+             "choices": [
+                 {"to": "IsolationPrecheck", "when": ["cond_permit_is_isolation"]},
+                 {"to": "RiskAssessed", "when": []},
+             ]},
+            {"from": "IsolationPrecheck", "event": "ISOLATION_REVIEW", "to": "RiskAssessed", "conditions": ["cond_role_safety_officer"]},
+            {"from": "RiskAssessed", "event": "APPROVED", "to": "Approved", "conditions": ["cond_role_safety_officer"]},
+            {"from": "Approved", "event": "ISSUED", "to": "Issued", "conditions": ["cond_role_safety_officer"]},
+            {"from": "Issued", "event": "ACTIVATED", "to": "Active", "conditions": []},
+            {"from": "Active", "event": "HANDED_BACK", "to": "HandedBack", "conditions": []},
+            {"from": "HandedBack", "event": "CLOSED", "to": "Closed", "conditions": []},
+            {"from": "Active", "event": "EXPIRED", "to": "Expired", "conditions": []},
+            {"from": "Requested", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "IsolationPrecheck", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "RiskAssessed", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Approved", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Issued", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+            {"from": "Active", "event": "CANCELLED", "to": "Cancelled", "conditions": []},
+        ],
+        "auto_transitions": [],
+    }, created_at=utc_now())
+
+    # 5d3. Seed the permit form layout with two-way condition rules:
+    #   * permit_type = "Electrical Isolation" -> isolation group appears (field -> form)
+    #   * _workflow_status in review/approval stages -> supervisor group appears (stage -> form)
+    seed_permit_form_layout(db)
 
     # 5e. PM Schedule — create-only tracking workflow (Step 6 PM records)
     seed_legacy_workflow_if_absent(db, "pm_schedule", "pm_schedule_v1", {
@@ -636,6 +661,63 @@ def seed_all(db: Session):
 
     # 6. Seed Sample Live Entities if none exist
     seed_sample_entities(db)
+
+
+def seed_permit_form_layout(db: Session):
+    """Seeds the permit-to-work form layout demonstrating both binding directions.
+
+    Field -> workflow stage and stage -> form are wired as visibility conditions:
+      * The "Isolation Details" group only appears when ``permit_type`` equals
+        "Electrical Isolation" (field value drives what is visible).
+      * The "Supervisor Approval" group only appears when the current workflow
+        stage is a review/approval stage (``_workflow_status`` pseudo-field),
+        so at create time / in Requested the approval fields stay hidden.
+    """
+    existing = db.query(EntityForm).filter(EntityForm.entity_type == "permit").first()
+    if existing:
+        return
+
+    layout = [
+        # --- Section + request fields (visible at create / Requested stage) ---
+        {"i": "header:permit_request", "x": 0, "y": 0, "w": 12, "h": 1, "isHeader": True, "label": "Permit Request"},
+        {"i": "title", "x": 0, "y": 1, "w": 6, "h": 1, "fieldName": "title", "fieldType": "text", "label": "Title", "required": True},
+        {"i": "permit_type", "x": 6, "y": 1, "w": 6, "h": 1, "fieldName": "permit_type", "fieldType": "dropdown", "optionsList": "permit_type", "label": "Permit Type", "required": True},
+        {"i": "location", "x": 0, "y": 2, "w": 6, "h": 1, "fieldName": "location", "fieldType": "text", "label": "Location", "required": True},
+        {"i": "risk_level", "x": 6, "y": 2, "w": 6, "h": 1, "fieldName": "risk_level", "fieldType": "dropdown", "options": ["Low", "Medium", "High"], "label": "Risk Level", "required": False},
+        {"i": "hazards_identified", "x": 0, "y": 3, "w": 12, "h": 2, "fieldName": "hazards_identified", "fieldType": "long_text", "label": "Hazards Identified", "required": True},
+        {"i": "safety_precautions", "x": 0, "y": 5, "w": 12, "h": 2, "fieldName": "safety_precautions", "fieldType": "long_text", "label": "Safety Precautions", "required": False},
+
+        # --- Isolation details group: only for Electrical Isolation permits (field -> form) ---
+        {"i": "group:isolation_details", "x": 0, "y": 7, "w": 12, "h": 1, "isGroup": True, "groupId": "group:isolation_details", "label": "Isolation Details",
+         "visibilityCondition": {
+             "action": "show",
+             "matchType": "all",
+             "rules": [{"field": "permit_type", "operator": "equals", "value": "Electrical Isolation"}],
+         }},
+        {"i": "isolation_notes", "x": 0, "y": 8, "w": 12, "h": 2, "fieldName": "isolation_notes", "fieldType": "long_text", "groupId": "group:isolation_details", "label": "Isolation Point Notes", "required": False},
+
+        # --- Supervisor approval group: appears at review/approval stages (stage -> form) ---
+        {"i": "group:supervisor_approval", "x": 0, "y": 10, "w": 12, "h": 1, "isGroup": True, "groupId": "group:supervisor_approval", "label": "Supervisor Approval",
+         "visibilityCondition": {
+             "action": "show",
+             "matchType": "any",
+             "rules": [
+                 {"field": "_workflow_status", "operator": "equals", "value": "IsolationPrecheck"},
+                 {"field": "_workflow_status", "operator": "equals", "value": "Approved"},
+             ],
+         }},
+        {"i": "supervisor_signoff", "x": 0, "y": 11, "w": 6, "h": 1, "fieldName": "supervisor_signoff", "fieldType": "boolean", "groupId": "group:supervisor_approval", "label": "Supervisor Sign-off", "required": False},
+        {"i": "supervisor_notes", "x": 6, "y": 12, "w": 6, "h": 2, "fieldName": "supervisor_notes", "fieldType": "long_text", "groupId": "group:supervisor_approval", "label": "Supervisor Notes", "required": False},
+    ]
+
+    form = EntityForm(
+        entity_type="permit",
+        layout=layout,
+        cols=12,
+        row_height=40,
+    )
+    db.add(form)
+    db.commit()
 
 
 def seed_lists(db: Session):

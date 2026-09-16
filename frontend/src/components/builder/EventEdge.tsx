@@ -1,10 +1,13 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
-import { ShieldCheck } from 'lucide-react';
+import { GitFork, ShieldCheck } from 'lucide-react';
+import type { WorkflowChoice, WorkflowAction } from '../../types';
 
 export type EventEdgeData = {
   event: string;
-  gates: string[];
+  conditions: string[];
+  choices?: WorkflowChoice[];
+  on_after?: WorkflowAction[];
   onRenameEvent?: (edgeId: string, event: string) => void;
 };
 
@@ -19,8 +22,15 @@ function EventEdge({
   selected,
   data,
 }: EdgeProps) {
-  const { event, gates = [], onRenameEvent } = (data || {}) as EventEdgeData;
+  const { event, conditions = [], choices, onRenameEvent } = (data || {}) as EventEdgeData;
   const [value, setValue] = useState(event);
+  const branchCount = choices?.length ?? 0;
+
+  // Keep the on-canvas label in sync when the event is renamed elsewhere
+  // (e.g. from the node inspector's event popup).
+  useEffect(() => {
+    setValue(event);
+  }, [event]);
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -37,6 +47,9 @@ function EventEdge({
     if (next && next !== event) onRenameEvent?.(id, next);
   };
 
+  const guarded = (conditions?.length ?? 0) > 0;
+  const branching = branchCount > 0;
+
   return (
     <>
       <BaseEdge
@@ -44,8 +57,8 @@ function EventEdge({
         path={edgePath}
         style={{
           strokeWidth: 2,
-          stroke: selected ? '#2563eb' : '#94a3b8',
-          strokeDasharray: selected ? undefined : gates.length ? '2 3' : '5 4',
+          stroke: selected ? '#2563eb' : branching ? '#d97706' : '#94a3b8',
+          strokeDasharray: selected ? undefined : branching || guarded ? '4 3' : '5 4',
         }}
       />
       <EdgeLabelRenderer>
@@ -71,11 +84,18 @@ function EventEdge({
             className="rounded border border-blue-200 bg-white px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold tracking-wide text-blue-700 shadow-sm outline-none focus:border-blue-500"
             style={{ width: 'auto', minWidth: '4rem' }}
           />
-          {gates.length > 0 && (
-            <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold text-amber-700">
-              <ShieldCheck className="h-2.5 w-2.5" /> {gates.length} gate{gates.length > 1 ? 's' : ''}
-            </span>
-          )}
+          <div className="flex items-center gap-0.5">
+            {branching && (
+              <span className="flex items-center gap-0.5 rounded bg-orange-100 px-1 py-px text-[9px] font-semibold text-orange-700">
+                <GitFork className="h-2.5 w-2.5" /> {branchCount}
+              </span>
+            )}
+            {guarded && (
+              <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold text-amber-700">
+                <ShieldCheck className="h-2.5 w-2.5" /> {conditions!.length} condition{conditions!.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
       </EdgeLabelRenderer>
     </>

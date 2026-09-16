@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw, Trash2, Pencil, Loader2, GitBranch, CalendarClock } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Pencil, Loader2, GitBranch, GitFork, CalendarClock, Layers, PlayCircle } from 'lucide-react';
 import { api } from '../api/client';
 import type { Workflow, WorkflowStatus } from '../types';
 
@@ -35,8 +35,26 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
     refresh();
   }, [refresh]);
 
+  const sections = useMemo(() => {
+    const byType = new Map<string, Workflow[]>();
+    for (const wf of workflows) {
+      const list = byType.get(wf.entity_type) ?? [];
+      list.push(wf);
+      byType.set(wf.entity_type, list);
+    }
+    const types = [...byType.keys()].sort();
+    return types
+      .filter((t) => filter === 'all' || t === filter)
+      .map((t) => {
+        const list = [...byType.get(t)!].sort(
+          (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+        );
+        const live = list.filter((w) => w.status === 'published');
+        return { entityType: t, versions: list, liveId: live.length ? live[live.length - 1].id : undefined };
+      });
+  }, [workflows, filter]);
+
   const entityTypes = useMemo(() => [...new Set(workflows.map((wf) => wf.entity_type))].sort(), [workflows]);
-  const visible = filter === 'all' ? workflows : workflows.filter((wf) => wf.entity_type === filter);
 
   const handleDelete = async (wf: Workflow) => {
     if (!window.confirm(`Delete workflow "${wf.version_label}" (${wf.status})? This cannot be undone.`)) return;
@@ -56,35 +74,48 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
     <div className="mx-auto w-full max-w-5xl px-6 py-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Workflow Builder</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Workflow Studio</h1>
           <p className="mt-1 text-sm text-gray-500">
             Design state machines with a drag-and-drop canvas, then publish them for use by entities.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-700"
-          >
-            <option value="all">All entity types</option>
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={() => setFilter('all')}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
+                filter === 'all' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              All
+            </button>
             {entityTypes.map((t) => (
-              <option key={t} value={t}>
+              <button
+                key={t}
+                type="button"
+                onClick={() => setFilter(t)}
+                className={`rounded-full border px-2.5 py-1 font-mono text-xs ${
+                  filter === t ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
                 {t}
-              </option>
+              </button>
             ))}
-          </select>
+          </div>
 
           <button
+            type="button"
             onClick={() => refresh()}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 p-2 text-gray-600 hover:bg-gray-50"
             title="Refresh"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
 
           <button
+            type="button"
             onClick={onNew}
             className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
           >
@@ -97,88 +128,103 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wider text-gray-500">
-              <th className="px-4 py-3 font-semibold">Version</th>
-              <th className="px-4 py-3 font-semibold">Entity Type</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">States</th>
-              <th className="px-4 py-3 font-semibold">Transitions</th>
-              <th className="px-4 py-3 font-semibold">Created</th>
-              <th className="px-4 py-3 text-right font-semibold">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
-                  <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-                </td>
-              </tr>
-            ) : visible.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
-                  No workflows{filter !== 'all' ? ` for "${filter}"` : ''} yet. Click <span className="font-medium text-gray-500">&quot;New Workflow&quot;</span> to build
-                  one.
-                </td>
-              </tr>
-            ) : (
-              visible.map((wf) => (
-                <tr key={wf.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium text-gray-800">
-                      <GitBranch className="h-3.5 w-3.5 text-blue-500" />
-                      {wf.version_label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-xs text-blue-700">
-                      {wf.entity_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${statusBadge[wf.status]}`}
-                    >
-                      {wf.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{wf.definition?.states?.length ?? 0}</td>
-                  <td className="px-4 py-3 text-gray-600">{wf.definition?.transitions?.length ?? 0}</td>
-                  <td className="px-4 py-3 text-gray-500">
-                    <span className="flex items-center gap-1 text-xs">
-                      <CalendarClock className="h-3.5 w-3.5 text-gray-400" />
-                      {wf.created_at ? new Date(wf.created_at).toLocaleString() : '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => onEdit(wf)}
-                        className="flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                        title={wf.status === 'published' ? 'Edit (forks a new draft)' : 'Edit workflow'}
-                      >
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(wf)}
-                        disabled={deleting === wf.id}
-                        className="flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                        title="Delete workflow"
-                      >
-                        {deleting === wf.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        Delete
-                      </button>
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+        </div>
+      ) : sections.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-400">
+          No workflows{filter !== 'all' ? ` for "${filter}"` : ''} yet. Click{' '}
+          <span className="font-medium text-gray-600">New Workflow</span> to build one.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-6">
+          {sections.map(({ entityType, versions, liveId }) => (
+            <section key={entityType} className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+              <header className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50/70 px-4 py-3">
+                <span className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-sm font-semibold text-blue-700">
+                  {entityType}
+                </span>
+                <span className="text-xs text-gray-400">{versions.length} version{versions.length > 1 ? 's' : ''}</span>
+                {liveId && (
+                  <span className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    <PlayCircle className="h-3 w-3" /> Live · drives routing & forms
+                  </span>
+                )}
+                <div className="ml-auto">
+                  <button
+                    type="button"
+                    onClick={onNew}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                  >
+                    + New draft
+                  </button>
+                </div>
+              </header>
+
+              <div className="divide-y divide-gray-50">
+                {versions.map((wf) => {
+                  const live = wf.id === liveId;
+                  const branches = (wf.definition?.transitions ?? []).reduce(
+                    (acc, t) => acc + (t.choices?.length ?? 1),
+                    0
+                  );
+                  return (
+                    <div key={wf.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-gray-50/60">
+                      <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium text-gray-800">
+                        <GitBranch className="h-3.5 w-3.5 text-blue-500" />
+                        {wf.version_label}
+                      </span>
+
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${statusBadge[wf.status]}`}>
+                        {wf.status}
+                        {live && <span className="ml-0.5 rounded bg-emerald-600 px-1 text-[9px] font-bold uppercase text-white">active</span>}
+                      </span>
+
+                      <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Layers className="h-3 w-3 text-gray-400" />
+                          {wf.definition?.states?.length ?? 0} states
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <GitFork className="h-3 w-3 text-gray-400" />
+                          {branches} routes
+                        </span>
+                        {wf.created_at && (
+                          <span className="flex items-center gap-1">
+                            <CalendarClock className="h-3 w-3 text-gray-400" />
+                            {new Date(wf.created_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onEdit(wf)}
+                          className="flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                          title={live ? 'Edit (forks a new draft)' : 'Edit workflow'}
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(wf)}
+                          disabled={deleting === wf.id}
+                          className="flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          title="Delete workflow"
+                        >
+                          {deleting === wf.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

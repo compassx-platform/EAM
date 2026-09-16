@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import {
   Plus,
   RefreshCw,
@@ -17,13 +17,15 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
+import { isItemReadOnly, isItemVisible, withWorkflowStatus } from '../../lib/conditions';
 import type {
   EntityRecord,
   EntityEvent,
   ValidTransition,
   EntityField,
-  GateTraceItem,
+  ConditionTraceItem,
   ResolvedList,
+  EntityFormItem,
 } from '../../types';
 import { EntityFormView } from './EntityFormView';
 
@@ -110,7 +112,7 @@ export function EntityConsole() {
 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [fieldLists, setFieldLists] = useState<Record<string, ResolvedList>>({});
-  const [gateMap, setGateMap] = useState<Record<string, { label: string; gate_type: string }>>({});
+  const [conditionMap, setConditionMap] = useState<Record<string, { label: string; type: string }>>({});
 
   const [detail, setDetail] = useState<{ entity: EntityRecord; events: EntityEvent[] } | null>(null);
   const [valid, setValid] = useState<ValidTransition[]>([]);
@@ -139,11 +141,11 @@ export function EntityConsole() {
   }, [route.query.toString(), route.query.get('type'), route.query.get('status')]);
 
   const loadMeta = useCallback(() => {
-    api.listGates(type).then((gates) => {
-      const map: Record<string, { label: string; gate_type: string }> = {};
-      for (const g of gates) map[g.id] = { label: g.label, gate_type: g.gate_type };
-      setGateMap(map);
-    }).catch(() => setGateMap({}));
+    api.listConditions(type).then((conds) => {
+      const map: Record<string, { label: string; type: string }> = {};
+      for (const g of conds) map[g.id] = { label: g.label, type: g.type };
+      setConditionMap(map);
+    }).catch(() => setConditionMap({}));
     api.listFields(type).then(async (fs) => {
       setFields(fs);
       const keys = [...new Set(fs.map((f) => f.option_list_key).filter((k): k is string => Boolean(k)))];
@@ -357,7 +359,7 @@ export function EntityConsole() {
           entityType={type}
           detail={detail}
           valid={valid}
-          gateMap={gateMap}
+          conditionMap={conditionMap}
           loading={detailLoading}
           onRefresh={reloadDetail}
           onClose={() => patchQuery({ selected: undefined })}
@@ -382,7 +384,7 @@ export function EntityConsole() {
           transition={fire}
           fields={fields}
           fieldLists={fieldLists}
-          gateMap={gateMap}
+          conditionMap={conditionMap}
           onClose={() => setFire(null)}
           onDone={() => {
             setFire(null);
@@ -401,7 +403,7 @@ function EntityDetail({
   entityType,
   detail,
   valid,
-  gateMap,
+  conditionMap,
   loading,
   onRefresh,
   onClose,
@@ -411,7 +413,7 @@ function EntityDetail({
   entityType: string;
   detail: { entity: EntityRecord; events: EntityEvent[] };
   valid: ValidTransition[];
-  gateMap: Record<string, { label: string; gate_type: string }>;
+  conditionMap: Record<string, { label: string; type: string }>;
   loading: boolean;
   onRefresh: () => void;
   onClose: () => void;
@@ -483,7 +485,7 @@ function EntityDetail({
               <p className="text-xs text-gray-400">No legal transitions from this state.</p>
             ) : (
               valid.map((t) => {
-                const gateIds = t.gates || [];
+                const conditionIds = t.conditions || [];
                 return (
                   <button
                     key={t.event_type}
@@ -498,13 +500,13 @@ function EntityDetail({
                       </span>
                     </span>
                     <span className="flex gap-0.5">
-                      {gateIds.map((g) => (
+                      {conditionIds.map((g) => (
                         <span
                           key={g}
-                          title={gateMap[g]?.label || g}
+                          title={conditionMap[g]?.label || g}
                           className="flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold text-amber-700 opacity-0 transition-opacity group-hover:opacity-100"
                         >
-                          <ShieldCheck className="h-2.5 w-2.5" /> {gateIds.length} gate
+                          <ShieldCheck className="h-2.5 w-2.5" /> {conditionIds.length} condition
                         </span>
                       ))}
                     </span>
@@ -538,7 +540,7 @@ function EntityDetail({
 
 function EventRow({ ev }: { ev: EntityEvent }) {
   const [open, setOpen] = useState(false);
-  const gateTrace = (ev.payload?.gate_trace as GateTraceItem[] | undefined) ?? null;
+  const gateTrace = (ev.payload?.condition_trace as ConditionTraceItem[] | undefined) ?? null;
   const routing = ev.payload?.routing as RoutingSummary | undefined;
   return (
     <div>
@@ -560,7 +562,7 @@ function EventRow({ ev }: { ev: EntityEvent }) {
         <div className="mt-1 flex flex-col gap-0.5">
           {gateTrace.map((g) => (
             <span
-              key={g.gate_id}
+              key={g.condition_id}
               className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${g.effective_pass ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
             >
               {g.effective_pass ? <ShieldCheck className="h-2.5 w-2.5" /> : <ShieldX className="h-2.5 w-2.5" />}
@@ -606,7 +608,7 @@ function FireTransitionModal({
   transition,
   fields,
   fieldLists,
-  gateMap,
+  conditionMap,
   onClose,
   onDone,
 }: {
@@ -615,7 +617,7 @@ function FireTransitionModal({
   transition: ValidTransition;
   fields: EntityField[];
   fieldLists: Record<string, ResolvedList>;
-  gateMap: Record<string, { label: string; gate_type: string }>;
+  conditionMap: Record<string, { label: string; type: string }>;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -625,6 +627,146 @@ function FireTransitionModal({
   const [err, setErr] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<TransitionResponse | null>(null);
 
+  // Active form layout for this entity type — used to show only the fields that
+  // are relevant at the current workflow stage (stage -> form two-way binding).
+  const [layoutItems, setLayoutItems] = useState<EntityFormItem[]>([]);
+  const [layoutResolved, setLayoutResolved] = useState<Record<string, ResolvedList>>({});
+  const [layoutLoading, setLayoutLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const form = await api.getForm(entityType);
+        if (cancelled) return;
+        const layout = ((form.layout || []) as Array<any>).map((it) => {
+          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
+          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+          return {
+            ...it,
+            isHeader,
+            isGroup,
+            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
+            fieldType: it.fieldType ?? it.field_type ?? null,
+            optionsList: it.optionsList ?? it.options_list ?? null,
+            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
+            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
+            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
+            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
+            required: Boolean(it.required),
+            options: it.options ?? [],
+          };
+        }) as EntityFormItem[];
+        setLayoutItems(layout);
+        const keys = [...new Set(layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k)))];
+        if (keys.length > 0) {
+          const r = await api.resolveLists(keys);
+          if (!cancelled) setLayoutResolved(r.resolved);
+        }
+      } catch {
+        /* no layout -> fall back to pure registry fields */
+      } finally {
+        if (!cancelled) setLayoutLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityType]);
+
+  // Values used to evaluate stage/field conditions: existing custom fields plus
+  // the entity's current workflow stage as the `_workflow_status` pseudo-field.
+  const conditionValues = useMemo(() => {
+    const base: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(entity.custom_fields || {})) {
+      base[k] = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    }
+    return withWorkflowStatus(base, entity.status);
+  }, [entity.custom_fields, entity.status]);
+
+  const byRegistryName = useMemo(
+    () => new Map(fields.map((f) => [f.field_name, f])),
+    [fields]
+  );
+
+  // Merge layout fields (with stage-driven visibility) and registry fields into a
+  // single editable set. Fields defined in the layout are gated by its conditions;
+  // registry fields that are not on the layout stay editable for back-compat.
+  const editDefs = useMemo(() => {
+    const hasLayout = layoutItems.length > 0;
+    const defs: Array<{
+      name: string;
+      label: string;
+      type: string;
+      required: boolean;
+      options: string[];
+      readOnly: boolean;
+      layoutItem: EntityFormItem | null;
+    }> = [];
+
+    const layoutFieldItems = layoutItems.filter((it) => !it.isHeader && !it.isGroup);
+    const layoutNames = new Set(layoutFieldItems.map((it) => it.fieldName || it.i));
+
+    if (hasLayout) {
+      for (const it of layoutFieldItems) {
+        const name = it.fieldName || it.i;
+        let options = it.options || [];
+        if (it.optionsList) {
+          const list = layoutResolved[it.optionsList];
+          if (list && list.kind === 'options') options = list.items as string[];
+          else {
+            const reg = byRegistryName.get(name);
+            if (reg?.option_list_key && fieldLists[reg.option_list_key]?.kind === 'options') {
+              options = fieldLists[reg.option_list_key].items as string[];
+            }
+          }
+        } else {
+          const reg = byRegistryName.get(name);
+          if ((!options || options.length === 0) && reg) {
+            options = fieldLists[reg.option_list_key as string]?.items as string[] || reg.select_options || [];
+          }
+        }
+        if (it.fieldType === 'boolean' && options.length === 0) options = ['yes', 'no'];
+
+        defs.push({
+          name,
+          label: it.label || it.fieldName || it.i,
+          type: it.fieldType || byRegistryName.get(name)?.field_type || 'text',
+          required: Boolean(it.required),
+          options,
+          readOnly: isItemReadOnly(it, layoutItems, conditionValues),
+          layoutItem: it,
+        });
+      }
+    }
+
+    // Registry fields not present on the layout (fallback).
+    for (const f of fields) {
+      if (layoutNames.has(f.field_name)) continue;
+      const regOptions = fieldLists[f.option_list_key as string]?.items as string[] | undefined;
+      defs.push({
+        name: f.field_name,
+        label: f.field_name,
+        type: f.field_type,
+        required: f.required,
+        options: regOptions || f.select_options || [],
+        readOnly: false,
+        layoutItem: null,
+      });
+    }
+    return defs;
+  }, [layoutItems, layoutResolved, byRegistryName, fields, fieldLists, conditionValues]);
+
+  // Only fields visible under the current workflow stage are shown.
+  const visibleDefs = useMemo(
+    () =>
+      editDefs.filter((d) => {
+        if (!d.layoutItem) return true;
+        return isItemVisible(d.layoutItem, layoutItems, conditionValues);
+      }),
+    [editDefs, layoutItems, conditionValues]
+  );
+
   const submit = async () => {
     setSaving(true);
     setErr(null);
@@ -633,20 +775,24 @@ function FireTransitionModal({
       const res = await api.transition(entityType, {
         entity_id: entity.id,
         event_type: transition.event_type,
-        custom_fields_delta: toCustomFields(values, fields),
+        custom_fields_delta: toCustomFields(values, visibleDefs),
         payload: comment.trim() ? { comment: comment.trim() } : undefined,
       });
       setLastResult(res);
       window.setTimeout(onDone, 900);
     } catch (e: any) {
       setErr(e.message);
-      setLastResult({ new_status: '', gate_trace: e.body?.details?.gate_trace ?? [] });
+      setLastResult({ new_status: '', condition_trace: e.body?.details?.condition_trace ?? [] });
     } finally {
       setSaving(false);
     }
   };
 
-  const gateIds = transition.gates || [];
+  const conditionIds = transition.conditions || [];
+  const stageNote =
+    layoutItems.length > 0
+      ? `Only fields relevant to the current workflow stage (“${entity.status}”) are shown.`
+      : 'Update fields (optional, sent as delta)';
 
   return (
     <Modal
@@ -654,16 +800,16 @@ function FireTransitionModal({
       subtitle={`${entity.status} → ${transitionTarget(transition)}`}
       onClose={onClose}
     >
-      {gateIds.length > 0 && (
+      {conditionIds.length > 0 && (
         <div className="flex flex-col gap-1 rounded-md border border-amber-200 bg-amber-50 p-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
-            {gateIds.length} gate(s) will be enforced
+            {conditionIds.length} condition(s) will be enforced
           </label>
-          {gateIds.map((g) => (
+          {conditionIds.map((g) => (
             <span key={g} className="flex items-center gap-1.5 text-[11px] text-amber-800">
-              <ShieldCheck className="h-3 w-3" /> {gateMap[g]?.label || g}
-              {gateMap[g]?.gate_type && (
-                <span className="rounded bg-amber-200/60 px-1 font-mono text-[9px]">{gateMap[g]!.gate_type}</span>
+              <ShieldCheck className="h-3 w-3" /> {conditionMap[g]?.label || g}
+              {conditionMap[g]?.type && (
+                <span className="rounded bg-amber-200/60 px-1 font-mono text-[9px]">{conditionMap[g]!.type}</span>
               )}
             </span>
           ))}
@@ -671,22 +817,27 @@ function FireTransitionModal({
       )}
 
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-          Update fields (optional, sent as delta)
-        </label>
-        {fields.map((f) => {
-          const list = f.option_list_key ? fieldLists[f.option_list_key] : undefined;
-          const listOptions = list && list.kind === 'options' ? (list.items as string[]) : null;
-          return (
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{stageNote}</label>
+        {layoutLoading ? (
+          <div className="flex items-center gap-1.5 py-2 text-xs text-gray-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading form layout…
+          </div>
+        ) : visibleDefs.length === 0 ? (
+          <p className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-400">
+            No editable fields for the current workflow stage.
+          </p>
+        ) : (
+          visibleDefs.map((d) => (
             <FieldRow
-              key={f.field_name}
-              field={f}
-              value={values[f.field_name] ?? ''}
-              onChange={(v) => setValues((s) => ({ ...s, [f.field_name]: v }))}
-              listOptions={listOptions}
+              key={d.name}
+              def={d}
+              value={values[d.name] ?? ''}
+              readOnly={d.readOnly}
+              onChange={(v) => setValues((s) => ({ ...s, [d.name]: v }))}
+              listOptions={d.options}
             />
-          );
-        })}
+          ))
+        )}
         <input
           value={comment}
           onChange={(e) => setComment(e.target.value)}
@@ -699,12 +850,12 @@ function FireTransitionModal({
 
       {lastResult && (
         <div className="flex flex-col gap-1.5">
-          {lastResult.gate_trace.length > 0 && (
+          {lastResult.condition_trace.length > 0 && (
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Gate results</label>
-              {lastResult.gate_trace.map((g) => (
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Condition results</label>
+              {lastResult.condition_trace.map((g) => (
                 <span
-                  key={g.gate_id}
+key={g.condition_id}
                   className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
                     g.effective_pass ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
                   }`}
@@ -793,7 +944,7 @@ type RoutingSummary = { choice_index: number; to?: string; choices: RoutingChoic
 
 interface TransitionResponse {
   new_status: string;
-  gate_trace: GateTraceItem[];
+  condition_trace: ConditionTraceItem[];
   routing?: RoutingSummary;
   side_effects?: Array<{ type: string; success: boolean; message?: string; [k: string]: unknown }>;
   settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;
@@ -805,16 +956,21 @@ function transitionTarget(t: ValidTransition): string {
   return targets.length ? targets.join(' | ') : '…';
 }
 
-function toCustomFields(values: Record<string, string>, fields: EntityField[]): Record<string, unknown> {
-  const byName = new Map(fields.map((f) => [f.field_name, f]));
+function toCustomFields(
+  values: Record<string, string>,
+  defs: Array<{ name: string; type: string }> = []
+): Record<string, unknown> {
+  const byName = new Map(defs.map((d) => [d.name, d]));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
     const trimmed = v.trim();
     if (trimmed === '') continue;
-    const field = byName.get(k);
-    if (field?.field_type === 'number') {
+    const def = byName.get(k);
+    if (def?.type === 'number') {
       const n = Number(trimmed);
       out[k] = Number.isNaN(n) ? trimmed : n;
+    } else if (def?.type === 'boolean') {
+      out[k] = trimmed === 'yes';
     } else {
       out[k] = trimmed;
     }
@@ -822,44 +978,99 @@ function toCustomFields(values: Record<string, string>, fields: EntityField[]): 
   return out;
 }
 
-function FieldRow({ field, value, onChange, listOptions }: { field: EntityField; value: string; onChange: (v: string) => void; listOptions?: string[] | null }) {
+function FieldRow({
+  def,
+  value,
+  readOnly = false,
+  onChange,
+  listOptions,
+}: {
+  def: { name: string; label: string; type: string; required: boolean };
+  value: string;
+  readOnly?: boolean;
+  onChange: (v: string) => void;
+  listOptions?: string[];
+}) {
   const id = useId();
   const label = (
     <label htmlFor={id} className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
       <FileText className="h-3 w-3 text-gray-400" />
-      {field.field_name}
-      {field.required && <span className="text-red-500">*</span>}
-      <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{field.field_type}</span>
+      {def.label || def.name}
+      {def.required && <span className="text-red-500">*</span>}
+      <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
+      {readOnly && (
+        <span className="rounded bg-amber-100 px-1 font-mono text-[9px] text-amber-700" title="Read-only (disabled by condition)">
+          🔒 read-only
+        </span>
+      )}
     </label>
   );
 
-  const options = (listOptions ?? field.select_options) || [];
+  const options = listOptions || [];
+
+  const inputCls = `rounded-md border px-2 py-1.5 text-sm ${
+    readOnly
+      ? 'cursor-not-allowed border-gray-200 bg-gray-100/80 text-gray-500 select-none'
+      : 'border-gray-300 text-gray-800'
+  }`;
 
   const input =
-    field.field_type === 'select' ? (
+    def.type === 'select' || def.type === 'dropdown' ? (
       <select
         id={id}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800"
+        disabled={readOnly}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        className={inputCls}
       >
         <option value="">—</option>
         {options.map((o) => (
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
+    ) : def.type === 'boolean' ? (
+      <label
+        className={`flex w-fit items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs ${
+          readOnly
+            ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+            : 'cursor-pointer border-gray-300 bg-gray-50 text-gray-700'
+        }`}
+      >
+        <input
+          id={id}
+          type="checkbox"
+          checked={value === 'yes'}
+          disabled={readOnly}
+          onChange={(e) => !readOnly && onChange(e.target.checked ? 'yes' : 'no')}
+          className="accent-blue-600"
+        />
+        Yes
+      </label>
+    ) : def.type === 'long_text' ? (
+      <textarea
+        id={id}
+        value={value}
+        rows={2}
+        disabled={readOnly}
+        readOnly={readOnly}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        className={`${inputCls} resize-none leading-snug`}
+      />
     ) : (
       <input
         id={id}
         type={
-          field.field_type === 'number' ? 'number'
-          : field.field_type === 'date' ? 'date'
+          def.type === 'number' ? 'number'
+          : def.type === 'date' ? 'date'
+          : def.type === 'datetime' ? 'datetime-local'
+          : def.type === 'time' ? 'time'
           : 'text'
         }
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={field.field_type === 'entity_reference' ? 'linked entity id' : ''}
-        className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800"
+        disabled={readOnly}
+        readOnly={readOnly}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        className={inputCls}
       />
     );
 

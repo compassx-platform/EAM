@@ -1,11 +1,11 @@
-import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
-import { isItemVisible, isItemReadOnly } from '../../lib/conditions';
+import { isItemVisible, isItemReadOnly, withWorkflowStatus } from '../../lib/conditions';
 import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition } from '../../types';
 
 interface EntityCreateFormProps {
@@ -66,6 +66,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [initialState, setInitialState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -110,6 +111,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         setFields(formFields);
         setCols(form.cols || 12);
         setRowHeight(form.row_height || 40);
+        setInitialState(((form as any).initial_state as string) || null);
         const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
         const fieldKeys = formFields
           .map((f) => f.option_list_key)
@@ -196,12 +198,17 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     setValues((prev) => ({ ...prev, [fieldName]: val }));
   };
 
-  // Evaluate conditions dynamically based on current form values
+  // Evaluate conditions dynamically based on current form values (plus the
+  // workflow stage the record will start in, so stage-bound rules apply).
+  const conditionValues = useMemo(
+    () => withWorkflowStatus(values, initialState),
+    [values, initialState]
+  );
   const currentlyVisibleItems = items.filter((it) => {
     if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
       return false;
     }
-    return isItemVisible(it, items, values);
+    return isItemVisible(it, items, conditionValues);
   });
   const hasLayout = items.length > 0;
 
@@ -362,7 +369,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                           </div>
                         );
                       }
-                      const isReadOnly = isItemReadOnly(it, items, values);
+                      const isReadOnly = isItemReadOnly(it, items, conditionValues);
                       return (
                         <FillCell
                           key={it.i}

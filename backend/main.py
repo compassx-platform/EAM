@@ -15,7 +15,7 @@ from backend.services.expiry_worker import check_and_expire_permits
 from backend.routers import (
     auth_router,
     fields_router,
-    gates_router,
+conditions_router,
     workflows_router,
     entities_router,
     system_router,
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CompassX Workflow Engine & Manager",
-    description="Event-Sourced Generic Workflow Engine with Closed Deterministic Gates",
+    description="Event-Sourced Generic Workflow Engine with Centralized Reusable Conditions",
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
@@ -74,7 +74,7 @@ app.add_middleware(
 # Mount Routers under API prefix
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(fields_router, prefix=settings.API_PREFIX)
-app.include_router(gates_router, prefix=settings.API_PREFIX)
+app.include_router(conditions_router, prefix=settings.API_PREFIX)
 app.include_router(workflows_router, prefix=settings.API_PREFIX)
 app.include_router(forms_router, prefix=settings.API_PREFIX)
 app.include_router(actions_router, prefix=settings.API_PREFIX)

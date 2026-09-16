@@ -15,7 +15,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { isItemVisible } from '../../lib/conditions';
+import { isItemVisible, withWorkflowStatus } from '../../lib/conditions';
 import type {
   EntityField,
   EntityFormItem,
@@ -101,16 +101,19 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
 
   // Normalize custom_fields from entity record
   const customFields: Record<string, unknown> = entity.custom_fields || {};
-  const valuesForCondition: Record<string, string> = {};
+  const baseConditionValues: Record<string, string> = {};
   for (const [k, v] of Object.entries(customFields)) {
     if (v === null || v === undefined) {
-      valuesForCondition[k] = '';
+      baseConditionValues[k] = '';
     } else if (typeof v === 'object') {
-      valuesForCondition[k] = JSON.stringify(v);
+      baseConditionValues[k] = JSON.stringify(v);
     } else {
-      valuesForCondition[k] = String(v);
+      baseConditionValues[k] = String(v);
     }
   }
+  // Merge the entity's current workflow stage so stage-bound rules apply in the
+  // read-only filled-form view (stage -> form two-way binding).
+  const valuesForCondition = withWorkflowStatus(baseConditionValues, entity.status);
 
   useEffect(() => {
     let cancelled = false;

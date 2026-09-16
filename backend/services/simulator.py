@@ -2,7 +2,7 @@ from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from backend.models.entities import get_entity_models
 from backend.models.workflow import WorkflowDefinition
-from backend.services.gate_evaluator import evaluate_transition_gates, GateEvaluationResult
+from backend.services.condition_evaluator import evaluate_condition_ids, ConditionEvaluationResult
 from backend.services.command_handler import _resolve_transition_target, NoConditionSatisfiedError
 
 def simulate_transition(
@@ -33,7 +33,7 @@ def simulate_transition(
             return {
                 "accepted": False,
                 "error": f"{entity_type} with ID '{entity_id}' not found",
-                "gate_trace": [],
+                "condition_trace": [],
             }
         if entity:
             if not current_status:
@@ -54,7 +54,7 @@ def simulate_transition(
             return {
                 "accepted": False,
                 "error": f"No published workflow found for entity type '{entity_type}'",
-                "gate_trace": [],
+                "condition_trace": [],
             }
         workflow_version = published_wf.version_label
         wf_def = published_wf.definition
@@ -67,7 +67,7 @@ def simulate_transition(
             return {
                 "accepted": False,
                 "error": f"Workflow version '{workflow_version}' not found for '{entity_type}'",
-                "gate_trace": [],
+                "condition_trace": [],
             }
         wf_def = wf.definition
 
@@ -85,15 +85,15 @@ def simulate_transition(
             "error": f"Invalid transition: No transition from state '{current_status}' on event '{event_type}'",
             "from_state": current_status,
             "to_state": None,
-            "gate_trace": [],
+            "condition_trace": [],
         }
 
     to_state = matching_transition.get("to")
-    gate_ids = matching_transition.get("gates", []) or []
+    condition_ids = matching_transition.get("conditions", []) or matching_transition.get("gates", []) or []
 
-    all_passed, results, failing = evaluate_transition_gates(
+    all_passed, results, failing = evaluate_condition_ids(
         db=db,
-        gate_ids=gate_ids,
+        condition_ids=condition_ids,
         custom_fields=custom_fields,
         actor_id=actor_id,
         actor_type=actor_type,
@@ -125,7 +125,7 @@ def simulate_transition(
             "workflow_version": workflow_version,
             "error": ncs.message,
             "reason": ncs.message,
-            "gate_trace": trace,
+            "condition_trace": trace,
             "routing": {"choices": ncs.details.get("choice_trace", [])},
         }
 
@@ -136,8 +136,8 @@ def simulate_transition(
         "to_state": to_state,
         "event_type": event_type,
         "workflow_version": workflow_version,
-        "gate_failed": failing.label if failing else None,
-        "reason": failing.reason if failing else ("All gates passed" if accepted else None),
-        "gate_trace": trace,
+        "condition_failed": failing.label if failing else None,
+        "reason": failing.reason if failing else ("All conditions passed" if accepted else None),
+        "condition_trace": trace,
         "routing": routing,
     }

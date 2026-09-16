@@ -94,7 +94,7 @@ def save_draft(req: WorkflowDraftRequest, db: Session = Depends(get_db)):
 @router.post("/{id}/validate")
 def validate_workflow(id: str, db: Session = Depends(get_db)):
     """
-    Validates a workflow against §6 graph rules (unreachable states, missing gates, etc.).
+    Validates a workflow against §6 graph rules (unreachable states, missing conditions, etc.).
     """
     wf = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == id).first()
     if not wf:

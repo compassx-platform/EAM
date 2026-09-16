@@ -7,11 +7,12 @@ import { FormList } from './components/forms/FormList';
 import { FormBuilder } from './components/forms/FormBuilder';
 import { ListsView } from './components/lists/ListsView';
 import { ListEditor } from './components/lists/ListEditor';
+import { ConditionList } from './components/conditions/ConditionList';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool, ListChecks } from 'lucide-react';
+import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
-type Tab = 'workflows' | 'entities' | 'forms' | 'lists';
+type Tab = 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions';
 
 function App() {
   const route = useHashRoute();
@@ -25,12 +26,15 @@ function App() {
       ? 'forms'
       : route.path.startsWith('/lists')
         ? 'lists'
-        : 'workflows';
+        : route.path.startsWith('/conditions')
+          ? 'conditions'
+          : 'workflows';
 
   const switchTab = (t: Tab) => {
     if (t === 'entities') navigate('/entities');
     else if (t === 'forms') navigate('/forms');
     else if (t === 'lists') navigate('/lists');
+    else if (t === 'conditions') navigate('/conditions');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
@@ -61,6 +65,7 @@ function App() {
           {navBtn('entities', 'Entities', Layers)}
           {navBtn('forms', 'Forms', PenTool)}
           {navBtn('lists', 'Lists', ListChecks)}
+          {navBtn('conditions', 'Conditions', ShieldCheck)}
         </nav>
 
         {tab === 'entities' && route.path === '/entities/new' && (
@@ -128,6 +133,10 @@ function App() {
               />
             </div>
           )
+        ) : tab === 'conditions' ? (
+          <div key={listTick} className="h-full overflow-y-auto">
+            <ConditionList />
+          </div>
         ) : builderId !== undefined ? (
           <WorkflowBuilder
             key={builderId ?? 'new'}

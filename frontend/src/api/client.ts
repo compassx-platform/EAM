@@ -1,13 +1,16 @@
 import type {
   Workflow,
   WorkflowDefinition,
-  GateInstance,
+  ConditionDefinition,
+  ConditionGroup,
+  ConditionVersion,
+  ConditionTypeInfo,
+  ConditionTraceItem,
   ValidationResult,
   EntityField,
   EntityRecord,
   EntityEvent,
   ValidTransition,
-  GateTraceItem,
   EntityForm,
   EntityFormItem,
   OptionListSummary,
@@ -85,22 +88,58 @@ export const api = {
     return request(`/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  listGates(entityType?: string): Promise<GateInstance[]> {
+  listConditions(entityType?: string): Promise<ConditionDefinition[]> {
     const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : '';
-    return request<GateInstance[]>(`/gates${q}`);
+    return request<ConditionDefinition[]>(`/conditions${q}`);
   },
 
-  createGate(input: {
+  getCondition(id: string): Promise<ConditionDefinition> {
+    return request<ConditionDefinition>(`/conditions/${encodeURIComponent(id)}`);
+  },
+
+  createCondition(input: {
+    id?: string;
     entity_type: string;
-    gate_type: string;
     label: string;
-    params?: Record<string, unknown>;
-  }): Promise<GateInstance> {
-    return request<GateInstance>('/gates', { method: 'POST', body: JSON.stringify(input) });
+    description?: string;
+    type?: 'structured' | 'script';
+    definition: ConditionGroup;
+    failure_policy?: 'block' | 'allow';
+  }): Promise<ConditionDefinition> {
+    return request<ConditionDefinition>('/conditions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   },
 
-  listGateTypes(): Promise<Array<{ gate_type: string; name: string; description: string }>> {
-    return request('/gates/types');
+  listConditionTypes(): Promise<ConditionTypeInfo> {
+    return request<ConditionTypeInfo>('/conditions/types');
+  },
+
+  listConditionVersions(id: string): Promise<ConditionVersion[]> {
+    return request<ConditionVersion[]>(`/conditions/${encodeURIComponent(id)}/versions`);
+  },
+
+  getConditionUsage(id: string): Promise<{
+    workflows: Array<{ id: string; version_label: string; status: string; references: string[] }>;
+    forms: Array<{ entity_type: string; references: string[] }>;
+    referenced: boolean;
+  }> {
+    return request(`/conditions/${encodeURIComponent(id)}/used-by`);
+  },
+
+  evaluateCondition(
+    id: string,
+    input: { custom_fields: Record<string, unknown>; actor_id?: string; actor_type?: string; actor_roles?: string[] }
+  ): Promise<ConditionTraceItem> {
+    return request<ConditionTraceItem>(`/conditions/${encodeURIComponent(id)}/eval`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteCondition(id: string): Promise<{ deleted: boolean; id: string }> {
+    return request(`/conditions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   listActionTypes(): Promise<
@@ -277,7 +316,7 @@ export const api = {
     from_state: string;
     new_status: string;
     event_id: string;
-    gate_trace: GateTraceItem[];
+    condition_trace: ConditionTraceItem[];
     routing?: { choice_index: number; choices: Array<{ choice_index: number; to: string; when: string[]; matched: boolean }> };
     side_effects?: Array<{ type: string; success: boolean; [k: string]: unknown }>;
     settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;

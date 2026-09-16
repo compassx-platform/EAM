@@ -7,7 +7,7 @@ import type {
   WorkflowAutoTransition,
 } from '../../types';
 
-export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'end';
+export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
 
 export interface NodeMeta {
   name: string;
@@ -19,21 +19,54 @@ export type WorkflowFlowNode = Node<
   {
     label: string;
     kind: NodeKind;
+    /** True when this state is a declared terminal state (cannot advance). */
+    terminal?: boolean;
     onRename?: (oldLabel: string, newLabel: string) => void;
     onDelete?: (id: string) => void;
+    onDuplicate?: (id: string) => void;
   },
   'state'
 >;
 export type WorkflowFlowEdge = Edge<
   {
     event: string;
-    gates: string[];
+    conditions: string[];
     choices?: WorkflowChoice[];
     on_after?: WorkflowAction[];
     onRenameEvent?: (edgeId: string, event: string) => void;
+    onDelete?: (id: string) => void;
   },
   'event'
 >;
+
+/** True when the connection has been split into conditional branches. */
+export function edgeIsBranching(e: WorkflowFlowEdge): boolean {
+  return (e.data?.choices?.length ?? 0) > 0;
+}
+
+/** Number of conditional branches on a connection (0 = plain transition). */
+export function edgeBranchCount(e: WorkflowFlowEdge): number {
+  return e.data?.choices?.length ?? 0;
+}
+
+/** Editable copy of a single edge for live editing in an inspector. */
+export function edgeDescription(e: WorkflowFlowEdge): {
+  from: string;
+  event: string;
+  to: string | null;
+  guardCount: number;
+  branchCount: number;
+} {
+  const branches = e.data?.choices ?? [];
+  const fallback = branches.find((c) => !c.when || c.when.length === 0)?.to ?? branches[0]?.to ?? null;
+  return {
+    from: e.source,
+    event: e.data?.event ?? 'EVENT',
+    to: e.data?.choices?.length ? fallback : e.target || fallback,
+    guardCount: e.data?.conditions?.length ?? 0,
+    branchCount: branches.length,
+  };
+}
 
 export interface WorkflowDefinitionExtras {
   terminal_states?: string[];
@@ -50,12 +83,20 @@ export function transitionTargetLabel(t: WorkflowTransition): string | null {
 }
 
 export const NODE_KINDS: Array<{ kind: NodeKind; label: string; description: string }> = [
-  { kind: 'start', label: 'Start', description: 'Entry point of the workflow' },
-  { kind: 'state', label: 'State', description: 'Generic workflow step' },
-  { kind: 'task', label: 'Task', description: 'Action being performed' },
-  { kind: 'gate', label: 'Gate Check', description: 'Step subject to gate enforcement' },
-  { kind: 'end', label: 'End', description: 'Terminal outcome' },
+  { kind: 'start', label: 'Start', description: 'Entry point — new records begin here' },
+  { kind: 'state', label: 'Step', description: 'A step in the process' },
+  { kind: 'task', label: 'Task', description: 'Work by a user, e.g. an approval — routes to positive or negative outcomes' },
+  { kind: 'gate', label: 'Condition', description: 'Evaluates a condition — routes YES/NO via conditional branches' },
+  { kind: 'manual', label: 'Manual Input', description: 'Prompts the user to pick an option — each option can route differently' },
+  { kind: 'wait', label: 'Wait', description: 'Pauses the workflow until a date or condition is met' },
+  { kind: 'sub', label: 'Sub-Process', description: 'Starts another workflow process as a sub-routine' },
+  { kind: 'comm', label: 'Communication', description: 'Sends a message or notification when reached' },
+  { kind: 'end', label: 'Stop', description: 'Terminal outcome — the workflow stops here' },
 ];
+
+export const KIND_LABEL: Record<NodeKind, string> = Object.fromEntries(
+  NODE_KINDS.map((k) => [k.kind, k.label])
+) as Record<NodeKind, string>;
 
 export function kindDefaultLabel(kind: NodeKind): string {
   const entry = NODE_KINDS.find((k) => k.kind === kind);
@@ -64,7 +105,7 @@ export function kindDefaultLabel(kind: NodeKind): string {
 
 export function defaultPositionFor(kind: NodeKind, index: number) {
   const base = layoutPosition(index);
-  const offset = { start: 0, end: 0, gate: 60, task: 0, state: 0 }[kind] || 0;
+  const offset = { start: 0, end: 0, gate: 60, task: 0, state: 0, manual: 0, wait: 0, sub: 0, comm: 0 }[kind] || 0;
   return { x: base.x + offset, y: base.y };
 }
 
@@ -98,7 +139,7 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
     target: transitionTargetLabel(t) || '',
     data: {
       event: t.event,
-      gates: t.gates || [],
+      conditions: t.conditions ?? t.gates ?? [],
       choices: t.choices,
       on_after: t.on_after,
     },
@@ -129,7 +170,7 @@ export function flowToDefinition(
       from: e.source,
       event: e.data?.event || 'EVENT',
       to: e.data?.choices?.length ? null : e.target,
-      gates: e.data?.gates || [],
+      conditions: e.data?.conditions ?? [],
     };
     if (e.data?.choices?.length) transition.choices = e.data.choices;
     if (e.data?.on_after?.length) transition.on_after = e.data.on_after;

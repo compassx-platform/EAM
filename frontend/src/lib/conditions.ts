@@ -7,6 +7,26 @@ import type {
 } from '../types';
 
 /**
+ * Reserved pseudo-field name used to reference the entity's current workflow
+ * stage inside form condition rules. Stage -> form binding: rule.field can be
+ * `_workflow_status` and rule.value a state from the published workflow (e.g.
+ * "Approved") to hide/show/lock fields based on where the record is in its flow.
+ */
+export const WORKFLOW_STATUS_FIELD = '_workflow_status';
+
+/**
+ * Merges the entity's current workflow stage into condition values so that
+ * rules referencing the `_workflow_status` pseudo-field can be evaluated.
+ */
+export function withWorkflowStatus(
+  values: Record<string, unknown> = {},
+  status?: string | null
+): Record<string, unknown> {
+  if (!status) return values;
+  return { ...values, [WORKFLOW_STATUS_FIELD]: status };
+}
+
+/**
  * Checks if a value is considered empty (for conditional logic).
  */
 export function isValueEmpty(val: unknown): boolean {
@@ -243,26 +263,27 @@ export function formatRuleSummary(rule: ConditionRule): string {
   const field = rule.field;
   const op = rule.operator;
   const val = rule.value;
+  const fieldLabel = field === WORKFLOW_STATUS_FIELD ? 'Workflow stage' : `"${field}"`;
 
   switch (op) {
     case 'equals':
-      return `"${field}" = "${val}"`;
+      return `${fieldLabel} = "${val}"`;
     case 'not_equals':
-      return `"${field}" ≠ "${val}"`;
+      return `${fieldLabel} ≠ "${val}"`;
     case 'contains':
-      return `"${field}" contains "${val}"`;
+      return `${fieldLabel} contains "${val}"`;
     case 'not_contains':
-      return `"${field}" not contains "${val}"`;
+      return `${fieldLabel} not contains "${val}"`;
     case 'is_empty':
-      return `"${field}" is empty`;
+      return `${fieldLabel} is empty`;
     case 'is_not_empty':
-      return `"${field}" is filled`;
+      return `${fieldLabel} is filled`;
     case 'greater_than':
-      return `"${field}" > ${val}`;
+      return `${fieldLabel} > ${val}`;
     case 'less_than':
-      return `"${field}" < ${val}`;
+      return `${fieldLabel} < ${val}`;
     default:
-      return `"${field}" ${op} "${val}"`;
+      return `${fieldLabel} ${op} "${val}"`;
   }
 }
 

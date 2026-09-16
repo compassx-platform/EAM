@@ -16,7 +16,7 @@ from backend.services.expression import (
     render_template,
     render_template_mapping,
 )
-from backend.services.gate_evaluator import evaluate_single_gate
+from backend.services.condition_evaluator import evaluate_condition
 from backend.services.command_handler import (
     create_entity,
     propose_transition,
@@ -24,7 +24,7 @@ from backend.services.command_handler import (
     _resolve_transition_target,
     SYSTEM_WORKFLOW_ACTOR,
 )
-from backend.models.workflow import GateInstance
+from backend.models.conditions import ConditionDefinition
 from backend.models.entities import (
     WorkOrder,
     WorkOrderEvent,
@@ -35,18 +35,18 @@ from backend.models.entities import (
 
 
 @pytest.fixture
-def gates(test_db):
-    """Look up the seeded gate instances used across the v2 flow."""
+def conditions(test_db):
+    """Look up the seeded conditions used across the v2 flow."""
     ids = [
-        "gate_wo_is_emergency",
-        "gate_wo_cost_high",
-        "gate_wo_permit_required",
-        "gate_wo_failure_recorded",
-        "gate_wo_variance_over",
+        "cond_wo_is_emergency",
+        "cond_wo_cost_high",
+        "cond_wo_permit_required",
+        "cond_wo_failure_recorded",
+        "cond_wo_variance_over",
     ]
     found = {}
-    for g in test_db.query(GateInstance).filter(GateInstance.id.in_(ids)).all():
-        found[g.id] = g
+    for c in test_db.query(ConditionDefinition).filter(ConditionDefinition.id.in_(ids)).all():
+        found[c.id] = c
     return found
 
 
@@ -103,40 +103,40 @@ def test_expression_render_templates():
 # 2. New declarative gate types
 # ---------------------------------------------------------------------------
 
-def test_attribute_condition_gate(test_db, gates):
-    g = gates["gate_wo_is_emergency"]
-    assert gates["gate_wo_is_emergency"].gate_type == "attribute_condition"
+def test_attribute_condition_gate(test_db, conditions):
+    c = conditions["cond_wo_is_emergency"]
+    assert conditions["cond_wo_is_emergency"].definition["rules"][0]["type"] == "attribute"
 
-    em_pass = evaluate_single_gate(db=test_db, gate=g, custom_fields={"worktype": "EM"}, actor_id="x@y")
+    em_pass = evaluate_condition(db=test_db, condition=c, custom_fields={"worktype": "EM"}, actor_id="x@y")
     assert em_pass.effective_pass is True
     assert em_pass.passed is True
 
-    cm_fail = evaluate_single_gate(db=test_db, gate=g, custom_fields={"worktype": "CM"}, actor_id="x@y")
+    cm_fail = evaluate_condition(db=test_db, condition=c, custom_fields={"worktype": "CM"}, actor_id="x@y")
     assert cm_fail.passed is False
     assert "CM" in cm_fail.reason
 
 
-def test_attribute_condition_is_not_empty(test_db, gates):
-    g = gates["gate_wo_failure_recorded"]
-    assert evaluate_single_gate(db=test_db, gate=g, custom_fields={"failurecode": "FX-007"}, actor_id="x@y").passed is True
-    assert evaluate_single_gate(db=test_db, gate=g, custom_fields={"failurecode": ""}, actor_id="x@y").passed is False
-    assert evaluate_single_gate(db=test_db, gate=g, custom_fields={}, actor_id="x@y").passed is False
+def test_attribute_condition_is_not_empty(test_db, conditions):
+    c = conditions["cond_wo_failure_recorded"]
+    assert evaluate_condition(db=test_db, condition=c, custom_fields={"failurecode": "FX-007"}, actor_id="x@y").passed is True
+    assert evaluate_condition(db=test_db, condition=c, custom_fields={"failurecode": ""}, actor_id="x@y").passed is False
+    assert evaluate_condition(db=test_db, condition=c, custom_fields={}, actor_id="x@y").passed is False
 
 
-def test_expression_threshold_gate_cost(test_db, gates):
-    g = gates["gate_wo_cost_high"]
-    high = evaluate_single_gate(db=test_db, gate=g, custom_fields={"estlabcost": 12000, "estmatcost": 6000}, actor_id="x@y")
+def test_expression_threshold_gate_cost(test_db, conditions):
+    c = conditions["cond_wo_cost_high"]
+    high = evaluate_condition(db=test_db, condition=c, custom_fields={"estlabcost": 12000, "estmatcost": 6000}, actor_id="x@y")
     assert high.passed is True
-    low = evaluate_single_gate(db=test_db, gate=g, custom_fields={"estlabcost": 200, "estmatcost": 100}, actor_id="x@y")
+    low = evaluate_condition(db=test_db, condition=c, custom_fields={"estlabcost": 200, "estmatcost": 100}, actor_id="x@y")
     assert low.passed is False
 
 
-def test_expression_threshold_gate_variance(test_db, gates):
-    g = gates["gate_wo_variance_over"]
+def test_expression_threshold_gate_variance(test_db, conditions):
+    c = conditions["cond_wo_variance_over"]
     base = {"estlabcost": 10000, "estmatcost": 5000}
-    over = evaluate_single_gate(db=test_db, gate=g, custom_fields={**base, "actlabcost": 18000, "actmatcost": 9000}, actor_id="x@y")
+    over = evaluate_condition(db=test_db, condition=c, custom_fields={**base, "actlabcost": 18000, "actmatcost": 9000}, actor_id="x@y")
     assert over.passed is True  # 27000/15000 = 1.8 > 1.15
-    within = evaluate_single_gate(db=test_db, gate=g, custom_fields={**base, "actlabcost": 11000, "actmatcost": 5000}, actor_id="x@y")
+    within = evaluate_condition(db=test_db, condition=c, custom_fields={**base, "actlabcost": 11000, "actmatcost": 5000}, actor_id="x@y")
     assert within.passed is False  # 16000/15000 = 1.067 <= 1.15
 
 
@@ -149,7 +149,7 @@ def test_resolve_transition_target_no_condition(test_db):
         "from": "X",
         "event": "E",
         "choices": [
-            {"to": "TARGET", "when": ["gate_wo_is_emergency"]},
+            {"to": "TARGET", "when": ["cond_wo_is_emergency"]},
         ],
     }
     with pytest.raises(NoConditionSatisfiedError) as exc_info:

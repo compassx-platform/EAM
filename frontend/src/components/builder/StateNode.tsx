@@ -1,13 +1,15 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { X, Play, Circle, ClipboardList, ShieldCheck, Flag } from 'lucide-react';
+import { X, Copy, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail } from 'lucide-react';
 import type { NodeKind } from './flowModel';
 
 export type StateNodeData = {
   label: string;
   kind: NodeKind;
+  terminal?: boolean;
   onRename?: (oldLabel: string, newLabel: string) => void;
   onDelete?: (id: string) => void;
+  onDuplicate?: (id: string) => void;
 };
 
 const KIND_STYLES: Record<NodeKind, { dot: string; ring: string; text: string; signal: string }> = {
@@ -15,7 +17,23 @@ const KIND_STYLES: Record<NodeKind, { dot: string; ring: string; text: string; s
   state: { dot: 'bg-blue-500', ring: 'border-blue-300', text: 'text-blue-800', signal: 'bg-blue-200' },
   task: { dot: 'bg-indigo-500', ring: 'border-indigo-300', text: 'text-indigo-800', signal: 'bg-indigo-200' },
   gate: { dot: 'bg-amber-500', ring: 'border-amber-300', text: 'text-amber-800', signal: 'bg-amber-200' },
+  manual: { dot: 'bg-violet-500', ring: 'border-violet-300', text: 'text-violet-800', signal: 'bg-violet-200' },
+  wait: { dot: 'bg-teal-500', ring: 'border-teal-300', text: 'text-teal-800', signal: 'bg-teal-200' },
+  sub: { dot: 'bg-fuchsia-500', ring: 'border-fuchsia-300', text: 'text-fuchsia-800', signal: 'bg-fuchsia-200' },
+  comm: { dot: 'bg-sky-500', ring: 'border-sky-300', text: 'text-sky-800', signal: 'bg-sky-200' },
   end: { dot: 'bg-rose-500', ring: 'border-rose-300', text: 'text-rose-800', signal: 'bg-rose-200' },
+};
+
+const KIND_LABEL: Record<NodeKind, string> = {
+  start: 'start',
+  state: 'step',
+  task: 'task',
+  gate: 'condition',
+  manual: 'manual input',
+  wait: 'wait',
+  sub: 'sub-process',
+  comm: 'communication',
+  end: 'stop',
 };
 
 function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
@@ -26,6 +44,14 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
       return <ShieldCheck className={className} />;
     case 'task':
       return <ClipboardList className={className} />;
+    case 'manual':
+      return <ListChecks className={className} />;
+    case 'wait':
+      return <Timer className={className} />;
+    case 'sub':
+      return <Workflow className={className} />;
+    case 'comm':
+      return <Mail className={className} />;
     case 'end':
       return <Flag className={className} />;
     default:
@@ -34,7 +60,7 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
 }
 
 function StateNode({ id, data, selected }: NodeProps) {
-  const { label, kind, onRename, onDelete } = data as StateNodeData;
+  const { label, kind, terminal, onRename, onDelete, onDuplicate } = data as StateNodeData;
   const [value, setValue] = useState(label);
   const style = KIND_STYLES[kind] || KIND_STYLES.state;
 
@@ -66,17 +92,33 @@ function StateNode({ id, data, selected }: NodeProps) {
           }}
           className="nodrag nopan w-full bg-transparent text-sm font-semibold text-gray-800 outline-none"
         />
-        <button
-          onClick={() => onDelete?.(id)}
-          className="nodrag nopan opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-          title="Delete"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center">
+          <button
+            onClick={() => onDuplicate?.(id)}
+            className="nodrag nopan rounded-md p-0.5 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-blue-50 hover:text-blue-600"
+            title="Duplicate"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete?.(id)}
+            className="nodrag nopan rounded-md p-0.5 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-600"
+            title="Delete"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
-      <span className={`absolute -top-2 left-2 rounded px-1 text-[9px] font-bold uppercase tracking-wider text-white ${style.dot}`}>
-        {kind}
-      </span>
+      <div className="flex items-center justify-between px-3 pb-1.5">
+        <span className={`rounded px-1 text-[9px] font-bold uppercase tracking-wider text-white ${style.dot}`}>
+          {KIND_LABEL[kind] || kind}
+        </span>
+        {terminal && (
+          <span className="rounded bg-rose-100 px-1 text-[9px] font-bold uppercase tracking-wider text-rose-600">
+            ⚑ terminal
+          </span>
+        )}
+      </div>
       {kind !== 'end' && (
         <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500" />
       )}

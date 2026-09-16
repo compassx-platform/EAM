@@ -8,7 +8,7 @@ from backend.models.entities import get_entity_models
 from backend.models.workflow import WorkflowDefinition
 from backend.models.users import AppUser
 from backend.services.field_validator import validate_custom_fields, FieldValidationError
-from backend.services.gate_evaluator import evaluate_transition_gates, GateEvaluationResult
+from backend.services.condition_evaluator import evaluate_condition_ids, ConditionEvaluationResult
 
 # Actor used for automatic, data-driven routing events.
 SYSTEM_WORKFLOW_ACTOR = "system:workflow-engine"
@@ -46,12 +46,12 @@ class NoConditionSatisfiedError(CommandError):
         )
 
 
-class GateFailedError(CommandError):
-    def __init__(self, gate_label: str, reason: str, trace: List[Dict[str, Any]]):
+class ConditionFailedError(CommandError):
+    def __init__(self, condition_label: str, reason: str, trace: List[Dict[str, Any]]):
         super().__init__(
-            code="gate_failed",
-            message=f"Transition blocked by gate: {gate_label} - {reason}",
-            details={"gate_failed": gate_label, "reason": reason, "gate_trace": trace}
+            code="condition_failed",
+            message=f"Transition blocked by condition: {condition_label} - {reason}",
+            details={"condition_failed": condition_label, "reason": reason, "condition_trace": trace}
         )
 
 
@@ -77,7 +77,7 @@ def _resolve_transition_target(
     A transition is either:
       - a plain ``{from, event, to}`` transition, or
       - a decision node ``{from, event, choices: [{to, when}, ...]}`` where the
-        first choice whose ``when`` gates all pass wins.
+        first choice whose ``when`` conditions all pass wins.
 
     Returns (to_state, chosen_choice_index, choice_trace, on_after_actions).
     """
@@ -94,9 +94,9 @@ def _resolve_transition_target(
         if not isinstance(choice, dict):
             choice_trace.append({"choice_index": idx, "to": choice.get("to"), "matched": False, "reason": "malformed choice"})
             continue
-        all_ok, results, failing = evaluate_transition_gates(
+        all_ok, results, failing = evaluate_condition_ids(
             db=db,
-            gate_ids=when,
+            condition_ids=when,
             custom_fields=custom_fields,
             actor_id=actor_context.get("actor_id"),
             actor_type=actor_context.get("actor_type", "human"),
@@ -107,7 +107,7 @@ def _resolve_transition_target(
             "to": choice.get("to"),
             "when": when,
             "matched": all_ok,
-            "gates": [r.model_dump() for r in results],
+            "conditions": [r.model_dump() for r in results],
         }
         choice_trace.append(trace_entry)
         if all_ok:
@@ -249,7 +249,7 @@ def propose_transition(
 ) -> Dict[str, Any]:
     """
     Executes a transition through the single command path (Section 5: POST /api/{entity_type}/transition).
-    Implements the 7-step sequence with closed gate validation, conditional
+    Implements the 7-step sequence with centralized condition validation, conditional
     routing (choices), optimistic concurrency, optional post-transition side
     effects (on_after), and automatic conditional routing (settling).
     """
@@ -293,12 +293,12 @@ def propose_transition(
     if not matching_transition:
         raise InvalidTransitionError(from_state=current_status, event_type=event_type)
 
-    gate_ids = matching_transition.get("gates", []) or []
+    condition_ids = matching_transition.get("conditions", []) or matching_transition.get("gates", []) or []
 
-    # Step 4 & 5: Evaluate transition-level gates (blocking checks)
-    all_passed, results, failing = evaluate_transition_gates(
+    # Step 4 & 5: Evaluate transition-level conditions (blocking checks)
+    all_passed, results, failing = evaluate_condition_ids(
         db=db,
-        gate_ids=gate_ids,
+        condition_ids=condition_ids,
         custom_fields=current_custom_fields,
         actor_id=actor_id,
         actor_type=actor_type,
@@ -307,9 +307,9 @@ def propose_transition(
 
     if not all_passed:
         trace_dicts = [r.model_dump() for r in results]
-        raise GateFailedError(
-            gate_label=failing.label if failing else "Gate Check",
-            reason=failing.reason if failing else "Gate conditions failed",
+        raise ConditionFailedError(
+            condition_label=failing.label if failing else "Condition Check",
+            reason=failing.reason if failing else "Condition failed",
             trace=trace_dicts,
         )
 
@@ -322,12 +322,12 @@ def propose_transition(
         actor_context=actor_context,
     )
 
-    # Step 6: All gates pass -> single transaction with optimistic concurrency
+    # Step 6: All conditions pass -> single transaction with optimistic concurrency
     new_event_id = generate_uuid()
     now = utc_now()
 
     event_payload = dict(payload or {})
-    event_payload["gate_trace"] = [r.model_dump() for r in results]
+    event_payload["condition_trace"] = [r.model_dump() for r in results]
     if choice_index is not None:
         event_payload["routing"] = {
             "choice_index": choice_index,
@@ -378,7 +378,7 @@ def propose_transition(
             "from_state": current_status,
             "new_status": to_state,
             "event_id": new_event_id,
-            "gate_trace": [r.model_dump() for r in results],
+            "condition_trace": [r.model_dump() for r in results],
         }
         if choice_index is not None:
             response["routing"] = {
@@ -436,7 +436,7 @@ def _settle_workflow(
 ) -> List[Dict[str, Any]]:
     """
     Automatic conditional routing: repeatedly evaluates the state's
-    ``auto_transitions`` and fires the first whose ``when`` gates pass, as a
+    ``auto_transitions`` and fires the first whose ``when`` conditions pass, as a
     real system-actor workflow event. Loops until no auto transition applies
     (bounded to guard against infinite cycles).
     """
@@ -460,9 +460,9 @@ def _settle_workflow(
             if key in used_keys:
                 continue
             when = auto.get("when") or []
-            all_ok, results, failing = evaluate_transition_gates(
+            all_ok, results, failing = evaluate_condition_ids(
                 db=db,
-                gate_ids=when,
+                condition_ids=when,
                 custom_fields=entity.custom_fields or {},
                 actor_id=SYSTEM_WORKFLOW_ACTOR,
                 actor_type="system",
@@ -472,7 +472,7 @@ def _settle_workflow(
                 matched = {
                     "auto": auto,
                     "key": key,
-                    "gate_trace": [r.model_dump() for r in results],
+                    "condition_trace": [r.model_dump() for r in results],
                     "event": a_event,
                 }
                 break
@@ -489,7 +489,7 @@ def _settle_workflow(
                 event_type=matched["event"],
                 actor_id=SYSTEM_WORKFLOW_ACTOR,
                 actor_type="system",
-                payload={"reason": "Automatic conditional routing", "routing_gate_trace": matched["gate_trace"]},
+                payload={"reason": "Automatic conditional routing", "routing_condition_trace": matched["condition_trace"]},
                 run_post_pipeline=False,
             )
             fired.append({

@@ -4,7 +4,7 @@ from backend.services.command_handler import (
     propose_transition,
     StaleWriteError,
     InvalidTransitionError,
-    GateFailedError,
+    ConditionFailedError,
 )
 from backend.services.projector import rebuild_entity_from_events
 from backend.models.entities import WorkOrder, WorkOrderEvent

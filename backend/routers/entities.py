@@ -12,7 +12,7 @@ from backend.services.command_handler import (
     CommandError,
     StaleWriteError,
     InvalidTransitionError,
-    GateFailedError,
+    ConditionFailedError,
 )
 from backend.services.field_validator import FieldValidationError
 from backend.services.simulator import simulate_transition
@@ -122,8 +122,8 @@ def propose_transition_endpoint(
         return result
     except StaleWriteError as swe:
         raise HTTPException(status_code=409, detail={"error_code": "stale_write", "message": swe.message})
-    except GateFailedError as gfe:
-        raise HTTPException(status_code=422, detail={"error_code": "gate_failed", "message": gfe.message, "details": gfe.details})
+    except ConditionFailedError as gfe:
+        raise HTTPException(status_code=422, detail={"error_code": "condition_failed", "message": gfe.message, "details": gfe.details})
     except InvalidTransitionError as ite:
         raise HTTPException(status_code=400, detail={"error_code": "invalid_transition", "message": ite.message, "details": ite.details})
     except CommandError as ce:
@@ -247,7 +247,7 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
             entry: Dict[str, Any] = {
                 "event_type": t.get("event"),
                 "to_state": t.get("to"),
-                "gates": t.get("gates", []) or [],
+                "conditions": t.get("conditions", []) or [],
             }
             if t.get("choices"):
                 entry["choices"] = t.get("choices")

@@ -1,13 +1,13 @@
 from backend.services.field_validator import validate_custom_fields, FieldValidationError
 from backend.services.workflow_validator import validate_workflow_definition, WorkflowValidationError
-from backend.services.gate_evaluator import evaluate_single_gate, evaluate_transition_gates, GateEvaluationResult
+from backend.services.condition_evaluator import evaluate_condition, evaluate_condition_by_id, evaluate_condition_ids, evaluate_condition_any, evaluate_rule_tree, ConditionEvaluationResult
 from backend.services.command_handler import (
     create_entity,
     propose_transition,
     CommandError,
     StaleWriteError,
     InvalidTransitionError,
-    GateFailedError,
+    ConditionFailedError,
 )
 from backend.services.simulator import simulate_transition
 from backend.services.projector import rebuild_entity_from_events, rebuild_all_entities
@@ -18,15 +18,18 @@ __all__ = [
     "FieldValidationError",
     "validate_workflow_definition",
     "WorkflowValidationError",
-    "evaluate_single_gate",
-    "evaluate_transition_gates",
-    "GateEvaluationResult",
+    "evaluate_condition",
+    "evaluate_condition_by_id",
+    "evaluate_condition_ids",
+    "evaluate_condition_any",
+    "evaluate_rule_tree",
+    "ConditionEvaluationResult",
     "create_entity",
     "propose_transition",
     "CommandError",
     "StaleWriteError",
     "InvalidTransitionError",
-    "GateFailedError",
+    "ConditionFailedError",
     "simulate_transition",
     "rebuild_entity_from_events",
     "rebuild_all_entities",
