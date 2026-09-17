@@ -40,7 +40,7 @@ interface LeftRailProps {
  */
 export function LeftRail({ onAdd, onAutoArrange, onOpenSettings }: LeftRailProps) {
   return (
-    <div className="group flex w-12 shrink-0 flex-col items-start gap-1 overflow-hidden border-r border-gray-200 bg-white py-2 transition-all duration-200 hover:w-56">
+    <div className="group flex h-full w-12 shrink-0 flex-col items-start gap-1 overflow-y-auto overflow-x-hidden border-r border-gray-200 bg-white py-3 transition-all duration-200 hover:w-56 z-10">
       <p className="w-full whitespace-nowrap px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
         Add state
       </p>

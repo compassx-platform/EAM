@@ -588,39 +588,42 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const selectedEdge = selection?.kind === 'edge' ? edges.find((e) => e.id === selection.id) ?? null : null;
 
   return (
-    <div className="flex h-full flex-col">
-      <HeaderBar
-        entityType={entityType}
-        onEntityType={(v) => {
-          setEntityType(v);
-          setDirty(true);
-        }}
-        versionLabel={versionLabel}
-        onVersionLabel={(v) => {
-          setVersionLabel(v);
-          setDirty(true);
-        }}
-        status={status}
-        dirty={dirty}
-        saving={saving}
-        canDelete={!!id}
-        notice={notice}
-        knownTypes={knownTypes}
-        onBack={onBack}
-        onAutoArrange={handleAutoArrange}
-        onNewCondition={() => setConditionModalOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onValidate={handleValidate}
-        onSave={handleSave}
-        onPublish={handlePublish}
-        onDelete={handleDeleteWorkflow}
-      />
+    <div className="flex h-full w-full flex-row min-h-0 overflow-hidden">
+      {/* Left Rail using full height */}
+      <LeftRail onAdd={handleAddNode} onAutoArrange={handleAutoArrange} onOpenSettings={() => setSettingsOpen(true)} />
 
-      <div className="flex min-h-0 flex-1">
-        <LeftRail onAdd={handleAddNode} onAutoArrange={handleAutoArrange} onOpenSettings={() => setSettingsOpen(true)} />
+      {/* Main Studio Area */}
+      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        <HeaderBar
+          entityType={entityType}
+          onEntityType={(v) => {
+            setEntityType(v);
+            setDirty(true);
+          }}
+          versionLabel={versionLabel}
+          onVersionLabel={(v) => {
+            setVersionLabel(v);
+            setDirty(true);
+          }}
+          status={status}
+          dirty={dirty}
+          saving={saving}
+          canDelete={!!id}
+          notice={notice}
+          knownTypes={knownTypes}
+          onBack={onBack}
+          onAutoArrange={handleAutoArrange}
+          onNewCondition={() => setConditionModalOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onValidate={handleValidate}
+          onSave={handleSave}
+          onPublish={handlePublish}
+          onDelete={handleDeleteWorkflow}
+        />
 
-        {/* Canvas */}
-        <div className="relative min-w-0 flex-1">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          {/* Canvas */}
+          <div className="relative min-w-0 flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -762,9 +765,11 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           );
         })()}
       </div>
+    </div>
 
       {conditionModalOpen && (
         <ConditionModal
+          variant="dialog"
           entityType={entityType}
           conditionTypes={conditionTypes}
           fields={fields}

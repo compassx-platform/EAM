@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Loader2, Plus, ShieldPlus, Trash2, GitBranch } from 'lucide-react';
+import { useMemo, useState, useRef, useEffect } from 'react';
+import { Loader2, Plus, ShieldPlus, Trash2, GitBranch, X } from 'lucide-react';
 import { api } from '../../../api/client';
 import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, EntityField } from '../../../types';
 import { Field } from './ui';
@@ -31,6 +31,10 @@ interface ConditionModalProps {
   initial?: ConditionDefinition | null;
   onClose: () => void;
   onSaved: (condition: ConditionDefinition) => void;
+  /** Display variant: 'modal' (full-screen backdrop) or 'dialog' (docked floating card beside inspector). Defaults to 'modal'. */
+  variant?: 'modal' | 'dialog';
+  /** Y-coordinate of trigger click/button for anchored positioning & pointer arrow. */
+  anchorY?: number | null;
 }
 
 const NUMBER_TYPES = ['number', 'integer', 'decimal', 'currency', 'duration'];
@@ -258,7 +262,10 @@ export function ConditionModal({
   initial,
   onClose,
   onSaved,
+  variant = 'modal',
+  anchorY,
 }: ConditionModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const atoms = conditionTypes?.atoms ?? [];
   const [entityType, setEntityType] = useState(initial?.entity_type ?? initialEntityType ?? '');
   const [label, setLabel] = useState(initial?.label ?? '');
@@ -356,6 +363,17 @@ export function ConditionModal({
     return [...opts].sort();
   }, [entityTypes, scopedFields, entityType]);
 
+  useEffect(() => {
+    if (variant !== 'dialog') return;
+    const handleDocClick = (e: MouseEvent) => {
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleDocClick);
+    return () => document.removeEventListener('mousedown', handleDocClick);
+  }, [variant, onClose]);
+
   const Editor = () => (
     <div className="flex flex-col gap-3">
       {initial && (
@@ -441,6 +459,75 @@ export function ConditionModal({
     </div>
   );
 
+  if (variant === 'dialog') {
+    const PADDING = 16;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const estimatedHeight = 520;
+    const desiredTop = (anchorY !== null && anchorY !== undefined) ? anchorY - 48 : 64;
+    const top = (anchorY !== null && anchorY !== undefined)
+      ? Math.max(PADDING, Math.min(vh - estimatedHeight - PADDING, desiredTop))
+      : 64;
+    const arrowTop = (anchorY !== null && anchorY !== undefined)
+      ? Math.max(16, Math.min(estimatedHeight - 20, anchorY - top - 7))
+      : null;
+
+    return (
+      <div
+        ref={dialogRef}
+        style={{ top: `${top}px` }}
+        className="fixed right-[332px] z-40 flex max-h-[88vh] w-[480px] flex-col rounded-xl border border-gray-200 bg-white shadow-2xl origin-right animate-in fade-in zoom-in-95 duration-150"
+      >
+        {arrowTop !== null && (
+          <div
+            className="pointer-events-none absolute -right-[7px] z-10 h-3.5 w-3.5 rotate-45 border-r border-t border-gray-200 bg-white"
+            style={{ top: `${arrowTop}px` }}
+          />
+        )}
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-gray-800">
+            <ShieldPlus className="h-4 w-4 text-blue-700" />
+            {initial ? `Edit condition · ${initial.id}` : 'New condition'}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {atoms.length === 0 ? (
+            <p className="text-xs text-gray-400">No condition rule types available.</p>
+          ) : (
+            <Editor />
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-4 py-3">
+          {err && <p className="mr-auto text-xs text-red-600">{err}</p>}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || atoms.length === 0}
+            className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldPlus className="h-3.5 w-3.5" />}
+            {initial ? `Save v${(initial.current_version ?? 0) + 1}` : 'Create condition'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={onClose}>
       <div
@@ -453,9 +540,7 @@ export function ConditionModal({
             {initial ? `Edit condition · ${initial.id}` : 'New condition'}
           </h3>
           <button type="button" onClick={onClose} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
+            <X className="h-4 w-4" />
           </button>
         </div>
 

@@ -13,6 +13,7 @@ import {
   Printer,
   X,
   Clock,
+  Info,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { isItemVisible, withWorkflowStatus } from '../../lib/conditions';
@@ -22,6 +23,7 @@ import type {
   EntityRecord,
   ChecklistItem,
   ResolvedList,
+  ConditionDefinition,
 } from '../../types';
 import type { AttachedFile } from './EntityCreateForm';
 
@@ -90,6 +92,7 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
   const entityType = propType || (entity as any).entity_type || 'permit';
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
+  const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
@@ -119,8 +122,12 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
     let cancelled = false;
     (async () => {
       try {
-        const form = await api.getForm(entityType);
+        const [form, condList] = await Promise.all([
+          api.getForm(entityType),
+          api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
+        ]);
         if (cancelled) return;
+        setConditions(condList);
         const layout = ((form.layout || []) as Array<any>).map((it) => {
           const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
           const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
@@ -231,31 +238,31 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
     if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
       return false;
     }
-    return isItemVisible(it, items, valuesForCondition);
+    return isItemVisible(it, items, valuesForCondition, conditions);
   });
 
   const hasLayout = items.length > 0;
 
   const content = (
-    <div className="flex flex-col bg-white">
+    <div className="flex flex-col bg-white min-h-full">
       {/* Form Header Info Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/80 px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-6 py-4 shrink-0">
         <div className="flex flex-wrap items-center gap-3">
           {onClose && (
             <button
               onClick={onClose}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
             >
-              <ArrowLeft className="h-4 w-4" /> Back
+              <ArrowLeft className="h-3.5 w-3.5" /> Back
             </button>
           )}
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-gray-900">
-                {entityType.toUpperCase()} Record
-              </h2>
+              <h1 className="text-lg font-bold text-gray-900">
+                {entityType.charAt(0).toUpperCase() + entityType.slice(1)} Record
+              </h1>
               <span
-                className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
                   STATUS_BADGE[entity.status?.toLowerCase()] || 'bg-blue-50 text-blue-700 border-blue-200'
                 }`}
               >
@@ -281,7 +288,7 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
 
         <div className="flex items-center gap-2">
           {hasLayout && (
-            <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50">
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 shadow-2xs">
               <input
                 type="checkbox"
                 checked={showAllFields}
@@ -294,7 +301,7 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
           )}
           <button
             onClick={() => window.print()}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 shadow-2xs"
             title="Print form"
           >
             <Printer className="h-3.5 w-3.5 text-gray-500" /> Print
@@ -302,7 +309,7 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
           {onClose && isModal && (
             <button
               onClick={onClose}
-              className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
             >
               <X className="h-5 w-5" />
             </button>
@@ -317,87 +324,108 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
       )}
 
       {err && (
-        <div className="m-6 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+        <div className="m-6 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
           {err}
         </div>
       )}
 
       {loaded && (
-        <div className="p-6">
-          {hasLayout ? (
-            <div ref={containerRef}>
-              {mounted && (
-                <GridLayout
-                  width={width}
-                  layout={currentlyVisibleItems}
-                  compactor={verticalCompactor}
-                  gridConfig={{
-                    cols,
-                    rowHeight,
-                    margin: [12, 12],
-                    containerPadding: [12, 12],
-                  }}
-                  dragConfig={{ enabled: false }}
-                  resizeConfig={{ enabled: false }}
-                  className="rounded-lg"
-                >
-                  {currentlyVisibleItems.map((it) => {
-                    if (it.isGroup) {
-                      return (
-                        <div
-                          key={it.i}
-                          className="flex h-full w-full items-center gap-2 rounded-md border border-purple-200 bg-purple-50/70 px-3 text-sm font-bold text-purple-900 shadow-xs"
-                        >
-                          <Layers className="h-4 w-4 shrink-0 text-purple-600" />
-                          <span className="truncate">{it.label || it.groupTitle || 'Group'}</span>
-                        </div>
-                      );
-                    }
-                    if (it.isHeader) {
-                      return (
-                        <div
-                          key={it.i}
-                          className="flex h-full w-full items-center gap-1.5 rounded-md bg-indigo-50 px-3 text-sm font-bold text-indigo-700"
-                        >
-                          <Heading className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{it.label}</span>
-                        </div>
-                      );
-                    }
-                    const fieldDef = resolveItem(it);
-                    if (!fieldDef) return null;
-                    const rawVal = customFields[it.fieldName || it.i] ?? customFields[it.i];
-                    return (
-                      <ReadOnlyFillCell
-                        key={it.i}
-                        def={fieldDef}
-                        value={rawVal}
-                        itemHeight={it.h}
-                      />
-                    );
-                  })}
-                </GridLayout>
-              )}
+        <div className="flex-1 overflow-y-auto p-6 sm:p-10 bg-white">
+          <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 sm:p-10 shadow-xs">
+            {/* Document Sheet Heading */}
+            <div className="mb-6">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+                {entityType.charAt(0).toUpperCase() + entityType.slice(1)} details
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Summary of recorded fields and workflow attributes for this record.
+              </p>
             </div>
-          ) : (
-            /* Fallback when no form layout exists */
-            <div className="flex flex-col gap-3">
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                No custom form builder layout has been published for entity type{' '}
-                <span className="font-mono font-bold">{entityType}</span>. Displaying all recorded custom fields.
+
+            {hasLayout ? (
+              <div ref={containerRef}>
+                {mounted && (
+                  <GridLayout
+                    width={width}
+                    layout={currentlyVisibleItems}
+                    compactor={verticalCompactor}
+                    gridConfig={{
+                      cols,
+                      rowHeight,
+                      margin: [16, 16],
+                      containerPadding: [0, 0],
+                    }}
+                    dragConfig={{ enabled: false }}
+                    resizeConfig={{ enabled: false }}
+                    className="rounded-lg"
+                  >
+                    {currentlyVisibleItems.map((it) => {
+                      if (it.isGroup) {
+                        return (
+                          <div
+                            key={it.i}
+                            className="flex h-full w-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 shadow-2xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Layers className="h-4 w-4 shrink-0 text-gray-500" />
+                              <span className="text-sm font-semibold text-gray-900">
+                                {it.label || it.groupTitle || 'Group'}
+                              </span>
+                            </div>
+                            {it.placeholder && (
+                              <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
+                            )}
+                          </div>
+                        );
+                      }
+                      if (it.isHeader) {
+                        return (
+                          <div
+                            key={it.i}
+                            className="flex h-full w-full flex-col justify-center pt-2 pb-1"
+                          >
+                            <h3 className="text-sm sm:text-base font-semibold text-gray-900">
+                              {it.label || 'Section Header'}
+                            </h3>
+                            {it.placeholder && (
+                              <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
+                            )}
+                          </div>
+                        );
+                      }
+                      const fieldDef = resolveItem(it);
+                      if (!fieldDef) return null;
+                      const rawVal = customFields[it.fieldName || it.i] ?? customFields[it.i];
+                      return (
+                        <ReadOnlyFillCell
+                          key={it.i}
+                          def={fieldDef}
+                          value={rawVal}
+                          itemHeight={it.h}
+                        />
+                      );
+                    })}
+                  </GridLayout>
+                )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(customFields).map(([k, v]) => (
-                  <div key={k} className="flex flex-col rounded-md border border-gray-200 bg-white p-3 shadow-xs">
-                    <span className="text-xs font-semibold text-gray-500 font-mono">{k}</span>
-                    <div className="mt-1">
+            ) : (
+              /* Fallback when no form layout exists */
+              <div className="flex flex-col gap-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800">
+                  No custom form builder layout has been published for entity type{' '}
+                  <span className="font-mono font-bold">{entityType}</span>. Displaying all recorded custom fields.
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(customFields).map(([k, v]) => (
+                    <div key={k} className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-gray-900">{k}</span>
                       <ReadOnlyWidget def={{ key: k, name: k, type: 'text', required: false, options: [] }} value={v} />
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -405,8 +433,8 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
 
   if (isModal) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6 overflow-y-auto">
-        <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 sm:p-6 backdrop-blur-xs overflow-y-auto">
+        <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
           <div className="overflow-y-auto">
             {content}
           </div>
@@ -416,15 +444,13 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6">
-      <div className="overflow-hidden rounded-xl border border-gray-200 shadow-xs">
-        {content}
-      </div>
+    <div className="h-full w-full min-h-0 overflow-hidden flex flex-col">
+      {content}
     </div>
   );
 }
 
-// --- Read-only Grid Cell -------------------------------------------------------------
+// --- Read-only Grid Cell: Stacked Label + Input --------------------------------------
 const ReadOnlyFillCell = forwardRef<
   HTMLDivElement,
   {
@@ -439,9 +465,9 @@ const ReadOnlyFillCell = forwardRef<
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full items-center gap-2 px-2.5 py-1`}
+      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1`}
     >
-      <label className="flex w-36 shrink-0 items-center gap-1 truncate text-xs font-semibold text-gray-700">
+      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
         <span className="truncate" title={def.label || def.name}>
           {def.label || def.name}
         </span>
@@ -464,7 +490,7 @@ function ReadOnlyWidget({
   value: unknown;
   itemHeight?: number;
 }) {
-  const boxCls = 'w-full rounded-md border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 text-xs text-gray-800 font-medium';
+  const boxCls = 'w-full rounded-md border border-gray-300 bg-gray-50/70 px-3 py-2 text-xs text-gray-900 font-medium shadow-2xs';
 
   // 1. File Attachment
   if (def.type === 'file') {
@@ -480,21 +506,21 @@ function ReadOnlyWidget({
 
     if (files.length === 0) {
       return (
-        <div className="flex items-center gap-1.5 rounded-md border border-dashed border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-400 italic">
+        <div className="flex items-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-gray-50/50 px-3 py-2 text-xs text-gray-400 italic">
           <Paperclip className="h-3.5 w-3.5 text-gray-400" /> No files attached
         </div>
       );
     }
 
     return (
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         {files.map((f, idx) => (
           <div
             key={idx}
-            className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-2.5 py-1 shadow-2xs"
+            className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-1.5 shadow-2xs"
           >
             <Paperclip className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="max-w-[140px] truncate text-xs font-semibold text-gray-800" title={f.name}>
+            <span className="max-w-[160px] truncate text-xs font-semibold text-gray-800" title={f.name}>
               {f.name}
             </span>
             <span className="font-mono text-[10px] text-gray-500 shrink-0">
@@ -506,7 +532,7 @@ function ReadOnlyWidget({
                 download={f.name}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-0.5 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-blue-700"
+                className="inline-flex items-center gap-0.5 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-blue-700"
               >
                 <Download className="h-2.5 w-2.5" /> Download
               </a>
@@ -534,21 +560,21 @@ function ReadOnlyWidget({
 
     if (tasks.length === 0) {
       return (
-        <span className="text-[11px] text-gray-400 italic">
+        <span className="text-xs text-gray-400 italic">
           {checkedSet.size > 0 ? [...checkedSet].join(', ') : 'No checklist items'}
         </span>
       );
     }
 
     return (
-      <div className="flex w-full flex-col divide-y divide-gray-100 rounded-md border border-gray-200 bg-white shadow-2xs">
+      <div className="flex w-full flex-col divide-y divide-gray-100 rounded-md border border-gray-300 bg-white shadow-2xs">
         {tasks.map((t) => {
           const isDone = checkedSet.has(t.label);
           return (
             <div
               key={t.label}
-              className={`flex items-center gap-2 px-2.5 py-1.5 text-xs ${
-                isDone ? 'bg-emerald-50/40 text-gray-800' : 'text-gray-500'
+              className={`flex items-center gap-2.5 px-3 py-2 text-xs ${
+                isDone ? 'bg-blue-50/40 text-gray-900' : 'text-gray-500'
               }`}
             >
               <input
@@ -556,18 +582,18 @@ function ReadOnlyWidget({
                 checked={isDone}
                 readOnly
                 disabled
-                className="h-3.5 w-3.5 rounded border-gray-300 accent-emerald-600"
+                className="h-3.5 w-3.5 rounded border-gray-300 accent-blue-600"
               />
               <span className={isDone ? 'font-medium text-gray-900' : 'text-gray-500'}>
                 {t.label}
               </span>
               {t.required && (
-                <span className={`ml-auto text-[9px] font-bold ${isDone ? 'text-emerald-600' : 'text-amber-600'}`}>
+                <span className={`ml-auto text-[10px] font-bold ${isDone ? 'text-blue-600' : 'text-amber-600'}`}>
                   {isDone ? '✓ Completed' : 'Required'}
                 </span>
               )}
               {t.assigned_role && (
-                <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-500">
+                <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[9px] text-gray-500">
                   {t.assigned_role}
                 </span>
               )}
@@ -593,19 +619,19 @@ function ReadOnlyWidget({
 
     if (rows.length === 0) {
       return (
-        <div className="rounded-md border border-gray-200 bg-gray-50/70 p-2 text-center text-xs text-gray-400 italic">
+        <div className="rounded-md border border-gray-300 bg-gray-50/70 p-3 text-center text-xs text-gray-400 italic">
           No table rows recorded
         </div>
       );
     }
 
     return (
-      <div className="w-full overflow-hidden rounded-md border border-gray-200 bg-white">
+      <div className="w-full overflow-hidden rounded-md border border-gray-300 bg-white">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-gray-50 text-left text-gray-600 border-b border-gray-200 font-semibold">
               {cols.map((c) => (
-                <th key={c} className="px-2.5 py-1.5 font-medium">
+                <th key={c} className="px-3 py-2 font-semibold text-gray-700">
                   {c}
                 </th>
               ))}
@@ -615,7 +641,7 @@ function ReadOnlyWidget({
             {rows.map((row, ri) => (
               <tr key={ri} className="hover:bg-gray-50/50">
                 {cols.map((c) => (
-                  <td key={c} className="px-2.5 py-1.5 text-gray-800">
+                  <td key={c} className="px-3 py-2 text-gray-800">
                     {row[c] || '—'}
                   </td>
                 ))}
@@ -627,77 +653,126 @@ function ReadOnlyWidget({
     );
   }
 
-  // 4. Selection / Radio
+  // 4. Selection / Radio Choice Cards
   if (def.type === 'selection') {
     const valStr = String(value ?? '');
     return (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
         {def.options.map((o) => {
           const isSelected = valStr === o;
+          const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+          const title = parts[0].trim();
+          const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
           return (
-            <span
+            <div
               key={o}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              className={`rounded-lg border p-4 text-left flex flex-col justify-between ${
                 isSelected
-                  ? 'bg-blue-100 text-blue-800 font-bold border border-blue-300'
-                  : 'bg-gray-100 text-gray-400 opacity-60'
+                  ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                  : 'border-gray-200 bg-white opacity-70'
               }`}
             >
-              <input type="radio" checked={isSelected} readOnly disabled className="accent-blue-600" />
-              {o}
-            </span>
+              <div className="flex items-center justify-between gap-3 w-full">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                  <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                </div>
+                <div
+                  className={`h-4 w-4 shrink-0 rounded-full border flex items-center justify-center ${
+                    isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
+                  }`}
+                >
+                  {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+              </div>
+              {desc && (
+                <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+              )}
+            </div>
           );
         })}
       </div>
     );
   }
 
-  // 5. Checkbox Group
+  // 5. Checkbox Group Choice Cards
   if (def.type === 'checkbox_group') {
     let checkedList: string[] = [];
     if (Array.isArray(value)) checkedList = value.map(String);
     else if (typeof value === 'string') checkedList = value.split(',').map((s) => s.trim());
 
     return (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
         {def.options.map((o) => {
           const isSelected = checkedList.includes(o);
+          const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+          const title = parts[0].trim();
+          const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
           return (
-            <span
+            <div
               key={o}
-              className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${
+              className={`rounded-lg border p-4 text-left flex flex-col justify-between ${
                 isSelected
-                  ? 'bg-purple-100 text-purple-800 font-bold border border-purple-300'
-                  : 'bg-gray-100 text-gray-400 opacity-60'
+                  ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                  : 'border-gray-200 bg-white opacity-70'
               }`}
             >
-              <input type="checkbox" checked={isSelected} readOnly disabled className="accent-purple-600" />
-              {o}
-            </span>
+              <div className="flex items-center justify-between gap-3 w-full">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                  <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  readOnly
+                  disabled
+                  className="accent-blue-600 h-4 w-4 rounded"
+                />
+              </div>
+              {desc && (
+                <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+              )}
+            </div>
           );
         })}
       </div>
     );
   }
 
-  // 6. Boolean
+  // 6. Boolean Toggle Badges
   if (def.type === 'boolean') {
     const isYes = value === true || value === 'yes' || value === 'true';
     return (
-      <span
-        className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-bold ${
-          isYes ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600'
-        }`}
-      >
-        {isYes ? '✓ Yes' : '✗ No'}
-      </span>
+      <div className="flex items-center gap-3">
+        <div
+          className={`rounded-md border px-4 py-2 text-xs font-semibold ${
+            isYes
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
+          }`}
+        >
+          Yes
+        </div>
+        <div
+          className={`rounded-md border px-4 py-2 text-xs font-semibold ${
+            !isYes
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
+          }`}
+        >
+          No
+        </div>
+      </div>
     );
   }
 
   // 7. Long Text
   if (def.type === 'long_text') {
     return (
-      <div className={`${boxCls} whitespace-pre-wrap leading-relaxed`}>
+      <div className={`${boxCls} whitespace-pre-wrap leading-relaxed min-h-[60px]`}>
         {value ? String(value) : <span className="text-gray-400 italic">None</span>}
       </div>
     );

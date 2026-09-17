@@ -2,11 +2,11 @@ import { forwardRef, useEffect, useId, useMemo, useRef, useState, type CSSProper
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap, Info, ChevronDown, Database } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
 import { isItemVisible, isItemReadOnly, withWorkflowStatus } from '../../lib/conditions';
-import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition } from '../../types';
+import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition, ConditionDefinition } from '../../types';
 
 interface EntityCreateFormProps {
   entityType: string;
@@ -62,6 +62,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
+  const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
@@ -77,8 +78,12 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     let cancelled = false;
     (async () => {
       try {
-        const form = await api.getForm(entityType);
+        const [form, condList] = await Promise.all([
+          api.getForm(entityType),
+          api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
+        ]);
         if (cancelled) return;
+        setConditions(condList);
         const layout = ((form.layout || []) as Array<any>).map((it) => {
           const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
           const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
@@ -208,7 +213,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
       return false;
     }
-    return isItemVisible(it, items, conditionValues);
+    return isItemVisible(it, items, conditionValues, conditions);
   });
   const hasLayout = items.length > 0;
 
@@ -291,148 +296,186 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-8">
-      {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
+      {/* Surface Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 bg-white px-6 py-4 shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-xs transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" /> Entities
+            <ArrowLeft className="h-3.5 w-3.5" /> Entities
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">New {entityType} record</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Form fill-in based on the layout defined in the Form Builder. Creating the record starts the workflow.
+            <h1 className="text-lg font-bold text-gray-900">New {entityType} record</h1>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Form fill-in based on layout defined in Form Builder. Creating the record initializes workflow state.
             </p>
           </div>
         </div>
-        <span className="rounded-md bg-blue-50 px-2 py-1 font-mono text-xs font-semibold text-blue-700">
+        <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 font-mono text-xs font-bold text-blue-700">
           {entityType}
         </span>
       </div>
 
-      {!loaded && (
-        <div className="flex items-center justify-center rounded-lg border border-gray-200 bg-white py-20 text-gray-400">
-          <Loader2 className="h-5 w-5 animate-spin" /> Loading form layout…
-        </div>
-      )}
+      {/* Surface Content Body */}
+      <div className="flex-1 overflow-y-auto p-6 sm:p-10 bg-white">
+        <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 sm:p-10 shadow-xs">
+          {!loaded && (
+            <div className="flex items-center justify-center py-20 text-gray-400">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading form layout…
+            </div>
+          )}
 
-      {loaded && (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-              {hasLayout ? 'Form layout' : 'No form layout defined'}
-            </span>
-            {mounted && <span className="text-[11px] text-gray-400">{cols} cols · {rowHeight}px rows</span>}
-          </div>
-
-          {hasLayout || fallbackFields.length > 0 ? (
-            <div className="p-4">
-              <div ref={containerRef}>
-                {mounted && hasLayout && (
-                  <GridLayout
-                    width={width}
-                    layout={currentlyVisibleItems}
-                    compactor={verticalCompactor}
-                    gridConfig={{
-                      cols,
-                      rowHeight,
-                      margin: [12, 12],
-                      containerPadding: [12, 12],
-                    }}
-                    dragConfig={{ enabled: false }}
-                    resizeConfig={{ enabled: false }}
-                    className="rounded-lg"
-                  >
-                    {currentlyVisibleItems.map((it) => {
-                      if (it.isGroup) {
-                        return (
-                          <div
-                            key={it.i}
-                            className="flex h-full w-full items-center gap-2 rounded-md border border-purple-200 bg-purple-50/70 px-3 text-sm font-bold text-purple-900 shadow-sm"
-                          >
-                            <Layers className="h-4 w-4 shrink-0 text-purple-600" />
-                            <span className="truncate">{it.label || it.groupTitle || 'Group'}</span>
-                          </div>
-                        );
-                      }
-                      if (it.isHeader) {
-                        return (
-                          <div
-                            key={it.i}
-                            className="flex h-full w-full items-center gap-1.5 rounded-md bg-indigo-50 px-3 text-sm font-bold text-indigo-700"
-                          >
-                            <Heading className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{it.label}</span>
-                          </div>
-                        );
-                      }
-                      const isReadOnly = isItemReadOnly(it, items, conditionValues);
-                      return (
-                        <FillCell
-                          key={it.i}
-                          def={resolveItem(it)!}
-                          value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
-                          itemHeight={it.h}
-                          readOnly={isReadOnly}
-                          onChange={(v) => handleValueChange(it, v)}
-                        />
-                      );
-                    })}
-                  </GridLayout>
-                )}
-                {mounted && !hasLayout && fallbackFields.length === 0 && (
-                  <div className="py-6 text-center text-xs text-gray-400">Layout not visible yet — measuring…</div>
-                )}
+          {loaded && (
+            <div>
+              {/* Form Title & Description (No underline border, matching image) */}
+              <div className="mb-6">
+                <h1 className="text-base sm:text-lg font-semibold text-gray-900">
+                  {entityType.charAt(0).toUpperCase() + entityType.slice(1)} setup
+                </h1>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Fill in the configuration details below to initialize this {entityType} record in the workflow.
+                </p>
               </div>
 
-              {fallbackFields.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="mb-1 flex items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    All registered fields (no layout defined yet — build one in the Form Builder)
+              {hasLayout || fallbackFields.length > 0 ? (
+                <div>
+                  <div ref={containerRef}>
+                    {mounted && hasLayout && (
+                      <GridLayout
+                        width={width}
+                        layout={currentlyVisibleItems}
+                        compactor={verticalCompactor}
+                        gridConfig={{
+                          cols,
+                          rowHeight,
+                          margin: [16, 16],
+                          containerPadding: [0, 0],
+                        }}
+                        dragConfig={{ enabled: false }}
+                        resizeConfig={{ enabled: false }}
+                        className="rounded-lg"
+                      >
+                        {currentlyVisibleItems.map((it) => {
+                          if (it.isGroup) {
+                            return (
+                              <div
+                                key={it.i}
+                                className="flex h-full w-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 shadow-2xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Layers className="h-4 w-4 shrink-0 text-gray-500" />
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {it.label || it.groupTitle || 'Group'}
+                                  </span>
+                                </div>
+                                {it.placeholder && (
+                                  <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (it.isHeader) {
+                            return (
+                              <div
+                                key={it.i}
+                                className="flex h-full w-full flex-col justify-center pt-2 pb-1"
+                              >
+                                <h2 className="text-sm sm:text-base font-semibold text-gray-900">
+                                  {it.label || 'Section Header'}
+                                </h2>
+                                {it.placeholder && (
+                                  <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
+                                )}
+                              </div>
+                            );
+                          }
+                          const isReadOnly = isItemReadOnly(it, items, conditionValues, conditions);
+                          return (
+                            <FillCell
+                              key={it.i}
+                              def={resolveItem(it)!}
+                              value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
+                              itemHeight={it.h}
+                              readOnly={isReadOnly}
+                              onChange={(v) => handleValueChange(it, v)}
+                            />
+                          );
+                        })}
+                      </GridLayout>
+                    )}
+                    {mounted && !hasLayout && fallbackFields.length === 0 && (
+                      <div className="py-6 text-center text-xs text-gray-400">Layout not visible yet — measuring…</div>
+                    )}
                   </div>
-                  {fallbackFields.map((f) => (
-                    <FieldRow
-                      key={`fallback-${f.field_name}`}
-                      def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) }}
-                      value={values[f.field_name] ?? ''}
-                      onChange={(v) => handleFallbackChange(f.field_name, v)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
 
-          <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50/60 px-4 py-3">
-            {err && (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>
-            )}
-            {success && (
-              <p className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Created — opening the record…
-              </p>
-            )}
-            <button
-              onClick={submit}
-              disabled={saving}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-blue-700 px-3 py-2.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-              Create {entityType} (starts workflow)
-            </button>
-          </div>
+                  {fallbackFields.length > 0 && (
+                    <div className="mt-8 flex flex-col gap-4 pt-4">
+                      <div className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                        Additional Fields
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {fallbackFields.map((f) => (
+                          <FieldRow
+                            key={`fallback-${f.field_name}`}
+                            def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) }}
+                            value={values[f.field_name] ?? ''}
+                            onChange={(v) => handleFallbackChange(f.field_name, v)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {/* Bottom Action Bar matching reference design exactly */}
+              <div className="mt-12 pt-6 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  Close
+                </button>
+
+                <div className="flex items-center gap-4">
+                  {err && (
+                    <span className="text-xs text-red-600">{err}</span>
+                  )}
+                  {success && (
+                    <span className="text-xs text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Created
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={saving}
+                    className="flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-semibold text-white disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors shadow-xs"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Create {entityType} and continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// --- grid cell: compact label+input on one row so it fits h=1 field cells ----
-// forwardRef + className/style forwarding so react-grid-layout can measure the
-// cell and position it (it clones each child with ref/className/style props).
+// --- grid cell: stacked label+input on clean white card form ----
 const FillCell = forwardRef<HTMLDivElement, {
   def: ResolvedField;
   value: string;
@@ -449,16 +492,21 @@ const FillCell = forwardRef<HTMLDivElement, {
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full items-center gap-2 px-2.5 py-1 ${
+      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1 ${
         readOnly ? 'opacity-90' : ''
       }`}
     >
-      <label htmlFor={id} className="flex w-36 shrink-0 items-center gap-1 truncate text-xs font-medium text-gray-700">
+      <label htmlFor={id} className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
         <span className="truncate">{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
+        {def.placeholder && (
+          <span title={def.placeholder} className="group relative">
+            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
+          </span>
+        )}
         {readOnly && (
-          <span className="ml-0.5 text-[10px] text-amber-600" title="Read-only (disabled by condition)">
-            🔒
+          <span className="rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
+            Read-only
           </span>
         )}
       </label>
@@ -479,8 +527,8 @@ function FieldRow({
 }) {
   const id = useId();
   return (
-    <div className="flex flex-col gap-0.5">
-      <label htmlFor={id} className="flex items-center gap-1 text-xs font-medium text-gray-700">
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="flex items-center gap-1 text-xs font-semibold text-gray-900">
         {def.label || def.name}
         {def.required && <span className="text-red-500">*</span>}
       </label>
@@ -497,10 +545,10 @@ function makeInput(
   textareaRows?: number,
   readOnly = false
 ) {
-  const cls = `w-full rounded-md border px-2 py-1.5 text-sm ${
+  const cls = `w-full rounded-md border px-3 py-2 text-xs transition-colors shadow-2xs ${
     readOnly
       ? 'border-gray-200 bg-gray-100/90 text-gray-500 cursor-not-allowed select-none'
-      : 'border-gray-300 bg-white text-gray-800'
+      : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600'
   }`;
 
   if (def.type === 'long_text') {
@@ -513,62 +561,92 @@ function makeInput(
         readOnly={readOnly}
         rows={textareaRows ?? 3}
         placeholder={def.placeholder || ''}
-        className={`${cls} h-full min-h-[28px] resize-none leading-snug`}
+        className={`${cls} h-full min-h-[36px] resize-none leading-relaxed`}
       />
     );
   }
   if (def.type === 'selection') {
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
         {def.options.length === 0 ? (
-          <span className="text-[11px] text-gray-400">No options defined</span>
+          <span className="text-xs text-gray-400">No options defined</span>
         ) : (
-          def.options.map((o) => (
-            <label
-              key={o}
-              className={`flex items-center gap-1 text-xs ${
-                readOnly ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer text-gray-700'
-              }`}
-            >
-              <input
-                type="radio"
-                name={`sel-${id}`}
-                value={o}
-                checked={value === o}
-                disabled={readOnly}
-                onChange={() => !readOnly && onChange(o)}
-                className="accent-blue-600"
-              />
-              {o}
-            </label>
-          ))
+          def.options.map((o) => {
+            const isSelected = value === o;
+            const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+            const title = parts[0].trim();
+            const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
+            return (
+              <div
+                key={o}
+                onClick={() => !readOnly && onChange(o)}
+                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
+                  isSelected
+                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
+              >
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                  </div>
+                  <div
+                    className={`h-4 w-4 shrink-0 rounded-full border flex items-center justify-center ${
+                      isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
+                    }`}
+                  >
+                    {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </div>
+                </div>
+                {desc && (
+                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     );
   }
   if (def.type === 'checkbox_group') {
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
         {def.options.length === 0 ? (
-          <span className="text-[11px] text-gray-400">No options defined</span>
+          <span className="text-xs text-gray-400">No options defined</span>
         ) : (
           def.options.map((o) => {
             const checked = value.split(',').map((s) => s.trim()).includes(o);
+            const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+            const title = parts[0].trim();
+            const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
             return (
               <label
                 key={o}
-                className={`flex items-center gap-1 text-xs ${
-                  readOnly ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer text-gray-700'
-                }`}
+                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
+                  checked
+                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
               >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={readOnly}
-                  onChange={() => !readOnly && onChange(toggleMulti(value, o))}
-                  className="accent-blue-600"
-                />
-                {o}
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={readOnly}
+                    onChange={() => !readOnly && onChange(toggleMulti(value, o))}
+                    className="accent-blue-600 h-4 w-4 rounded"
+                  />
+                </div>
+                {desc && (
+                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+                )}
               </label>
             );
           })
@@ -578,23 +656,32 @@ function makeInput(
   }
   if (def.type === 'boolean') {
     return (
-      <label
-        className={`flex w-fit items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs ${
-          readOnly
-            ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
-            : 'cursor-pointer border-gray-300 bg-gray-50 text-gray-700'
-        }`}
-      >
-        <input
-          id={id}
-          type="checkbox"
-          checked={value === 'yes'}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
           disabled={readOnly}
-          onChange={(e) => !readOnly && onChange(e.target.checked ? 'yes' : 'no')}
-          className="accent-blue-600"
-        />
-        Yes
-      </label>
+          onClick={() => !readOnly && onChange('yes')}
+          className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
+            value === 'yes'
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => !readOnly && onChange('no')}
+          className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
+            value === 'no' || (!value && value !== '')
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          No
+        </button>
+      </div>
     );
   }
 
@@ -612,21 +699,21 @@ function makeInput(
       onChange(JSON.stringify([...next]));
     };
     return (
-      <div className="flex w-full flex-col gap-1">
+      <div className="flex w-full flex-col gap-1.5">
         {tasks.map((t) => {
           const done = checked.has(t.label);
           const pendingReq = !done && t.required;
           return (
             <label
               key={t.label}
-              className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${
+              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${
                 readOnly
                   ? 'cursor-not-allowed border-gray-200 bg-gray-100/70 text-gray-400'
                   : done
-                  ? 'border-indigo-200 bg-indigo-50/50 cursor-pointer'
+                  ? 'border-blue-200 bg-blue-50/50 cursor-pointer'
                   : pendingReq
                   ? 'border-amber-200 bg-amber-50/40 cursor-pointer'
-                  : 'border-gray-200 bg-white cursor-pointer'
+                  : 'border-gray-300 bg-white cursor-pointer'
               }`}
             >
               <input
@@ -634,7 +721,7 @@ function makeInput(
                 checked={done}
                 disabled={readOnly}
                 onChange={() => toggle(t.label)}
-                className="accent-indigo-600"
+                className="accent-blue-600 h-3.5 w-3.5"
               />
               <span className={done ? 'text-gray-500 line-through' : readOnly ? 'text-gray-500' : 'text-gray-800'}>
                 {t.label}
@@ -659,18 +746,22 @@ function makeInput(
   }
   if (def.type === 'dropdown' || def.type === 'select') {
     return (
-      <select
-        id={id}
-        value={value}
-        disabled={readOnly}
-        onChange={(e) => !readOnly && onChange(e.target.value)}
-        className={cls}
-      >
-        <option value="">—</option>
-        {(def.options || []).map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-      </select>
+      <div className="relative w-full">
+        <select
+          id={id}
+          value={value}
+          disabled={readOnly}
+          onChange={(e) => !readOnly && onChange(e.target.value)}
+          className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
+        >
+          <option value="">{def.placeholder || 'Select…'}</option>
+          {(def.options || []).map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+        <Database className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+      </div>
     );
   }
   const nativeType: Record<string, string> = {

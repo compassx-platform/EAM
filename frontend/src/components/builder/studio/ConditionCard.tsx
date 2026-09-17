@@ -28,7 +28,7 @@ export function renderRulePreview(ruleNode: any): string {
 
 export interface ConditionCardProps {
   condition: ConditionDefinition;
-  onEdit?: (condition: ConditionDefinition) => void;
+  onEdit?: (condition: ConditionDefinition, e?: React.MouseEvent) => void;
   onRemove?: () => void;
   compact?: boolean;
 }
@@ -61,7 +61,7 @@ export function ConditionCard({ condition, onEdit, onRemove, compact = false }: 
           {onEdit && (
             <button
               type="button"
-              onClick={() => onEdit(condition)}
+              onClick={(e) => onEdit(condition, e)}
               title="Edit in condition module"
               className="rounded p-1 text-gray-400 hover:bg-white hover:text-blue-700"
             >

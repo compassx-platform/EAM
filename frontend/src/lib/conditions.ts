@@ -4,6 +4,10 @@ import type {
   ConditionRule,
   ConditionAction,
   ConditionOperator,
+  ConditionDefinition,
+  ConditionGroup,
+  ConditionAtom,
+  ConditionRuleNode,
 } from '../types';
 
 /**
@@ -41,6 +45,219 @@ export function isValueEmpty(val: unknown): boolean {
 }
 
 /**
+ * Helper to normalize a list or dictionary of ConditionDefinitions into a map.
+ */
+export function toConditionMap(
+  defs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
+): Record<string, ConditionDefinition> {
+  if (!defs) return {};
+  if (Array.isArray(defs)) {
+    const map: Record<string, ConditionDefinition> = {};
+    defs.forEach((d) => {
+      if (d && d.id) map[d.id] = d;
+    });
+    return map;
+  }
+  return defs;
+}
+
+// -----------------------------------------------------------------------------
+// Centralized AST Evaluator (Maximo Conditional Expression analogue)
+// -----------------------------------------------------------------------------
+
+function getFieldValue(values: Record<string, unknown>, fieldName: string): unknown {
+  const target = fieldName.trim();
+  if (values[target] !== undefined) return values[target];
+  const lower = target.toLowerCase();
+  for (const [k, v] of Object.entries(values)) {
+    if (k.toLowerCase() === lower) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Evaluates a single ConditionAtom against form/entity values.
+ */
+export function evaluateConditionAtom(
+  atom: ConditionAtom,
+  values: Record<string, unknown> = {},
+  userContext?: { role?: string; roles?: string[] }
+): boolean {
+  switch (atom.type) {
+    case 'attribute': {
+      const rawVal = getFieldValue(values, atom.field);
+      const strVal = rawVal !== undefined && rawVal !== null ? String(rawVal).trim() : '';
+      const targetVal = atom.value !== undefined && atom.value !== null ? String(atom.value).trim() : '';
+      const caseSensitive = Boolean(atom.case_sensitive);
+      const op = atom.operator || 'eq';
+
+      if (op === 'is_empty') return isValueEmpty(rawVal);
+      if (op === 'is_not_empty') return !isValueEmpty(rawVal);
+
+      const left = caseSensitive ? strVal : strVal.toLowerCase();
+      const right = caseSensitive ? targetVal : targetVal.toLowerCase();
+
+      switch (op) {
+        case 'eq':
+        case 'equals':
+          return left === right;
+
+        case 'ne':
+        case 'not_equals':
+          return left !== right;
+
+        case 'contains':
+          if (!right) return true;
+          return left.includes(right);
+
+        case 'not_contains':
+          if (!right) return false;
+          return !left.includes(right);
+
+        case 'starts_with':
+          return left.startsWith(right);
+
+        case 'ends_with':
+          return left.endsWith(right);
+
+        case 'in': {
+          const parts = targetVal.split(',').map((p) => (caseSensitive ? p.trim() : p.trim().toLowerCase()));
+          return parts.includes(left);
+        }
+
+        case 'not_in': {
+          const parts = targetVal.split(',').map((p) => (caseSensitive ? p.trim() : p.trim().toLowerCase()));
+          return !parts.includes(left);
+        }
+
+        case 'lt':
+        case 'less_than': {
+          const numL = parseFloat(strVal);
+          const numR = parseFloat(targetVal);
+          return !isNaN(numL) && !isNaN(numR) && numL < numR;
+        }
+
+        case 'le': {
+          const numL = parseFloat(strVal);
+          const numR = parseFloat(targetVal);
+          return !isNaN(numL) && !isNaN(numR) && numL <= numR;
+        }
+
+        case 'gt':
+        case 'greater_than': {
+          const numL = parseFloat(strVal);
+          const numR = parseFloat(targetVal);
+          return !isNaN(numL) && !isNaN(numR) && numL > numR;
+        }
+
+        case 'ge': {
+          const numL = parseFloat(strVal);
+          const numR = parseFloat(targetVal);
+          return !isNaN(numL) && !isNaN(numR) && numL >= numR;
+        }
+
+        default:
+          return left === right;
+      }
+    }
+
+    case 'role': {
+      if (!atom.role) return true;
+      const targetRole = atom.role.trim().toLowerCase();
+      if (userContext?.roles && userContext.roles.length > 0) {
+        return userContext.roles.some((r) => r.trim().toLowerCase() === targetRole);
+      }
+      if (userContext?.role) {
+        return userContext.role.trim().toLowerCase() === targetRole;
+      }
+      return true; // If no user context, allow by default in builder/preview
+    }
+
+    case 'field_not_empty': {
+      const rawVal = getFieldValue(values, atom.field);
+      return !isValueEmpty(rawVal);
+    }
+
+    case 'date': {
+      const rawVal = getFieldValue(values, atom.field);
+      if (!rawVal) return false;
+      const dateVal = new Date(String(rawVal)).getTime();
+      if (isNaN(dateVal)) return false;
+      const target = atom.value === 'now' || !atom.value ? Date.now() : new Date(String(atom.value)).getTime();
+      if (isNaN(target)) return false;
+
+      const op = atom.operator || 'ge';
+      switch (op) {
+        case 'lt':
+          return dateVal < target;
+        case 'le':
+          return dateVal <= target;
+        case 'gt':
+          return dateVal > target;
+        case 'ge':
+          return dateVal >= target;
+        case 'eq':
+          return Math.abs(dateVal - target) < 86400000;
+        default:
+          return dateVal >= target;
+      }
+    }
+
+    case 'related': {
+      const rawVal = getFieldValue(values, atom.relationship_field);
+      if (!rawVal) return false;
+      return true;
+    }
+
+    case 'expression': {
+      return true;
+    }
+
+    default:
+      return true;
+  }
+}
+
+/**
+ * Evaluates a structured ConditionGroup AST against values.
+ */
+export function evaluateConditionGroup(
+  group?: ConditionGroup | null,
+  values: Record<string, unknown> = {},
+  userContext?: { role?: string; roles?: string[] }
+): boolean {
+  if (!group || !group.rules || group.rules.length === 0) return true;
+
+  const isOr = (group.logic || 'AND').toUpperCase() === 'OR';
+  const evaluateChild = (node: ConditionRuleNode): boolean => {
+    if ('group' in node && node.group) {
+      return evaluateConditionGroup(node.group, values, userContext);
+    }
+    return evaluateConditionAtom(node as ConditionAtom, values, userContext);
+  };
+
+  let passed = isOr ? group.rules.some(evaluateChild) : group.rules.every(evaluateChild);
+  if (group.negate) passed = !passed;
+  return passed;
+}
+
+/**
+ * Evaluates a centralized ConditionDefinition AST.
+ */
+export function evaluateConditionDefinition(
+  def: ConditionDefinition,
+  values: Record<string, unknown> = {},
+  userContext?: { role?: string; roles?: string[] }
+): boolean {
+  if (!def || !def.definition) return true;
+  return evaluateConditionGroup(def.definition, values, userContext);
+}
+
+// -----------------------------------------------------------------------------
+// Legacy & Unified Condition Rule Normalization
+// -----------------------------------------------------------------------------
+
+/**
  * Normalizes a VisibilityCondition object into an array of ConditionRule items.
  */
 export function getConditionRules(condition?: VisibilityCondition | null): ConditionRule[] {
@@ -61,24 +278,13 @@ export function getConditionRules(condition?: VisibilityCondition | null): Condi
 }
 
 /**
- * Evaluates a single rule clause against current form values.
+ * Evaluates a single legacy rule clause against current form values.
  */
 export function evaluateSingleRule(
   rule: ConditionRule,
   values: Record<string, unknown> = {}
 ): boolean {
-  const targetField = rule.field.trim();
-  let rawVal = values[targetField];
-  if (rawVal === undefined) {
-    const lowerKey = targetField.toLowerCase();
-    for (const [k, v] of Object.entries(values)) {
-      if (k.toLowerCase() === lowerKey) {
-        rawVal = v;
-        break;
-      }
-    }
-  }
-
+  const rawVal = getFieldValue(values, rule.field);
   const strVal = rawVal !== undefined && rawVal !== null ? String(rawVal).trim() : '';
   const condVal = (rule.value || '').trim();
   const operator = rule.operator || 'equals';
@@ -127,16 +333,29 @@ export function evaluateSingleRule(
 
 /**
  * Evaluates whether all/any condition rules match based on current form values.
+ * Supports both centralized condition_id lookup and legacy inline rules.
  */
 export function isConditionMatched(
   condition?: VisibilityCondition | null,
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
+  if (!condition) return false;
+
+  // 1. Centralized condition reference
+  if (condition.condition_id) {
+    const map = toConditionMap(conditionDefs);
+    const def = map[condition.condition_id];
+    if (def) {
+      return evaluateConditionDefinition(def, values);
+    }
+  }
+
+  // 2. Legacy rules array
   const rules = getConditionRules(condition);
   if (rules.length === 0) return false;
 
-  const matchType = condition?.matchType || 'all';
-
+  const matchType = condition.matchType || 'all';
   if (matchType === 'any') {
     return rules.some((rule) => evaluateSingleRule(rule, values));
   }
@@ -148,17 +367,20 @@ export function isConditionMatched(
  */
 export function evaluateVisibility(
   condition?: VisibilityCondition | null,
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
+  if (!condition) return true;
+  const hasCentral = Boolean(condition.condition_id);
   const rules = getConditionRules(condition);
-  if (rules.length === 0) return true;
+  if (!hasCentral && rules.length === 0) return true;
 
-  const action = condition?.action || 'show';
+  const action = condition.action || 'show';
   if (action !== 'hide' && action !== 'show') {
     return true; // Not a visibility rule; always visible
   }
 
-  const matched = isConditionMatched(condition, values);
+  const matched = isConditionMatched(condition, values, conditionDefs);
   if (action === 'hide') {
     return !matched;
   }
@@ -170,17 +392,20 @@ export function evaluateVisibility(
  */
 export function evaluateReadOnly(
   condition?: VisibilityCondition | null,
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
+  if (!condition) return false;
+  const hasCentral = Boolean(condition.condition_id);
   const rules = getConditionRules(condition);
-  if (rules.length === 0) return false;
+  if (!hasCentral && rules.length === 0) return false;
 
-  const action = condition?.action;
+  const action = condition.action;
   if (action !== 'readonly' && action !== 'editable') {
     return false; // Not a read-only rule
   }
 
-  const matched = isConditionMatched(condition, values);
+  const matched = isConditionMatched(condition, values, conditionDefs);
   if (action === 'readonly') {
     return matched;
   }
@@ -195,9 +420,10 @@ export function evaluateReadOnly(
  */
 export function evaluateCondition(
   condition?: VisibilityCondition | null,
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
-  return evaluateVisibility(condition, values);
+  return evaluateVisibility(condition, values, conditionDefs);
 }
 
 /**
@@ -207,7 +433,8 @@ export function evaluateCondition(
 export function isItemVisible(
   item: EntityFormItem,
   allItems: EntityFormItem[],
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
   // 1. Check parent group visibility condition
   const groupId = item.groupId ?? item.group_id;
@@ -217,7 +444,7 @@ export function isItemVisible(
     );
     if (parentGroup) {
       const groupCond = parentGroup.visibilityCondition ?? parentGroup.visibility_condition;
-      if (!evaluateVisibility(groupCond, values)) {
+      if (!evaluateVisibility(groupCond, values, conditionDefs)) {
         return false;
       }
     }
@@ -225,7 +452,7 @@ export function isItemVisible(
 
   // 2. Check item's own visibility condition
   const itemCond = item.visibilityCondition ?? item.visibility_condition;
-  return evaluateVisibility(itemCond, values);
+  return evaluateVisibility(itemCond, values, conditionDefs);
 }
 
 /**
@@ -235,7 +462,8 @@ export function isItemVisible(
 export function isItemReadOnly(
   item: EntityFormItem,
   allItems: EntityFormItem[],
-  values: Record<string, unknown> = {}
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
 ): boolean {
   // 1. Check parent group read-only condition
   const groupId = item.groupId ?? item.group_id;
@@ -245,7 +473,7 @@ export function isItemReadOnly(
     );
     if (parentGroup) {
       const groupCond = parentGroup.visibilityCondition ?? parentGroup.visibility_condition;
-      if (evaluateReadOnly(groupCond, values)) {
+      if (evaluateReadOnly(groupCond, values, conditionDefs)) {
         return true;
       }
     }
@@ -253,7 +481,7 @@ export function isItemReadOnly(
 
   // 2. Check item's own read-only condition
   const itemCond = item.visibilityCondition ?? item.visibility_condition;
-  return evaluateReadOnly(itemCond, values);
+  return evaluateReadOnly(itemCond, values, conditionDefs);
 }
 
 /**
@@ -290,11 +518,13 @@ export function formatRuleSummary(rule: ConditionRule): string {
 /**
  * Friendly one-line description of a visibility or read-only condition.
  */
-export function formatConditionSummary(condition?: VisibilityCondition | null): string {
-  const rules = getConditionRules(condition);
-  if (rules.length === 0) return 'Always active';
+export function formatConditionSummary(
+  condition?: VisibilityCondition | null,
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
+): string {
+  if (!condition) return 'Always active';
 
-  const action = condition?.action || 'show';
+  const action = condition.action || 'show';
   const actionLabel =
     action === 'hide'
       ? 'Hide when'
@@ -304,7 +534,21 @@ export function formatConditionSummary(condition?: VisibilityCondition | null): 
       ? 'Read-only when'
       : 'Editable only when';
 
-  const joiner = condition?.matchType === 'any' ? ' OR ' : ' AND ';
+  // 1. Central condition reference
+  if (condition.condition_id) {
+    const map = toConditionMap(conditionDefs);
+    const def = map[condition.condition_id];
+    if (def) {
+      return `${actionLabel} [${def.label}] (v${def.current_version})`;
+    }
+    return `${actionLabel} condition [${condition.condition_id}]`;
+  }
+
+  // 2. Legacy rules
+  const rules = getConditionRules(condition);
+  if (rules.length === 0) return 'Always active';
+
+  const joiner = condition.matchType === 'any' ? ' OR ' : ' AND ';
   const rulesText = rules.map(formatRuleSummary).join(joiner);
   return `${actionLabel} ${rulesText}`;
 }

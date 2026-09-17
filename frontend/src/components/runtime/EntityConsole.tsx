@@ -228,16 +228,25 @@ export function EntityConsole() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
+      {/* Surface Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 bg-white px-6 py-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Entity Console</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Create and drive real <span className="font-mono">{type}</span> records through published workflows.
+          <div className="flex items-center gap-2">
+            <h1 className="flex items-center gap-2 text-lg font-bold text-gray-900">
+              <Layers className="h-5 w-5 text-blue-700" />
+              <span>Entity Runtime Console</span>
+            </h1>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 font-mono text-xs font-semibold text-gray-600">
+              {total}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Drive real <span className="font-mono font-semibold text-gray-700">{type}</span> records through published workflows and form bindings.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             value={type}
             onChange={(e) => {
@@ -247,7 +256,7 @@ export function EntityConsole() {
             }}
             placeholder="entity_type"
             list="console-entity-types"
-            className="w-44 rounded-md border border-gray-300 px-2.5 py-1.5 font-mono text-sm text-gray-700"
+            className="w-36 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 font-mono text-xs text-gray-800 focus:border-blue-500 focus:outline-none shadow-xs"
             title="Entity type to manage"
           />
           <datalist id="console-entity-types">
@@ -263,95 +272,96 @@ export function EntityConsole() {
               setStatusFilter(s);
               patchQuery({ status: s });
             }}
-            placeholder="status filter"
-            className="w-32 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-700"
+            placeholder="filter state…"
+            className="w-28 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none shadow-xs"
             title="Filter by current workflow state"
           />
 
           <button
             onClick={loadList}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs"
             title="Refresh"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
           <button
             onClick={() => navigate('/entities/new', { type })}
-            className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
+            className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
           >
             <Plus className="h-4 w-4" /> New {type || 'entity'}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-      )}
+      {/* Surface Content Body */}
+      <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {error}
+          </div>
+        )}
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-          {loading ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : `${total} record(s)`}
-        </div>
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wider text-gray-500">
-              <th className="px-4 py-3 font-semibold">Title</th>
-              <th className="px-4 py-3 font-semibold">Entity</th>
-              <th className="px-4 py-3 font-semibold">Current State</th>
-              <th className="px-4 py-3 font-semibold">Workflow Version</th>
-              <th className="px-4 py-3 font-semibold">Fields</th>
-              <th className="px-4 py-3 font-semibold">Updated</th>
-              <th className="px-4 py-3 text-right font-semibold">Open</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
-                  No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Create one to start driving the
-                  workflow.
-                </td>
+        <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-xs">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50/80 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                <th className="px-4 py-3">Title</th>
+                <th className="px-4 py-3">Entity ID</th>
+                <th className="px-4 py-3">Current State</th>
+                <th className="px-4 py-3">Workflow</th>
+                <th className="px-4 py-3">Fields</th>
+                <th className="px-4 py-3">Updated</th>
+                <th className="px-4 py-3 text-right">Open</th>
               </tr>
-            ) : (
-              items.map((e) => (
-                <tr key={e.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                  <td className="max-w-[260px] truncate px-4 py-3 text-[13px] font-medium text-gray-800">
-                    {entityTitle(e) ?? <span className="font-normal text-gray-400">—</span>}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-gray-800">{truncate(e.id)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
-                      {e.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-600">{e.workflow_version}</td>
-                  <td className="px-4 py-3 text-gray-600">{Object.keys(e.custom_fields || {}).length}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => setViewFormEntity(e)}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                        title="View filled form layout"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-blue-600" /> Form
-                      </button>
-                      <button
-                        onClick={() => patchQuery({ selected: e.id })}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        Drive <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
+                    No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Create one to start driving the workflow.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                items.map((e) => (
+                  <tr key={e.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="max-w-[240px] truncate px-4 py-3 text-xs font-semibold text-gray-900">
+                      {entityTitle(e) ?? <span className="font-normal text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-gray-700">{truncate(e.id)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
+                        {e.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{e.workflow_version}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{Object.keys(e.custom_fields || {}).length}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">
+                      {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="inline-flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => setViewFormEntity(e)}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 shadow-xs transition-colors"
+                          title="View filled form layout"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-blue-600" /> Form
+                        </button>
+                        <button
+                          onClick={() => patchQuery({ selected: e.id })}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 shadow-xs transition-colors"
+                        >
+                          Drive <ChevronRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {detail && (
