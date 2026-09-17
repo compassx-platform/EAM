@@ -162,6 +162,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
     known = {
         f.field_name for f in db.query(EntityField).filter(EntityField.entity_type == et).all()
     }
+    used = set()
 
     seen: Dict[str, Any] = {}
     cleaned = []
@@ -199,7 +200,8 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             })
             continue
 
-        # Generic field item: carries its own inline definition (no registry lookup needed).
+        # Generic field item: carries its own inline definition but must bind to a
+        # registered entity field (the form only surfaces entity-schema fields).
         ft = item.fieldType or item.field_type
         if ft:
             if ft not in ALLOWED_FIELD_TYPES:
@@ -212,6 +214,17 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 raise HTTPException(
                     status_code=400,
                     detail=f"Field item '{i}' is missing a field name"
+                )
+            if name in used:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{name}' can only be added to the form once.",
+                )
+            used.add(name)
+            if name not in known:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Field '{name}' is not registered for entity type '{et}'. Register it via the Entity Designer or POST /api/fields first.",
                 )
 
             options = []

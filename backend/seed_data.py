@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from backend.database import Base, engine
 from backend.models.users import AppUser, AppRole
@@ -8,12 +9,43 @@ from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.forms import EntityForm
 from backend.models.entities import WorkOrder, Permit, PMSchedule
 from backend.models.lists import ListDefinition
+from backend.models.entity_type import EntityTypeDefinition
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
+
+def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
+    """Idempotently adds a nullable column to an existing table (create_all will not alter it)."""
+    inspector = inspect(db.get_bind())
+    cols = {c["name"] for c in inspector.get_columns(table)}
+    if column in cols:
+        return
+    db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
 
 def seed_all(db: Session):
     """Initializes schema and seeds baseline users, roles, fields, gates, workflows, and sample entities."""
     Base.metadata.create_all(bind=db.get_bind())
+
+    # Lightweight schema backfills for pre-existing dev databases
+    _ensure_column(db, "entity_field", "label", "label VARCHAR(100)")
+
+    # 0. Seed Default Entity Types
+    default_entity_types = [
+        ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", True),
+        ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", True),
+        ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", True),
+    ]
+    for name, display_name, desc, icon, is_sys in default_entity_types:
+        et = db.query(EntityTypeDefinition).filter(EntityTypeDefinition.name == name).first()
+        if not et:
+            et = EntityTypeDefinition(
+                name=name,
+                display_name=display_name,
+                description=desc,
+                icon=icon,
+                is_system=is_sys
+            )
+            db.add(et)
+    db.commit()
 
     # 1. Seed Roles
     roles_data = ["Admin", "Supervisor", "Safety Officer", "Technician", "Manager"]
@@ -258,6 +290,30 @@ def seed_all(db: Session):
             "field_type": "select",
             "required": False,
             "select_options": ["Low", "Medium", "High"],
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "permit",
+            "field_name": "isolation_notes",
+            "field_type": "long_text",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "permit",
+            "field_name": "supervisor_signoff",
+            "field_type": "boolean",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": None,
+        },
+        {
+            "entity_type": "permit",
+            "field_name": "supervisor_notes",
+            "field_type": "long_text",
+            "required": False,
+            "select_options": None,
             "reference_entity_type": None,
         },
         # ---- PM Schedule fields (Step 6 PM records) ----

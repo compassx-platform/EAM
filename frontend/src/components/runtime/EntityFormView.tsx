@@ -1,18 +1,23 @@
-import { forwardRef, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import {
-  ArrowLeft,
+  ArrowRight,
+  Check,
+  Clock,
   Download,
-  Eye,
-  Heading,
+  FileText,
+  History,
   Layers,
   Loader2,
   Paperclip,
-  Printer,
+  RefreshCw,
+  ShieldCheck,
+  ShieldX,
+  Workflow,
   X,
-  Clock,
+  Zap,
   Info,
 } from 'lucide-react';
 import { api } from '../../api/client';
@@ -21,16 +26,21 @@ import type {
   EntityField,
   EntityFormItem,
   EntityRecord,
+  EntityEvent,
+  ValidTransition,
   ChecklistItem,
   ResolvedList,
   ConditionDefinition,
+  ConditionTraceItem,
 } from '../../types';
 import type { AttachedFile } from './EntityCreateForm';
 
-interface EntityFormViewProps {
-  entity: EntityRecord;
+export interface EntityFormViewProps {
+  entity?: EntityRecord | null;
+  recordId?: string | null;
   entityType?: string;
   onClose?: () => void;
+  onRecordUpdated?: () => void;
   isModal?: boolean;
 }
 
@@ -50,14 +60,24 @@ interface ResolvedField {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: 'bg-amber-100 text-amber-700 border-amber-200',
-  active: 'bg-blue-100 text-blue-700 border-blue-200',
-  approved: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  rejected: 'bg-rose-100 text-rose-700 border-rose-200',
+  draft: 'bg-amber-100 text-amber-800 border-amber-200',
+  requested: 'bg-blue-100 text-blue-800 border-blue-200',
+  active: 'bg-blue-100 text-blue-800 border-blue-200',
+  isolationprecheck: 'bg-purple-100 text-purple-800 border-purple-200',
+  riskassessed: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  completed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  published: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  rejected: 'bg-rose-100 text-rose-800 border-rose-200',
   closed: 'bg-gray-100 text-gray-700 border-gray-200',
-  cancelled: 'bg-rose-100 text-rose-700 border-rose-200',
-  expired: 'bg-orange-100 text-orange-700 border-orange-200',
+  cancelled: 'bg-rose-100 text-rose-800 border-rose-200',
+  expired: 'bg-orange-100 text-orange-800 border-orange-200',
 };
+
+function statusBadge(s?: string) {
+  if (!s) return 'bg-gray-100 text-gray-700 border-gray-200';
+  return STATUS_BADGE[s.toLowerCase()] ?? 'bg-blue-50 text-blue-700 border-blue-200';
+}
 
 function formatFileSize(bytes: number): string {
   if (!bytes) return '0 B';
@@ -88,22 +108,136 @@ function useContainerSize(active: boolean) {
   return { width, mounted, containerRef };
 }
 
-export function EntityFormView({ entity, entityType: propType, onClose, isModal = false }: EntityFormViewProps) {
-  const entityType = propType || (entity as any).entity_type || 'permit';
+const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
+
+function getEntityTitle(e: { custom_fields?: Record<string, unknown> } | null | undefined): string | null {
+  if (!e) return null;
+  const cf = e.custom_fields || {};
+  for (const k of TITLE_KEYS) {
+    const v = cf[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+  }
+  return null;
+}
+
+export function EntityFormView({
+  entity: initialEntity,
+  recordId: initialRecordId,
+  entityType: propType,
+  onClose,
+  onRecordUpdated,
+  isModal = false,
+}: EntityFormViewProps) {
+  const [entityRecord, setEntityRecord] = useState<EntityRecord | null>(initialEntity || null);
+  const [events, setEvents] = useState<EntityEvent[]>([]);
+  const [validTransitions, setValidTransitions] = useState<ValidTransition[]>([]);
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
+  const [conditionMap, setConditionMap] = useState<Record<string, { label: string; type: string }>>({});
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showAllFields, setShowAllFields] = useState(false);
+  const [auditLogOpen, setAuditLogOpen] = useState(false);
+  const [firingEvent, setFiringEvent] = useState<string | null>(null);
+  const [transitionError, setTransitionError] = useState<string | null>(null);
+
+  const activeId = initialRecordId || initialEntity?.id || '';
+  const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || 'permit';
 
   const { width, mounted, containerRef } = useContainerSize(loaded);
 
-  // Normalize custom_fields from entity record
-  const customFields: Record<string, unknown> = entity.custom_fields || {};
+  const loadData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoaded(false);
+    setErr(null);
+
+    try {
+      const [formRes, condList, fieldsRes] = await Promise.all([
+        api.getForm(entityType).catch(() => ({ layout: [], fields: [], cols: 12, row_height: 40 })),
+        api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
+        api.listFields(entityType).catch(() => [] as EntityField[]),
+      ]);
+
+      const cMap: Record<string, { label: string; type: string }> = {};
+      for (const g of condList) cMap[g.id] = { label: g.label, type: g.type };
+      setConditionMap(cMap);
+      setConditions(condList);
+      setFields(fieldsRes);
+
+      const layout = ((formRes.layout || []) as Array<any>).map((it) => {
+        const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
+        const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+        return {
+          ...it,
+          isHeader,
+          isGroup,
+          is_header: undefined,
+          is_group: undefined,
+          fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
+          fieldType: it.fieldType ?? it.field_type ?? null,
+          optionsList: it.optionsList ?? it.options_list ?? null,
+          options_list: undefined,
+          hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
+          hidden_options: undefined,
+          groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
+          group_id: undefined,
+          groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
+          group_title: undefined,
+          visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
+          visibility_condition: undefined,
+          accept: it.accept ?? undefined,
+          maxFileSizeMb: it.maxFileSizeMb ?? it.max_file_size_mb ?? 10,
+          allowMultiple: it.allowMultiple ?? it.allow_multiple ?? false,
+          maxFiles: it.maxFiles ?? it.max_files ?? 5,
+        };
+      });
+      setItems(layout);
+      setCols(formRes.cols || 12);
+      setRowHeight(formRes.row_height || 40);
+
+      const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
+      const fieldKeys = (formRes.fields || fieldsRes || [])
+        .map((f: EntityField) => f.option_list_key)
+        .filter((k): k is string => Boolean(k));
+      const keys = [...new Set([...layoutKeys, ...fieldKeys])];
+      if (keys.length > 0) {
+        const r = await api.resolveLists(keys).catch(() => ({ resolved: {} }));
+        setResolved(r.resolved || {});
+      }
+
+      // Fetch Entity and Valid Transitions
+      if (activeId) {
+        const [entityDetail, validRes] = await Promise.all([
+          api.getEntity(entityType, activeId),
+          api.listValidTransitions(entityType, activeId).catch(() => ({ valid_transitions: [] })),
+        ]);
+        setEntityRecord(entityDetail.entity);
+        setEvents(entityDetail.events || []);
+        setValidTransitions(validRes.valid_transitions || []);
+      } else if (initialEntity) {
+        setEntityRecord(initialEntity);
+        const validRes = await api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [] }));
+        setValidTransitions(validRes.valid_transitions || []);
+      }
+    } catch (e: any) {
+      setErr(e.message || 'Failed to load record');
+    } finally {
+      setLoaded(true);
+      setRefreshing(false);
+    }
+  }, [activeId, entityType, initialEntity]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Current entity custom fields + workflow status
+  const currentEntity = entityRecord || initialEntity;
+  const customFields: Record<string, unknown> = currentEntity?.custom_fields || {};
   const baseConditionValues: Record<string, string> = {};
   for (const [k, v] of Object.entries(customFields)) {
     if (v === null || v === undefined) {
@@ -114,75 +248,9 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
       baseConditionValues[k] = String(v);
     }
   }
-  // Merge the entity's current workflow stage so stage-bound rules apply in the
-  // read-only filled-form view (stage -> form two-way binding).
-  const valuesForCondition = withWorkflowStatus(baseConditionValues, entity.status);
+  const valuesForCondition = withWorkflowStatus(baseConditionValues, currentEntity?.status);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [form, condList] = await Promise.all([
-          api.getForm(entityType),
-          api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
-        ]);
-        if (cancelled) return;
-        setConditions(condList);
-        const layout = ((form.layout || []) as Array<any>).map((it) => {
-          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
-          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
-          return {
-            ...it,
-            isHeader,
-            isGroup,
-            is_header: undefined,
-            is_group: undefined,
-            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
-            fieldType: it.fieldType ?? it.field_type ?? null,
-            optionsList: it.optionsList ?? it.options_list ?? null,
-            options_list: undefined,
-            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
-            hidden_options: undefined,
-            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
-            group_id: undefined,
-            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
-            group_title: undefined,
-            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
-            visibility_condition: undefined,
-            accept: it.accept ?? undefined,
-            maxFileSizeMb: it.maxFileSizeMb ?? it.max_file_size_mb ?? 10,
-            allowMultiple: it.allowMultiple ?? it.allow_multiple ?? false,
-            maxFiles: it.maxFiles ?? it.max_files ?? 5,
-          };
-        });
-        const formFields = form.fields || [];
-        setItems(layout);
-        setFields(formFields);
-        setCols(form.cols || 12);
-        setRowHeight(form.row_height || 40);
-
-        const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
-        const fieldKeys = formFields
-          .map((f) => f.option_list_key)
-          .filter((k): k is string => Boolean(k));
-        const keys = [...new Set([...layoutKeys, ...fieldKeys])];
-        if (keys.length > 0) {
-          const r = await api.resolveLists(keys);
-          if (!cancelled) setResolved(r.resolved);
-        }
-      } catch (e: any) {
-        if (cancelled) return;
-        setErr(e.message);
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [entityType]);
-
-  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const byName = useMemo(() => new Map(fields.map((f) => [f.field_name, f])), [fields]);
 
   const resolveItem = (it: EntityFormItem): ResolvedField | null => {
     if (it.isHeader || it.isGroup) return null;
@@ -234,198 +302,370 @@ export function EntityFormView({ entity, entityType: propType, onClose, isModal 
   };
 
   const currentlyVisibleItems = items.filter((it) => {
-    if (showAllFields) return true;
     if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
       return false;
     }
     return isItemVisible(it, items, valuesForCondition, conditions);
   });
 
+  const handleFireTransition = async (t: ValidTransition) => {
+    if (!currentEntity || firingEvent) return;
+    setFiringEvent(t.event_type);
+    setTransitionError(null);
+    try {
+      await api.transition(entityType, {
+        entity_id: currentEntity.id,
+        event_type: t.event_type,
+      });
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (e: any) {
+      setTransitionError(e.message || `Failed to fire transition "${t.event_type}"`);
+    } finally {
+      setFiringEvent(null);
+    }
+  };
+
   const hasLayout = items.length > 0;
+  const entityTitleStr = getEntityTitle(currentEntity);
 
   const content = (
-    <div className="flex flex-col bg-white min-h-full">
-      {/* Form Header Info Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-6 py-4 shrink-0">
+    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-slate-50/50">
+      {/* Surface Navigation & Record Header */}
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200/80 bg-white px-6 py-3.5 shrink-0 shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" /> Back
-            </button>
-          )}
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-gray-900">
-                {entityType.charAt(0).toUpperCase() + entityType.slice(1)} Record
-              </h1>
-              <span
-                className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
-                  STATUS_BADGE[entity.status?.toLowerCase()] || 'bg-blue-50 text-blue-700 border-blue-200'
-                }`}
-              >
-                {entity.status}
+          <div className="flex items-center gap-2">
+            <h1 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+              <span>{entityTitleStr || `${entityType} Record`}</span>
+            </h1>
+            {currentEntity?.status && (
+              <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusBadge(currentEntity.status)}`}>
+                {currentEntity.status}
               </span>
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-gray-500 font-mono">
-              <span>ID: {entity.id}</span>
+            )}
+          </div>
+
+          {currentEntity && (
+            <div className="hidden sm:flex items-center gap-2 font-mono text-[11px] text-gray-500">
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600 font-semibold">{entityType}</span>
               <span>·</span>
-              <span>Workflow: {entity.workflow_version}</span>
-              {entity.created_at && (
+              <span className="truncate max-w-[140px]" title={currentEntity.id}>ID: {currentEntity.id}</span>
+              {currentEntity.workflow_version && (
                 <>
                   <span>·</span>
-                  <span className="flex items-center gap-1 font-sans">
-                    <Clock className="h-3 w-3 text-gray-400" />
-                    {new Date(entity.created_at).toLocaleString()}
+                  <span>{currentEntity.workflow_version}</span>
+                </>
+              )}
+              {currentEntity.created_at && (
+                <>
+                  <span>·</span>
+                  <span className="flex items-center gap-1 font-sans text-gray-400">
+                    <Clock className="h-3 w-3" />
+                    {new Date(currentEntity.created_at).toLocaleDateString()}
                   </span>
                 </>
               )}
             </div>
-          </div>
+          )}
         </div>
 
+        {/* Right Header Action Buttons */}
         <div className="flex items-center gap-2">
-          {hasLayout && (
-            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 shadow-2xs">
-              <input
-                type="checkbox"
-                checked={showAllFields}
-                onChange={(e) => setShowAllFields(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 accent-blue-600"
-              />
-              <Eye className="h-3.5 w-3.5 text-gray-500" />
-              <span>Show hidden fields</span>
-            </label>
-          )}
+          {/* Audit Timeline Sidebar Toggle Button */}
           <button
-            onClick={() => window.print()}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 shadow-2xs"
-            title="Print form"
+            type="button"
+            onClick={() => setAuditLogOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-2xs transition-colors"
+            title="View audit timeline & event history"
           >
-            <Printer className="h-3.5 w-3.5 text-gray-500" /> Print
+            <History className="h-3.5 w-3.5 text-gray-500" />
+            <span>Audit Log</span>
+            {events.length > 0 && (
+              <span className="rounded-full bg-gray-100 px-1.5 py-0.2 text-[10px] font-mono text-gray-600">
+                {events.length}
+              </span>
+            )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => loadData(true)}
+            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 shadow-2xs transition-colors"
+            title="Refresh record"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+
           {onClose && isModal && (
             <button
+              type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
             >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
-      </div>
+      </header>
 
-      {!loaded && (
-        <div className="flex items-center justify-center py-24 text-gray-400">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading filled form layout…
-        </div>
-      )}
+      {/* Main Form Body Surface */}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-8 min-h-0 bg-slate-100/60">
+        {!loaded ? (
+          <div className="flex flex-col items-center justify-center py-28 text-gray-400">
+            <Loader2 className="h-7 w-7 animate-spin text-blue-600 mb-3" />
+            <p className="text-xs font-medium text-gray-500">Loading full page form layout…</p>
+          </div>
+        ) : err ? (
+          <div className="mx-auto max-w-2xl rounded-xl border border-red-200 bg-red-50 p-6 text-center text-xs text-red-700 shadow-xs">
+            <p className="font-semibold text-sm mb-1">Failed to load record</p>
+            <p>{err}</p>
+          </div>
+        ) : !currentEntity ? (
+          <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-8 text-center text-xs text-gray-400 shadow-xs">
+            No record found for identifier <span className="font-mono font-bold">{activeId}</span>.
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl space-y-6">
+            {/* Top Workflow Actions Banner: Drive workflow directly from full-page form */}
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Workflow className="h-4 w-4 text-blue-600" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                    Current Stage: <span className="text-blue-700">{currentEntity.status}</span>
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {validTransitions.length > 0
+                    ? `Click an action to transition this ${entityType} record to the next workflow stage.`
+                    : `This record is currently in state "${currentEntity.status}".`}
+                </p>
+              </div>
 
-      {err && (
-        <div className="m-6 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-          {err}
-        </div>
-      )}
-
-      {loaded && (
-        <div className="flex-1 overflow-y-auto p-6 sm:p-10 bg-white">
-          <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-8 sm:p-10 shadow-xs">
-            {/* Document Sheet Heading */}
-            <div className="mb-6">
-              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
-                {entityType.charAt(0).toUpperCase() + entityType.slice(1)} details
-              </h2>
-              <p className="mt-0.5 text-xs text-gray-500">
-                Summary of recorded fields and workflow attributes for this record.
-              </p>
-            </div>
-
-            {hasLayout ? (
-              <div ref={containerRef}>
-                {mounted && (
-                  <GridLayout
-                    width={width}
-                    layout={currentlyVisibleItems}
-                    compactor={verticalCompactor}
-                    gridConfig={{
-                      cols,
-                      rowHeight,
-                      margin: [16, 16],
-                      containerPadding: [0, 0],
-                    }}
-                    dragConfig={{ enabled: false }}
-                    resizeConfig={{ enabled: false }}
-                    className="rounded-lg"
-                  >
-                    {currentlyVisibleItems.map((it) => {
-                      if (it.isGroup) {
-                        return (
-                          <div
-                            key={it.i}
-                            className="flex h-full w-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 shadow-2xs"
+              {/* Action Buttons: Directly fire the event on 1 click */}
+              <div className="flex flex-wrap items-center gap-2">
+                {validTransitions.length === 0 ? (
+                  <span className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200/60">
+                    No actions available from this state
+                  </span>
+                ) : (
+                  validTransitions.map((t) => {
+                    const isFiring = firingEvent === t.event_type;
+                    const isAnyFiring = firingEvent !== null;
+                    const condCount = (t.conditions || []).length;
+                    return (
+                      <button
+                        key={t.event_type}
+                        type="button"
+                        disabled={isAnyFiring}
+                        onClick={() => handleFireTransition(t)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 active:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isFiring ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                        ) : (
+                          <Zap className="h-3.5 w-3.5 text-blue-200" />
+                        )}
+                        <span>{t.event_type}</span>
+                        {condCount > 0 && (
+                          <span
+                            title={(t.conditions || []).map((c) => conditionMap[c]?.label || c).join(', ')}
+                            className="flex items-center gap-0.5 rounded bg-blue-800/80 px-1.5 py-0.2 text-[10px] font-mono text-blue-100"
                           >
-                            <div className="flex items-center gap-2">
-                              <Layers className="h-4 w-4 shrink-0 text-gray-500" />
-                              <span className="text-sm font-semibold text-gray-900">
-                                {it.label || it.groupTitle || 'Group'}
-                              </span>
-                            </div>
-                            {it.placeholder && (
-                              <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
-                            )}
-                          </div>
-                        );
-                      }
-                      if (it.isHeader) {
-                        return (
-                          <div
-                            key={it.i}
-                            className="flex h-full w-full flex-col justify-center pt-2 pb-1"
-                          >
-                            <h3 className="text-sm sm:text-base font-semibold text-gray-900">
-                              {it.label || 'Section Header'}
-                            </h3>
-                            {it.placeholder && (
-                              <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
-                            )}
-                          </div>
-                        );
-                      }
-                      const fieldDef = resolveItem(it);
-                      if (!fieldDef) return null;
-                      const rawVal = customFields[it.fieldName || it.i] ?? customFields[it.i];
-                      return (
-                        <ReadOnlyFillCell
-                          key={it.i}
-                          def={fieldDef}
-                          value={rawVal}
-                          itemHeight={it.h}
-                        />
-                      );
-                    })}
-                  </GridLayout>
+                            <ShieldCheck className="h-2.5 w-2.5 text-amber-300" /> {condCount}
+                          </span>
+                        )}
+                        <ArrowRight className="h-3 w-3 opacity-60" />
+                      </button>
+                    );
+                  })
                 )}
               </div>
-            ) : (
-              /* Fallback when no form layout exists */
-              <div className="flex flex-col gap-4">
-                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800">
-                  No custom form builder layout has been published for entity type{' '}
-                  <span className="font-mono font-bold">{entityType}</span>. Displaying all recorded custom fields.
+            </div>
+
+            {/* Inline Transition Error Banner if condition or execution fails */}
+            {transitionError && (
+              <div className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 shadow-2xs animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <ShieldX className="h-4 w-4 text-red-600 shrink-0" />
+                  <span>{transitionError}</span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {Object.entries(customFields).map(([k, v]) => (
-                    <div key={k} className="flex flex-col gap-1.5">
-                      <span className="text-xs font-semibold text-gray-900">{k}</span>
-                      <ReadOnlyWidget def={{ key: k, name: k, type: 'text', required: false, options: [] }} value={v} />
-                    </div>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setTransitionError(null)}
+                  className="rounded p-1 text-red-400 hover:bg-red-100 hover:text-red-700 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             )}
+
+            {/* Document Sheet Container */}
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-10 shadow-xs mb-8">
+              {/* Document Sheet Heading */}
+              <div className="mb-6 border-b border-gray-100 pb-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base sm:text-lg font-bold text-gray-900">
+                    {entityType.charAt(0).toUpperCase() + entityType.slice(1)} Record Form
+                  </h2>
+                  <span className="font-mono text-xs text-gray-400">
+                    v{currentEntity.workflow_version || '1.0'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Document layout reflecting the registered fields and conditional stage rules.
+                </p>
+              </div>
+
+              {hasLayout ? (
+                <div ref={containerRef}>
+                  {mounted && (
+                    <GridLayout
+                      width={width}
+                      layout={currentlyVisibleItems}
+                      compactor={verticalCompactor}
+                      gridConfig={{
+                        cols,
+                        rowHeight,
+                        margin: [16, 16],
+                        containerPadding: [0, 0],
+                      }}
+                      dragConfig={{ enabled: false }}
+                      resizeConfig={{ enabled: false }}
+                      className="rounded-lg"
+                    >
+                      {currentlyVisibleItems.map((it) => {
+                        if (it.isGroup) {
+                          return (
+                            <div
+                              key={it.i}
+                              className="flex h-full w-full flex-col justify-center rounded-xl border border-gray-200 bg-slate-50/50 p-4 shadow-2xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Layers className="h-4 w-4 shrink-0 text-gray-500" />
+                                <span className="text-sm font-semibold text-gray-900">
+                                  {it.label || it.groupTitle || 'Group'}
+                                </span>
+                              </div>
+                              {it.placeholder && (
+                                <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
+                              )}
+                            </div>
+                          );
+                        }
+                        if (it.isHeader) {
+                          return (
+                            <div
+                              key={it.i}
+                              className="flex h-full w-full flex-col justify-center pt-2 pb-1 border-b border-gray-100"
+                            >
+                              <h3 className="text-sm sm:text-base font-bold text-gray-900">
+                                {it.label || 'Section Header'}
+                              </h3>
+                              {it.placeholder && (
+                                <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
+                              )}
+                            </div>
+                          );
+                        }
+                        const fieldDef = resolveItem(it);
+                        if (!fieldDef) return null;
+                        const rawVal = customFields[it.fieldName || it.i] ?? customFields[it.i];
+                        return (
+                          <ReadOnlyFillCell
+                            key={it.i}
+                            def={fieldDef}
+                            value={rawVal}
+                            itemHeight={it.h}
+                          />
+                        );
+                      })}
+                    </GridLayout>
+                  )}
+                </div>
+              ) : (
+                /* Fallback when no form layout exists */
+                <div className="flex flex-col gap-4">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800">
+                    No custom form builder layout has been published for entity type{' '}
+                    <span className="font-mono font-bold">{entityType}</span>. Displaying all recorded custom fields.
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {Object.entries(customFields).map(([k, v]) => (
+                      <div key={k} className="flex flex-col gap-1.5">
+                        <span className="text-xs font-semibold text-gray-900">{k}</span>
+                        <ReadOnlyWidget def={{ key: k, name: k, type: 'text', required: false, options: [] }} value={v} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* Audit Timeline Slide-Over Sidebar */}
+      {auditLogOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          {/* Dimmed backdrop */}
+          <div
+            className="fixed inset-0 bg-gray-900/20 backdrop-blur-2xs transition-opacity"
+            onClick={() => setAuditLogOpen(false)}
+          />
+
+          {/* Sidebar drawer panel */}
+          <aside className="relative z-10 flex h-full w-full max-w-md flex-col bg-white shadow-2xl border-l border-gray-200 animate-in slide-in-from-right duration-200">
+            {/* Sidebar Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-blue-700" />
+                <h3 className="text-sm font-bold text-gray-900">Audit Timeline</h3>
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-gray-600">
+                  {events.length}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => loadData(true)}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                  title="Refresh event history"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditLogOpen(false)}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                  title="Close sidebar"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Sidebar Content */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {events.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center text-xs text-gray-400">
+                  <History className="h-8 w-8 text-gray-300 mb-2" />
+                  <p className="font-semibold text-gray-600">No recorded events yet</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Events and transitions will appear here as the workflow runs.</p>
+                </div>
+              ) : (
+                <ol className="relative flex flex-col border-l border-gray-200 ml-3">
+                  {[...events].reverse().map((ev) => (
+                    <li key={ev.event_id} className="relative pl-5 pb-5">
+                      <span className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-600 shadow-2xs" />
+                      <EventRow ev={ev} />
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </aside>
         </div>
       )}
     </div>
@@ -490,7 +730,7 @@ function ReadOnlyWidget({
   value: unknown;
   itemHeight?: number;
 }) {
-  const boxCls = 'w-full rounded-md border border-gray-300 bg-gray-50/70 px-3 py-2 text-xs text-gray-900 font-medium shadow-2xs';
+  const boxCls = 'w-full rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-900 font-medium shadow-2xs';
 
   // 1. File Attachment
   if (def.type === 'file') {
@@ -506,7 +746,7 @@ function ReadOnlyWidget({
 
     if (files.length === 0) {
       return (
-        <div className="flex items-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-gray-50/50 px-3 py-2 text-xs text-gray-400 italic">
+        <div className="flex items-center gap-1.5 rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-400 italic">
           <Paperclip className="h-3.5 w-3.5 text-gray-400" /> No files attached
         </div>
       );
@@ -517,7 +757,7 @@ function ReadOnlyWidget({
         {files.map((f, idx) => (
           <div
             key={idx}
-            className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-1.5 shadow-2xs"
+            className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-1.5 shadow-2xs"
           >
             <Paperclip className="h-3.5 w-3.5 text-blue-600 shrink-0" />
             <span className="max-w-[160px] truncate text-xs font-semibold text-gray-800" title={f.name}>
@@ -567,7 +807,7 @@ function ReadOnlyWidget({
     }
 
     return (
-      <div className="flex w-full flex-col divide-y divide-gray-100 rounded-md border border-gray-300 bg-white shadow-2xs">
+      <div className="flex w-full flex-col divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white shadow-2xs">
         {tasks.map((t) => {
           const isDone = checkedSet.has(t.label);
           return (
@@ -619,14 +859,14 @@ function ReadOnlyWidget({
 
     if (rows.length === 0) {
       return (
-        <div className="rounded-md border border-gray-300 bg-gray-50/70 p-3 text-center text-xs text-gray-400 italic">
+        <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-center text-xs text-gray-400 italic">
           No table rows recorded
         </div>
       );
     }
 
     return (
-      <div className="w-full overflow-hidden rounded-md border border-gray-300 bg-white">
+      <div className="w-full overflow-hidden rounded-lg border border-gray-200 bg-white">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-gray-50 text-left text-gray-600 border-b border-gray-200 font-semibold">
@@ -667,9 +907,9 @@ function ReadOnlyWidget({
           return (
             <div
               key={o}
-              className={`rounded-lg border p-4 text-left flex flex-col justify-between ${
+              className={`rounded-xl border p-4 text-left flex flex-col justify-between ${
                 isSelected
-                  ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                  ? 'border-blue-300 bg-blue-50/20 ring-1 ring-blue-600/30 shadow-xs'
                   : 'border-gray-200 bg-white opacity-70'
               }`}
             >
@@ -713,9 +953,9 @@ function ReadOnlyWidget({
           return (
             <div
               key={o}
-              className={`rounded-lg border p-4 text-left flex flex-col justify-between ${
+              className={`rounded-xl border p-4 text-left flex flex-col justify-between ${
                 isSelected
-                  ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                  ? 'border-blue-300 bg-blue-50/20 ring-1 ring-blue-600/30 shadow-xs'
                   : 'border-gray-200 bg-white opacity-70'
               }`}
             >
@@ -748,7 +988,7 @@ function ReadOnlyWidget({
     return (
       <div className="flex items-center gap-3">
         <div
-          className={`rounded-md border px-4 py-2 text-xs font-semibold ${
+          className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
             isYes
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
               : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
@@ -757,7 +997,7 @@ function ReadOnlyWidget({
           Yes
         </div>
         <div
-          className={`rounded-md border px-4 py-2 text-xs font-semibold ${
+          className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
             !isYes
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
               : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
@@ -785,6 +1025,73 @@ function ReadOnlyWidget({
         String(value)
       ) : (
         <span className="text-gray-400 italic">Empty</span>
+      )}
+    </div>
+  );
+}
+
+// ---- Event Log Row ------------------------------------------------------------------
+function EventRow({ ev }: { ev: EntityEvent }) {
+  const [open, setOpen] = useState(false);
+  const gateTrace = (ev.payload?.condition_trace as ConditionTraceItem[] | undefined) ?? null;
+  const routing = ev.payload?.routing as any;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] font-bold text-blue-700">
+          {ev.event_type}
+        </span>
+        {ev.from_state && (
+          <span className="flex items-center gap-1 text-[11px] text-gray-500">
+            {ev.from_state} <ArrowRight className="h-3 w-3" /> <span className="font-medium text-gray-700">{ev.to_state}</span>
+          </span>
+        )}
+        <span className="text-[10px] text-gray-400">{ev.actor_id}</span>
+        {ev.transaction_time && (
+          <span className="text-[10px] text-gray-400">{new Date(ev.transaction_time).toLocaleString()}</span>
+        )}
+      </div>
+      {gateTrace && gateTrace.length > 0 && (
+        <div className="mt-1 flex flex-col gap-0.5">
+          {gateTrace.map((g) => (
+            <span
+              key={g.condition_id}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${g.effective_pass ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
+            >
+              {g.effective_pass ? <ShieldCheck className="h-2.5 w-2.5" /> : <ShieldX className="h-2.5 w-2.5" />}
+              {g.label} — {g.reason}
+            </span>
+          ))}
+        </div>
+      )}
+      {routing && (
+        <div className="mt-1 flex flex-wrap items-center gap-0.5">
+          {routing.choices?.map((c: any) => (
+            <span
+              key={c.choice_index}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                c.matched ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-400 line-through'
+              }`}
+            >
+              {c.matched ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
+              c{String(c.choice_index)}→{c.to}
+            </span>
+          ))}
+        </div>
+      )}
+      {(ev.payload?.comment || Object.keys(ev.payload || {}).length > 0) && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="mt-1 text-[10px] font-medium text-gray-400 hover:text-blue-600"
+        >
+          {open ? 'hide' : 'show'} payload
+        </button>
+      )}
+      {open && (
+        <pre className="mt-1 overflow-x-auto rounded-lg bg-gray-50 p-2 text-[10px] text-gray-600 border border-gray-200">
+          {JSON.stringify(ev.payload, null, 2)}
+        </pre>
       )}
     </div>
   );

@@ -1,48 +1,32 @@
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   Plus,
   RefreshCw,
   Loader2,
-  Zap,
-  X,
-  ShieldCheck,
-  ShieldX,
-  ArrowRight,
-  ChevronRight,
   Layers,
-  FileText,
-  Check,
-  Workflow,
-  Paperclip,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
-import { isItemReadOnly, isItemVisible, withWorkflowStatus } from '../../lib/conditions';
-import type {
-  EntityRecord,
-  EntityEvent,
-  ValidTransition,
-  EntityField,
-  ConditionTraceItem,
-  ResolvedList,
-  EntityFormItem,
-} from '../../types';
+import type { EntityRecord } from '../../types';
 import { EntityFormView } from './EntityFormView';
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: 'bg-amber-100 text-amber-700 border-amber-200',
-  active: 'bg-blue-100 text-blue-700 border-blue-200',
-  published: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  completed: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  closed: 'bg-gray-100 text-gray-600 border-gray-200',
-  expired: 'bg-red-100 text-red-700 border-red-200',
+  draft: 'bg-amber-100 text-amber-800 border-amber-200',
+  requested: 'bg-blue-100 text-blue-800 border-blue-200',
+  active: 'bg-blue-100 text-blue-800 border-blue-200',
+  isolationprecheck: 'bg-purple-100 text-purple-800 border-purple-200',
+  riskassessed: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  completed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  published: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  rejected: 'bg-rose-100 text-rose-800 border-rose-200',
+  closed: 'bg-gray-100 text-gray-700 border-gray-200',
+  expired: 'bg-orange-100 text-orange-800 border-orange-200',
 };
 
-function statusBadge(s: string) {
-  return (
-    STATUS_BADGE[s?.toLowerCase()] ??
-    'bg-blue-50 text-blue-700 border-blue-200'
-  );
+function statusBadge(s?: string) {
+  if (!s) return 'bg-gray-100 text-gray-700 border-gray-200';
+  return STATUS_BADGE[s.toLowerCase()] ?? 'bg-blue-50 text-blue-700 border-blue-200';
 }
 
 function truncate(id: string, n = 14) {
@@ -51,7 +35,7 @@ function truncate(id: string, n = 14) {
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
 
-function entityTitle(e: { custom_fields: Record<string, unknown> }): string | null {
+function entityTitle(e: { custom_fields?: Record<string, unknown> }): string | null {
   const cf = e.custom_fields || {};
   for (const k of TITLE_KEYS) {
     const v = cf[k];
@@ -60,68 +44,16 @@ function entityTitle(e: { custom_fields: Record<string, unknown> }): string | nu
   return null;
 }
 
-function renderCustomFieldValue(v: unknown): ReactNode {
-  if (v === null || v === undefined) return <span className="text-gray-400">—</span>;
-  if (Array.isArray(v)) {
-    if (v.length > 0 && typeof v[0] === 'object' && v[0]?.name) {
-      return (
-        <div className="flex flex-wrap items-center justify-end gap-1">
-          {v.map((f: any, idx: number) => (
-            <span
-              key={idx}
-              className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700"
-            >
-              <Paperclip className="h-3 w-3" />
-              {f.dataUrl ? (
-                <a href={f.dataUrl} download={f.name} className="hover:underline">
-                  {f.name}
-                </a>
-              ) : (
-                <span>{f.name}</span>
-              )}
-            </span>
-          ))}
-        </div>
-      );
-    }
-    return (
-      <span className="max-w-[55%] truncate text-right text-xs font-medium text-gray-800">
-        {v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ')}
-      </span>
-    );
-  }
-  if (typeof v === 'object') {
-    return (
-      <span className="max-w-[55%] truncate text-right font-mono text-xs text-gray-700">
-        {JSON.stringify(v)}
-      </span>
-    );
-  }
-  return <span className="max-w-[55%] truncate text-right text-xs font-medium text-gray-800">{String(v)}</span>;
-}
-
-export function EntityConsole() {
+export function EntityConsole({ entityType, displayName }: { entityType: string; displayName?: string }) {
   const route = useHashRoute();
-  const [type, setType] = useState(() => route.query.get('type') || 'workorder');
-  const [knownTypes, setKnownTypes] = useState<string[]>([]);
+  const type = entityType;
   const [statusFilter, setStatusFilter] = useState(() => route.query.get('status') || '');
   const [items, setItems] = useState<EntityRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [fields, setFields] = useState<EntityField[]>([]);
-  const [fieldLists, setFieldLists] = useState<Record<string, ResolvedList>>({});
-  const [conditionMap, setConditionMap] = useState<Record<string, { label: string; type: string }>>({});
-
-  const [detail, setDetail] = useState<{ entity: EntityRecord; events: EntityEvent[] } | null>(null);
-  const [valid, setValid] = useState<ValidTransition[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
-
-  const [fire, setFire] = useState<ValidTransition | null>(null);
-  const [viewFormEntity, setViewFormEntity] = useState<EntityRecord | null>(null);
-
-  const selectedId = route.query.get('selected');
+  const selectedRecordId = route.query.get('record') || route.query.get('selected');
 
   const patchQuery = (patch: Record<string, string | undefined>) => {
     const q: Record<string, string> = { type, status: statusFilter || undefined } as Record<string, string>;
@@ -129,38 +61,13 @@ export function EntityConsole() {
       if (v === undefined || v === '') delete q[k];
       else q[k] = v;
     }
-    navigate('/entities', q);
+    navigate('/records', q);
   };
 
   useEffect(() => {
-    const t = route.query.get('type') || 'workorder';
     const s = route.query.get('status') || '';
-    if (t !== type) setType(t);
     if (s !== statusFilter) setStatusFilter(s);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.query.toString(), route.query.get('type'), route.query.get('status')]);
-
-  const loadMeta = useCallback(() => {
-    api.listConditions(type).then((conds) => {
-      const map: Record<string, { label: string; type: string }> = {};
-      for (const g of conds) map[g.id] = { label: g.label, type: g.type };
-      setConditionMap(map);
-    }).catch(() => setConditionMap({}));
-    api.listFields(type).then(async (fs) => {
-      setFields(fs);
-      const keys = [...new Set(fs.map((f) => f.option_list_key).filter((k): k is string => Boolean(k)))];
-      if (keys.length === 0) {
-        setFieldLists({});
-        return;
-      }
-      try {
-        const r = await api.resolveLists(keys);
-        setFieldLists(r.resolved);
-      } catch {
-        setFieldLists({});
-      }
-    }).catch(() => setFields([]));
-  }, [type]);
+  }, [route.query.toString(), route.query.get('status')]);
 
   const loadList = useCallback(() => {
     setLoading(true);
@@ -175,58 +82,23 @@ export function EntityConsole() {
   }, [type, statusFilter]);
 
   useEffect(() => {
-    setDetail(null);
-    setValid([]);
-    loadMeta();
     loadList();
-  }, [type, statusFilter, loadMeta, loadList]);
+  }, [type, statusFilter, loadList]);
 
-  useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      setValid([]);
-      return;
-    }
-    let cancelled = false;
-    setDetailLoading(true);
-    Promise.all([
-      api.getEntity(type, selectedId),
-      api.listValidTransitions(type, selectedId),
-    ])
-      .then(([res, vt]) => {
-        if (cancelled) return;
-        setDetail(res);
-        setValid(vt.valid_transitions);
-        setError(null);
-      })
-      .catch((e: any) => {
-        if (cancelled) return;
-        setDetail(null);
-        setError(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, type]);
+  // If a record is selected, render the dedicated full-page form view
+  if (selectedRecordId) {
+    return (
+      <EntityFormView
+        key={selectedRecordId}
+        recordId={selectedRecordId}
+        entityType={type}
+        onClose={() => patchQuery({ record: undefined, selected: undefined })}
+        onRecordUpdated={loadList}
+      />
+    );
+  }
 
-  useEffect(() => {
-    api
-      .listWorkflows()
-      .then((wfs) => setKnownTypes([...new Set(wfs.map((w) => w.entity_type))].sort()))
-      .catch(() => {});
-  }, []);
-
-  const reloadDetail = () => {
-    if (!detail) return;
-    const id = detail.entity.id;
-    api.getEntity(type, id).then(setDetail).catch(() => {});
-    api.listValidTransitions(type, id).then((vt) => setValid(vt.valid_transitions)).catch(() => setValid([]));
-  };
-
+  // Otherwise, render the entity records list table
   return (
     <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
       {/* Surface Header */}
@@ -234,37 +106,20 @@ export function EntityConsole() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="flex items-center gap-2 text-lg font-bold text-gray-900">
-              <Layers className="h-5 w-5 text-blue-700" />
-              <span>Entity Runtime Console</span>
+              <Layers className="h-5 w-5 text-gray-500" />
+              <span>{displayName || type}</span>
             </h1>
             <span className="rounded-full bg-gray-100 px-2 py-0.5 font-mono text-xs font-semibold text-gray-600">
               {total}
             </span>
+            <span className="font-mono text-[11px] text-gray-400">{type}</span>
           </div>
           <p className="mt-0.5 text-xs text-gray-500">
-            Drive real <span className="font-mono font-semibold text-gray-700">{type}</span> records through published workflows and form bindings.
+            Select any record row to view and edit in full-page form layout.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <input
-            value={type}
-            onChange={(e) => {
-              const t = e.target.value.trim().toLowerCase() || 'workorder';
-              setType(t);
-              patchQuery({ type: t, selected: undefined });
-            }}
-            placeholder="entity_type"
-            list="console-entity-types"
-            className="w-36 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 font-mono text-xs text-gray-800 focus:border-blue-500 focus:outline-none shadow-xs"
-            title="Entity type to manage"
-          />
-          <datalist id="console-entity-types">
-            {knownTypes.map((t) => (
-              <option key={t} value={t} />
-            ))}
-          </datalist>
-
           <input
             value={statusFilter}
             onChange={(e) => {
@@ -273,23 +128,23 @@ export function EntityConsole() {
               patchQuery({ status: s });
             }}
             placeholder="filter state…"
-            className="w-28 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none shadow-xs"
+            className="w-32 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none shadow-2xs"
             title="Filter by current workflow state"
           />
 
           <button
             onClick={loadList}
-            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs"
-            title="Refresh"
+            className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-2xs"
+            title="Refresh records"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
           <button
-            onClick={() => navigate('/entities/new', { type })}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
+            onClick={() => navigate('/create', { type })}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-800 transition-colors"
           >
-            <Plus className="h-4 w-4" /> New {type || 'entity'}
+            <Plus className="h-4 w-4" /> Create {displayName || type || 'record'}
           </button>
         </div>
       </div>
@@ -307,30 +162,40 @@ export function EntityConsole() {
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50/80 text-[10px] font-bold uppercase tracking-wider text-gray-500">
                 <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Entity ID</th>
+                <th className="px-4 py-3">Record ID</th>
                 <th className="px-4 py-3">Current State</th>
                 <th className="px-4 py-3">Workflow</th>
                 <th className="px-4 py-3">Fields</th>
                 <th className="px-4 py-3">Updated</th>
-                <th className="px-4 py-3 text-right">Open</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {items.length === 0 ? (
+              {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
-                    No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Create one to start driving the workflow.
+                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-600" />
+                    Loading {type} records…
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                    No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Click &ldquo;Create {displayName || type}&rdquo; to start.
                   </td>
                 </tr>
               ) : (
                 items.map((e) => (
-                  <tr key={e.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="max-w-[240px] truncate px-4 py-3 text-xs font-semibold text-gray-900">
+                  <tr
+                    key={e.id}
+                    onClick={() => patchQuery({ record: e.id, selected: undefined })}
+                    className="cursor-pointer hover:bg-slate-50/80 transition-colors group"
+                  >
+                    <td className="max-w-[240px] truncate px-4 py-3 text-xs font-semibold text-gray-900 group-hover:text-blue-700">
                       {entityTitle(e) ?? <span className="font-normal text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-gray-700">{truncate(e.id)}</td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-gray-600">{truncate(e.id)}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
+                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
                         {e.status}
                       </span>
                     </td>
@@ -339,786 +204,12 @@ export function EntityConsole() {
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => setViewFormEntity(e)}
-                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 shadow-xs transition-colors"
-                          title="View filled form layout"
-                        >
-                          <FileText className="h-3.5 w-3.5 text-blue-600" /> Form
-                        </button>
-                        <button
-                          onClick={() => patchQuery({ selected: e.id })}
-                          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 shadow-xs transition-colors"
-                        >
-                          Drive <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
-
-      {detail && (
-        <EntityDetail
-          entityType={type}
-          detail={detail}
-          valid={valid}
-          conditionMap={conditionMap}
-          loading={detailLoading}
-          onRefresh={reloadDetail}
-          onClose={() => patchQuery({ selected: undefined })}
-          onFire={(t) => setFire(t)}
-          onViewForm={(ent) => setViewFormEntity(ent)}
-        />
-      )}
-
-      {viewFormEntity && (
-        <EntityFormView
-          entity={viewFormEntity}
-          entityType={type}
-          isModal
-          onClose={() => setViewFormEntity(null)}
-        />
-      )}
-
-      {fire && detail && (
-        <FireTransitionModal
-          entityType={type}
-          entity={detail.entity}
-          transition={fire}
-          fields={fields}
-          fieldLists={fieldLists}
-          conditionMap={conditionMap}
-          onClose={() => setFire(null)}
-          onDone={() => {
-            setFire(null);
-            reloadDetail();
-            loadList();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---- Entity detail slide-over ---------------------------------------------------------
-
-function EntityDetail({
-  entityType,
-  detail,
-  valid,
-  conditionMap,
-  loading,
-  onRefresh,
-  onClose,
-  onFire,
-  onViewForm,
-}: {
-  entityType: string;
-  detail: { entity: EntityRecord; events: EntityEvent[] };
-  valid: ValidTransition[];
-  conditionMap: Record<string, { label: string; type: string }>;
-  loading: boolean;
-  onRefresh: () => void;
-  onClose: () => void;
-  onFire: (t: ValidTransition) => void;
-  onViewForm: (entity: EntityRecord) => void;
-}) {
-  const { entity, events } = detail;
-
-  return (
-    <div className="fixed inset-0 z-20 flex justify-end bg-gray-900/30" onClick={onClose}>
-      <aside
-        className="flex h-full w-[440px] flex-col overflow-y-auto bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
-          <Layers className="h-4 w-4 text-blue-700" />
-          <h3 className="flex-1 truncate font-mono text-sm font-semibold text-gray-800">{entity.id}</h3>
-          {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-          <button onClick={onClose} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-3 bg-gray-50/50">
-          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusBadge(entity.status)}`}>
-            {entity.status}
-          </span>
-          <span className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-[11px] text-blue-700">{entityType}</span>
-          <span className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-[11px] text-gray-600">{entity.workflow_version}</span>
-          
-          <button
-            onClick={() => onViewForm(entity)}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
-          >
-            <FileText className="h-3.5 w-3.5" /> View Filled Form
-          </button>
-        </div>
-
-        <div className="px-4 pt-3">
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Custom fields</label>
-            <button
-              onClick={() => onViewForm(entity)}
-              className="text-[11px] font-medium text-blue-600 hover:underline"
-            >
-              Open in form layout →
-            </button>
-          </div>
-          {Object.keys(entity.custom_fields || {}).length === 0 ? (
-            <p className="mt-1 text-xs text-gray-400">No custom fields set.</p>
-          ) : (
-            <div className="mt-1 flex flex-col gap-1">
-              {Object.entries(entity.custom_fields).map(([k, v]) => (
-                <div key={k} className="flex items-baseline justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-1">
-                  <span className="font-mono text-[11px] text-gray-500">{k}</span>
-                  {renderCustomFieldValue(v)}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 px-4">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-            Valid transitions ({valid.length})
-          </label>
-          <div className="mt-1 flex flex-col gap-1.5">
-            {valid.length === 0 ? (
-              <p className="text-xs text-gray-400">No legal transitions from this state.</p>
-            ) : (
-              valid.map((t) => {
-                const conditionIds = t.conditions || [];
-                return (
-                  <button
-                    key={t.event_type}
-                    onClick={() => onFire(t)}
-                    className="group flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-100"
-                  >
-                    <Zap className="h-4 w-4 shrink-0 text-blue-600" />
-                    <span className="flex-1">
-                      <span className="block font-mono text-xs font-bold text-blue-800">{t.event_type}</span>
-                      <span className="flex items-center gap-1 text-[11px] text-blue-600">
-                        {entity.status} <ArrowRight className="h-3 w-3" /> {transitionTarget(t)}
-                      </span>
-                    </span>
-                    <span className="flex gap-0.5">
-                      {conditionIds.map((g) => (
-                        <span
-                          key={g}
-                          title={conditionMap[g]?.label || g}
-                          className="flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold text-amber-700 opacity-0 transition-opacity group-hover:opacity-100"
-                        >
-                          <ShieldCheck className="h-2.5 w-2.5" /> {conditionIds.length} condition
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        <div className="mt-4 flex-1 px-4 pb-4">
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Audit timeline</label>
-            <button onClick={onRefresh} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline">
-              <RefreshCw className="h-3 w-3" /> refresh
-            </button>
-          </div>
-          <ol className="mt-2 flex flex-col border-l border-gray-200">
-            {[...events].reverse().map((ev) => (
-              <li key={ev.event_id} className="relative pl-4 pb-4">
-                <span className="absolute -left-[5px] top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-500" />
-                <EventRow ev={ev} />
-              </li>
-            ))}
-          </ol>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function EventRow({ ev }: { ev: EntityEvent }) {
-  const [open, setOpen] = useState(false);
-  const gateTrace = (ev.payload?.condition_trace as ConditionTraceItem[] | undefined) ?? null;
-  const routing = ev.payload?.routing as RoutingSummary | undefined;
-  return (
-    <div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="rounded-md bg-blue-50 px-1.5 py-0.5 font-mono text-[11px] font-bold text-blue-700">
-          {ev.event_type}
-        </span>
-        {ev.from_state && (
-          <span className="flex items-center gap-1 text-[11px] text-gray-500">
-            {ev.from_state} <ArrowRight className="h-3 w-3" /> <span className="font-medium text-gray-700">{ev.to_state}</span>
-          </span>
-        )}
-        <span className="text-[10px] text-gray-400">{ev.actor_id}</span>
-        {ev.transaction_time && (
-          <span className="text-[10px] text-gray-400">{new Date(ev.transaction_time).toLocaleString()}</span>
-        )}
-      </div>
-      {gateTrace && gateTrace.length > 0 && (
-        <div className="mt-1 flex flex-col gap-0.5">
-          {gateTrace.map((g) => (
-            <span
-              key={g.condition_id}
-              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${g.effective_pass ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}
-            >
-              {g.effective_pass ? <ShieldCheck className="h-2.5 w-2.5" /> : <ShieldX className="h-2.5 w-2.5" />}
-              {g.label} — {g.reason}
-            </span>
-          ))}
-        </div>
-      )}
-      {routing && (
-        <div className="mt-1 flex flex-wrap items-center gap-0.5">
-          {routing.choices.map((c) => (
-            <span
-              key={c.choice_index}
-              className={`flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                c.matched ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-400 line-through'
-              }`}
-            >
-              {c.matched ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
-              c{String(c.choice_index)}→{c.to}
-            </span>
-          ))}
-        </div>
-      )}
-      {(ev.payload?.comment || Object.keys(ev.payload || {}).length > 0) && (
-        <button onClick={() => setOpen((o) => !o)} className="mt-1 text-[10px] font-medium text-gray-400 hover:text-blue-600">
-          {open ? 'hide' : 'show'} payload
-        </button>
-      )}
-      {open && (
-        <pre className="mt-1 overflow-x-auto rounded-md bg-gray-50 p-2 text-[10px] text-gray-600">
-          {JSON.stringify(ev.payload, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-// ---- Fire transition ---------------------------------------------------------
-
-function FireTransitionModal({
-  entityType,
-  entity,
-  transition,
-  fields,
-  fieldLists,
-  conditionMap,
-  onClose,
-  onDone,
-}: {
-  entityType: string;
-  entity: EntityRecord;
-  transition: ValidTransition;
-  fields: EntityField[];
-  fieldLists: Record<string, ResolvedList>;
-  conditionMap: Record<string, { label: string; type: string }>;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [comment, setComment] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<TransitionResponse | null>(null);
-
-  // Active form layout for this entity type — used to show only the fields that
-  // are relevant at the current workflow stage (stage -> form two-way binding).
-  const [layoutItems, setLayoutItems] = useState<EntityFormItem[]>([]);
-  const [layoutResolved, setLayoutResolved] = useState<Record<string, ResolvedList>>({});
-  const [layoutLoading, setLayoutLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const form = await api.getForm(entityType);
-        if (cancelled) return;
-        const layout = ((form.layout || []) as Array<any>).map((it) => {
-          const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
-          const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
-          return {
-            ...it,
-            isHeader,
-            isGroup,
-            fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
-            fieldType: it.fieldType ?? it.field_type ?? null,
-            optionsList: it.optionsList ?? it.options_list ?? null,
-            hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
-            groupId: it.groupId ?? it.group_id ?? (isGroup ? it.i : null),
-            groupTitle: it.groupTitle ?? it.group_title ?? (isGroup ? (it.label || 'Group') : null),
-            visibilityCondition: it.visibilityCondition ?? it.visibility_condition ?? null,
-            required: Boolean(it.required),
-            options: it.options ?? [],
-          };
-        }) as EntityFormItem[];
-        setLayoutItems(layout);
-        const keys = [...new Set(layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k)))];
-        if (keys.length > 0) {
-          const r = await api.resolveLists(keys);
-          if (!cancelled) setLayoutResolved(r.resolved);
-        }
-      } catch {
-        /* no layout -> fall back to pure registry fields */
-      } finally {
-        if (!cancelled) setLayoutLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [entityType]);
-
-  // Values used to evaluate stage/field conditions: existing custom fields plus
-  // the entity's current workflow stage as the `_workflow_status` pseudo-field.
-  const conditionValues = useMemo(() => {
-    const base: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(entity.custom_fields || {})) {
-      base[k] = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
-    }
-    return withWorkflowStatus(base, entity.status);
-  }, [entity.custom_fields, entity.status]);
-
-  const byRegistryName = useMemo(
-    () => new Map(fields.map((f) => [f.field_name, f])),
-    [fields]
-  );
-
-  // Merge layout fields (with stage-driven visibility) and registry fields into a
-  // single editable set. Fields defined in the layout are gated by its conditions;
-  // registry fields that are not on the layout stay editable for back-compat.
-  const editDefs = useMemo(() => {
-    const hasLayout = layoutItems.length > 0;
-    const defs: Array<{
-      name: string;
-      label: string;
-      type: string;
-      required: boolean;
-      options: string[];
-      readOnly: boolean;
-      layoutItem: EntityFormItem | null;
-    }> = [];
-
-    const layoutFieldItems = layoutItems.filter((it) => !it.isHeader && !it.isGroup);
-    const layoutNames = new Set(layoutFieldItems.map((it) => it.fieldName || it.i));
-
-    if (hasLayout) {
-      for (const it of layoutFieldItems) {
-        const name = it.fieldName || it.i;
-        let options = it.options || [];
-        if (it.optionsList) {
-          const list = layoutResolved[it.optionsList];
-          if (list && list.kind === 'options') options = list.items as string[];
-          else {
-            const reg = byRegistryName.get(name);
-            if (reg?.option_list_key && fieldLists[reg.option_list_key]?.kind === 'options') {
-              options = fieldLists[reg.option_list_key].items as string[];
-            }
-          }
-        } else {
-          const reg = byRegistryName.get(name);
-          if ((!options || options.length === 0) && reg) {
-            options = fieldLists[reg.option_list_key as string]?.items as string[] || reg.select_options || [];
-          }
-        }
-        if (it.fieldType === 'boolean' && options.length === 0) options = ['yes', 'no'];
-
-        defs.push({
-          name,
-          label: it.label || it.fieldName || it.i,
-          type: it.fieldType || byRegistryName.get(name)?.field_type || 'text',
-          required: Boolean(it.required),
-          options,
-          readOnly: isItemReadOnly(it, layoutItems, conditionValues),
-          layoutItem: it,
-        });
-      }
-    }
-
-    // Registry fields not present on the layout (fallback).
-    for (const f of fields) {
-      if (layoutNames.has(f.field_name)) continue;
-      const regOptions = fieldLists[f.option_list_key as string]?.items as string[] | undefined;
-      defs.push({
-        name: f.field_name,
-        label: f.field_name,
-        type: f.field_type,
-        required: f.required,
-        options: regOptions || f.select_options || [],
-        readOnly: false,
-        layoutItem: null,
-      });
-    }
-    return defs;
-  }, [layoutItems, layoutResolved, byRegistryName, fields, fieldLists, conditionValues]);
-
-  // Only fields visible under the current workflow stage are shown.
-  const visibleDefs = useMemo(
-    () =>
-      editDefs.filter((d) => {
-        if (!d.layoutItem) return true;
-        return isItemVisible(d.layoutItem, layoutItems, conditionValues);
-      }),
-    [editDefs, layoutItems, conditionValues]
-  );
-
-  const submit = async () => {
-    setSaving(true);
-    setErr(null);
-    setLastResult(null);
-    try {
-      const res = await api.transition(entityType, {
-        entity_id: entity.id,
-        event_type: transition.event_type,
-        custom_fields_delta: toCustomFields(values, visibleDefs),
-        payload: comment.trim() ? { comment: comment.trim() } : undefined,
-      });
-      setLastResult(res);
-      window.setTimeout(onDone, 900);
-    } catch (e: any) {
-      setErr(e.message);
-      setLastResult({ new_status: '', condition_trace: e.body?.details?.condition_trace ?? [] });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const conditionIds = transition.conditions || [];
-  const stageNote =
-    layoutItems.length > 0
-      ? `Only fields relevant to the current workflow stage (“${entity.status}”) are shown.`
-      : 'Update fields (optional, sent as delta)';
-
-  return (
-    <Modal
-      title={`${transition.event_type}`}
-      subtitle={`${entity.status} → ${transitionTarget(transition)}`}
-      onClose={onClose}
-    >
-      {conditionIds.length > 0 && (
-        <div className="flex flex-col gap-1 rounded-md border border-amber-200 bg-amber-50 p-2">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
-            {conditionIds.length} condition(s) will be enforced
-          </label>
-          {conditionIds.map((g) => (
-            <span key={g} className="flex items-center gap-1.5 text-[11px] text-amber-800">
-              <ShieldCheck className="h-3 w-3" /> {conditionMap[g]?.label || g}
-              {conditionMap[g]?.type && (
-                <span className="rounded bg-amber-200/60 px-1 font-mono text-[9px]">{conditionMap[g]!.type}</span>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{stageNote}</label>
-        {layoutLoading ? (
-          <div className="flex items-center gap-1.5 py-2 text-xs text-gray-400">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading form layout…
-          </div>
-        ) : visibleDefs.length === 0 ? (
-          <p className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-400">
-            No editable fields for the current workflow stage.
-          </p>
-        ) : (
-          visibleDefs.map((d) => (
-            <FieldRow
-              key={d.name}
-              def={d}
-              value={values[d.name] ?? ''}
-              readOnly={d.readOnly}
-              onChange={(v) => setValues((s) => ({ ...s, [d.name]: v }))}
-              listOptions={d.options}
-            />
-          ))
-        )}
-        <input
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="Comment / note for the event log (optional)"
-          className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800 placeholder:text-gray-400"
-        />
-      </div>
-
-      {err && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</p>}
-
-      {lastResult && (
-        <div className="flex flex-col gap-1.5">
-          {lastResult.condition_trace.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Condition results</label>
-              {lastResult.condition_trace.map((g) => (
-                <span
-key={g.condition_id}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
-                    g.effective_pass ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
-                  }`}
-                >
-                  {g.effective_pass ? <ShieldCheck className="h-3 w-3" /> : <ShieldX className="h-3 w-3" />}
-                  {g.label} — {g.reason}
-                </span>
-              ))}
-            </div>
-          )}
-          {lastResult.routing && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Branch routing</label>
-              {lastResult.routing.choices.map((c, i) => (
-                <span
-                  key={c.choice_index}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] ${
-                    c.matched
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      : i === lastResult.routing!.choice_index
-                        ? 'border-amber-200 bg-amber-50 text-amber-700'
-                        : 'border-gray-200 bg-gray-50 text-gray-500'
-                  }`}
-                >
-                  {c.matched && <Check className="h-3 w-3" />}
-                  c{String(c.choice_index)}: {c.to}
-                  {c.when.length > 0 ? ` when ${c.when.join(', ')}` : ' (default)'}
-                </span>
-              ))}
-            </div>
-          )}
-          {lastResult.side_effects && lastResult.side_effects.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Side effects</label>
-              {lastResult.side_effects.map((s, i) => (
-                <span
-                  key={i}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${
-                    s.success ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
-                  }`}
-                >
-                  {s.success ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                  {s.type}
-                  {s.message ? ` — ${s.message}` : ''}
-                </span>
-              ))}
-            </div>
-          )}
-          {lastResult.settled && lastResult.settled.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Auto-settled</label>
-              {lastResult.settled.map((s, i) => (
-                <span
-                  key={i}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] ${
-                    s.success ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
-                  }`}
-                >
-                  {s.success ? <Workflow className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                  {s.event}
-                  {s.to ? `: ${s.from} → ${s.to}` : ''}
-                  {s.error ? ` — ${s.error}` : ''}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <button
-        onClick={submit}
-        disabled={saving}
-        className="mt-2 flex items-center justify-center gap-1.5 rounded-md bg-blue-700 px-3 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-      >
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-        Fire {transition.event_type}
-      </button>
-    </Modal>
-  );
-}
-
-// ---- Shared helpers ---------------------------------------------------------
-
-type RoutingChoice = { choice_index: number; to: string; when: string[]; matched: boolean };
-type RoutingSummary = { choice_index: number; to?: string; choices: RoutingChoice[] };
-
-interface TransitionResponse {
-  new_status: string;
-  condition_trace: ConditionTraceItem[];
-  routing?: RoutingSummary;
-  side_effects?: Array<{ type: string; success: boolean; message?: string; [k: string]: unknown }>;
-  settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;
-}
-
-function transitionTarget(t: ValidTransition): string {
-  if (t.to_state) return t.to_state;
-  const targets = (t.choices || []).map((c) => c.to).filter(Boolean);
-  return targets.length ? targets.join(' | ') : '…';
-}
-
-function toCustomFields(
-  values: Record<string, string>,
-  defs: Array<{ name: string; type: string }> = []
-): Record<string, unknown> {
-  const byName = new Map(defs.map((d) => [d.name, d]));
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(values)) {
-    const trimmed = v.trim();
-    if (trimmed === '') continue;
-    const def = byName.get(k);
-    if (def?.type === 'number') {
-      const n = Number(trimmed);
-      out[k] = Number.isNaN(n) ? trimmed : n;
-    } else if (def?.type === 'boolean') {
-      out[k] = trimmed === 'yes';
-    } else {
-      out[k] = trimmed;
-    }
-  }
-  return out;
-}
-
-function FieldRow({
-  def,
-  value,
-  readOnly = false,
-  onChange,
-  listOptions,
-}: {
-  def: { name: string; label: string; type: string; required: boolean };
-  value: string;
-  readOnly?: boolean;
-  onChange: (v: string) => void;
-  listOptions?: string[];
-}) {
-  const id = useId();
-  const label = (
-    <label htmlFor={id} className="flex items-center gap-1 text-[11px] font-semibold text-gray-600">
-      <FileText className="h-3 w-3 text-gray-400" />
-      {def.label || def.name}
-      {def.required && <span className="text-red-500">*</span>}
-      <span className="rounded bg-gray-100 px-1 font-mono text-[9px] text-gray-400">{def.type}</span>
-      {readOnly && (
-        <span className="rounded bg-amber-100 px-1 font-mono text-[9px] text-amber-700" title="Read-only (disabled by condition)">
-          🔒 read-only
-        </span>
-      )}
-    </label>
-  );
-
-  const options = listOptions || [];
-
-  const inputCls = `rounded-md border px-2 py-1.5 text-sm ${
-    readOnly
-      ? 'cursor-not-allowed border-gray-200 bg-gray-100/80 text-gray-500 select-none'
-      : 'border-gray-300 text-gray-800'
-  }`;
-
-  const input =
-    def.type === 'select' || def.type === 'dropdown' ? (
-      <select
-        id={id}
-        value={value}
-        disabled={readOnly}
-        onChange={(e) => !readOnly && onChange(e.target.value)}
-        className={inputCls}
-      >
-        <option value="">—</option>
-        {options.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-      </select>
-    ) : def.type === 'boolean' ? (
-      <label
-        className={`flex w-fit items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs ${
-          readOnly
-            ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
-            : 'cursor-pointer border-gray-300 bg-gray-50 text-gray-700'
-        }`}
-      >
-        <input
-          id={id}
-          type="checkbox"
-          checked={value === 'yes'}
-          disabled={readOnly}
-          onChange={(e) => !readOnly && onChange(e.target.checked ? 'yes' : 'no')}
-          className="accent-blue-600"
-        />
-        Yes
-      </label>
-    ) : def.type === 'long_text' ? (
-      <textarea
-        id={id}
-        value={value}
-        rows={2}
-        disabled={readOnly}
-        readOnly={readOnly}
-        onChange={(e) => !readOnly && onChange(e.target.value)}
-        className={`${inputCls} resize-none leading-snug`}
-      />
-    ) : (
-      <input
-        id={id}
-        type={
-          def.type === 'number' ? 'number'
-          : def.type === 'date' ? 'date'
-          : def.type === 'datetime' ? 'datetime-local'
-          : def.type === 'time' ? 'time'
-          : 'text'
-        }
-        value={value}
-        disabled={readOnly}
-        readOnly={readOnly}
-        onChange={(e) => !readOnly && onChange(e.target.value)}
-        className={inputCls}
-      />
-    );
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      {label}
-      {input}
-    </div>
-  );
-}
-
-function Modal({
-  title,
-  subtitle,
-  onClose,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-gray-900/40 p-4" onClick={onClose}>
-      <div
-        className="flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-2">
-          <div className="flex-1">
-            <h3 className="text-sm font-bold text-gray-800">{title}</h3>
-            {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
-          </div>
-          <button onClick={onClose} className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        {children}
       </div>
     </div>
   );

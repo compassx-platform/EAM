@@ -19,6 +19,8 @@ import type {
   ListUsage,
   ListKind,
   ChecklistItem,
+  EntityTypeDefinition,
+  EntityFieldInput,
 } from '../types';
 
 const API_BASE = '/api';
@@ -157,6 +159,7 @@ export const api = {
     entity_type: string;
     field_name: string;
     field_type: string;
+    label?: string | null;
     required?: boolean;
     select_options?: string[];
     option_list_key?: string | null;
@@ -322,6 +325,41 @@ export const api = {
     settled?: Array<{ success: boolean; event: string; from?: string; to?: string; error?: string }>;
   }> {
     return request(`/${encodeURIComponent(entityType)}/transition`, { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  listEntityTypes(): Promise<EntityTypeDefinition[]> {
+    return request<EntityTypeDefinition[]>('/entity-types');
+  },
+
+  getEntityType(name: string): Promise<EntityTypeDefinition> {
+    return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`);
+  },
+
+  createEntityType(input: {
+    name: string;
+    display_name: string;
+    description?: string;
+    icon?: string;
+    fields?: EntityFieldInput[];
+  }): Promise<EntityTypeDefinition> {
+    return request<EntityTypeDefinition>('/entity-types', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateEntityType(
+    name: string,
+    input: { display_name?: string; description?: string; icon?: string }
+  ): Promise<EntityTypeDefinition> {
+    return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteEntityType(name: string): Promise<{ deleted: boolean; name: string }> {
+    return request(`/entity-types/${encodeURIComponent(name)}`, { method: 'DELETE' });
   },
 };
 

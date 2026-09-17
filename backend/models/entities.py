@@ -34,6 +34,12 @@ class PMSchedule(EntityBaseMixin, Base):
 class PMScheduleEvent(EntityEventBaseMixin, Base):
     __tablename__ = "pm_schedule_event"
 
+class DynamicEntity(EntityBaseMixin, Base):
+    __tablename__ = "dynamic_entity"
+
+class DynamicEntityEvent(EntityEventBaseMixin, Base):
+    __tablename__ = "dynamic_entity_event"
+
 # Entity Registry to map dynamic entity_type parameter to physical models
 ENTITY_REGISTRY = {
     "workorder": {
@@ -55,6 +61,6 @@ ENTITY_REGISTRY = {
 
 def get_entity_models(entity_type: str):
     entity_key = entity_type.lower()
-    if entity_key not in ENTITY_REGISTRY:
-        raise ValueError(f"Unknown entity type '{entity_type}'. Registered entity types: {list(ENTITY_REGISTRY.keys())}")
-    return ENTITY_REGISTRY[entity_key]["model"], ENTITY_REGISTRY[entity_key]["event_model"]
+    if entity_key in ENTITY_REGISTRY:
+        return ENTITY_REGISTRY[entity_key]["model"], ENTITY_REGISTRY[entity_key]["event_model"]
+    return DynamicEntity, DynamicEntityEvent

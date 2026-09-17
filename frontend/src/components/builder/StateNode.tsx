@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { X, Copy, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail, GitFork } from 'lucide-react';
+import { Trash2, Copy, Play, Circle, ClipboardList, ShieldCheck, Flag, ListChecks, Timer, Workflow, Mail, GitFork } from 'lucide-react';
 import type { NodeKind } from './flowModel';
 
 export type StateNodeData = {
@@ -9,35 +9,36 @@ export type StateNodeData = {
   terminal?: boolean;
   condition_id?: string | null;
   conditions?: string[];
+  description?: string;
   onRename?: (oldLabel: string, newLabel: string) => void;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
 };
 
-const KIND_STYLES: Record<NodeKind, { dot: string; ring: string; text: string; signal: string }> = {
-  start: { dot: 'bg-emerald-500', ring: 'border-emerald-300', text: 'text-emerald-800', signal: 'bg-emerald-200' },
-  state: { dot: 'bg-blue-500', ring: 'border-blue-300', text: 'text-blue-800', signal: 'bg-blue-200' },
-  router: { dot: 'bg-purple-500', ring: 'border-purple-300', text: 'text-purple-800', signal: 'bg-purple-200' },
-  task: { dot: 'bg-indigo-500', ring: 'border-indigo-300', text: 'text-indigo-800', signal: 'bg-indigo-200' },
-  gate: { dot: 'bg-amber-500', ring: 'border-amber-300', text: 'text-amber-800', signal: 'bg-amber-200' },
-  manual: { dot: 'bg-violet-500', ring: 'border-violet-300', text: 'text-violet-800', signal: 'bg-violet-200' },
-  wait: { dot: 'bg-teal-500', ring: 'border-teal-300', text: 'text-teal-800', signal: 'bg-teal-200' },
-  sub: { dot: 'bg-fuchsia-500', ring: 'border-fuchsia-300', text: 'text-fuchsia-800', signal: 'bg-fuchsia-200' },
-  comm: { dot: 'bg-sky-500', ring: 'border-sky-300', text: 'text-sky-800', signal: 'bg-sky-200' },
-  end: { dot: 'bg-rose-500', ring: 'border-rose-300', text: 'text-rose-800', signal: 'bg-rose-200' },
+const KIND_ICON_COLORS: Record<NodeKind, string> = {
+  start: 'text-emerald-600',
+  state: 'text-blue-600',
+  router: 'text-purple-600',
+  task: 'text-indigo-600',
+  gate: 'text-amber-600',
+  manual: 'text-violet-600',
+  wait: 'text-teal-600',
+  sub: 'text-fuchsia-600',
+  comm: 'text-sky-600',
+  end: 'text-rose-600',
 };
 
-const KIND_LABEL: Record<NodeKind, string> = {
-  start: 'start',
-  state: 'step',
-  router: 'router',
-  task: 'task',
-  gate: 'condition',
-  manual: 'manual input',
-  wait: 'wait',
-  sub: 'sub-process',
-  comm: 'communication',
-  end: 'stop',
+const KIND_DEFAULT_SUBTITLES: Record<NodeKind, string> = {
+  start: 'Entry point for new records',
+  state: 'Step in the process',
+  router: 'Splits by TRUE / FALSE',
+  task: 'User task or approval',
+  gate: 'Evaluates condition',
+  manual: 'Prompts user selection',
+  wait: 'Pauses for timer/condition',
+  sub: 'Sub-routine workflow',
+  comm: 'Sends notification',
+  end: 'Terminal outcome',
 };
 
 function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
@@ -66,9 +67,9 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
 }
 
 function StateNode({ id, data, selected }: NodeProps) {
-  const { label, kind, terminal, condition_id, conditions, onRename, onDelete, onDuplicate } = data as StateNodeData;
+  const { label, kind, terminal, condition_id, conditions, description, onRename, onDelete, onDuplicate } = data as StateNodeData;
   const [value, setValue] = useState(label);
-  const style = KIND_STYLES[kind] || KIND_STYLES.state;
+  const iconColor = KIND_ICON_COLORS[kind] || 'text-gray-600';
   const activeCondition = (conditions && conditions[0]) || condition_id || null;
 
   const commit = () => {
@@ -77,19 +78,61 @@ function StateNode({ id, data, selected }: NodeProps) {
     if (next && next !== label) onRename?.(label, next);
   };
 
+  const subtitle =
+    kind === 'router'
+      ? activeCondition
+        ? `Condition: ${activeCondition}`
+        : 'Splits by TRUE / FALSE'
+      : description || KIND_DEFAULT_SUBTITLES[kind] || 'Workflow step';
+
   return (
     <div
-      className={`group relative min-w-[170px] max-w-[250px] rounded-xl border-2 bg-white shadow-sm transition-shadow ${
-        selected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/30' : style.ring
-      } ${kind === 'router' ? 'pr-12' : ''}`}
+      className={`group relative min-w-[190px] max-w-[240px] rounded-lg border bg-white transition-all select-none ${
+        selected
+          ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+          : kind === 'end'
+          ? 'border-dashed border-gray-300 shadow-2xs hover:border-gray-400'
+          : 'border-gray-300 shadow-2xs hover:border-gray-400'
+      } ${kind === 'router' ? 'pr-11' : ''}`}
     >
+      {/* Floating Action Bar on Hover/Selected */}
+      <div className="absolute -top-7 right-1 z-20 hidden items-center gap-0.5 rounded-md border border-gray-200 bg-white p-0.5 shadow-xs group-hover:flex">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDuplicate?.(id);
+          }}
+          className="nodrag nopan rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+          title="Duplicate node"
+        >
+          <Copy className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete?.(id);
+          }}
+          className="nodrag nopan rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+          title="Delete node"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* Target Input Handle on Left */}
       {kind !== 'start' && (
-        <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500" />
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-400 hover:!bg-blue-600 hover:!scale-125 transition-all"
+        />
       )}
-      <div className="flex items-center gap-2 px-3 py-2">
-        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${style.signal} ${style.text}`}>
-          <KindIcon kind={kind} className="h-3.5 w-3.5" />
-        </span>
+
+      {/* Top Row: Icon + Editable Name + Terminal Tag */}
+      <div className="flex items-center gap-2 px-3 pt-2.5 pb-0.5">
+        <KindIcon kind={kind} className={`h-4 w-4 shrink-0 ${iconColor}`} />
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -97,48 +140,27 @@ function StateNode({ id, data, selected }: NodeProps) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          className="nodrag nopan w-full truncate bg-transparent text-sm font-semibold text-gray-800 outline-none"
+          className="nodrag nopan w-full truncate bg-transparent text-xs font-semibold text-gray-950 outline-none hover:bg-gray-50 focus:bg-white rounded px-1 -mx-1 transition-colors"
         />
-        <div className="flex items-center">
-          <button
-            onClick={() => onDuplicate?.(id)}
-            className="nodrag nopan rounded-md p-0.5 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-blue-50 hover:text-blue-600"
-            title="Duplicate"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => onDelete?.(id)}
-            className="nodrag nopan rounded-md p-0.5 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-600"
-            title="Delete"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between px-3 pb-1.5 gap-1">
-        <div className="flex items-center gap-1 min-w-0">
-          <span className={`rounded px-1 text-[9px] font-bold uppercase tracking-wider text-white shrink-0 ${style.dot}`}>
-            {KIND_LABEL[kind] || kind}
-          </span>
-          {kind === 'router' && activeCondition && (
-            <span className="truncate rounded bg-slate-100 border border-slate-200 px-1 text-[9px] font-mono font-medium text-slate-700" title={`Condition: ${activeCondition}`}>
-              {activeCondition}
-            </span>
-          )}
-        </div>
         {terminal && (
-          <span className="rounded bg-rose-100 px-1 text-[9px] font-bold uppercase tracking-wider text-rose-600 shrink-0">
-            ⚑ terminal
+          <span className="shrink-0 rounded bg-rose-50 border border-rose-200 px-1 py-0.2 font-mono text-[9px] font-semibold text-rose-700">
+            stop
           </span>
         )}
       </div>
 
+      {/* Description / Subtitle Row */}
+      <div className="px-3 pb-2.5 pt-0.5">
+        <p className="truncate text-[11px] text-gray-500 leading-snug" title={subtitle}>
+          {subtitle}
+        </p>
+      </div>
+
+      {/* Right Handles (Dedicated TRUE/FALSE for Router, or Standard Output) */}
       {kind === 'router' ? (
         <>
           <div className="absolute right-2 top-[30%] -translate-y-1/2 flex items-center pointer-events-none select-none">
-            <span className="text-[9px] font-mono font-bold text-gray-600">
+            <span className="text-[9px] font-mono font-bold text-gray-500">
               TRUE
             </span>
           </div>
@@ -147,11 +169,11 @@ function StateNode({ id, data, selected }: NodeProps) {
             type="source"
             position={Position.Right}
             style={{ top: '30%' }}
-            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500 hover:!scale-125 transition-transform"
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-400 hover:!bg-blue-600 hover:!scale-125 transition-all"
           />
 
           <div className="absolute right-2 top-[70%] -translate-y-1/2 flex items-center pointer-events-none select-none">
-            <span className="text-[9px] font-mono font-bold text-gray-600">
+            <span className="text-[9px] font-mono font-bold text-gray-500">
               FALSE
             </span>
           </div>
@@ -160,11 +182,15 @@ function StateNode({ id, data, selected }: NodeProps) {
             type="source"
             position={Position.Right}
             style={{ top: '70%' }}
-            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500 hover:!scale-125 transition-transform"
+            className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-400 hover:!bg-blue-600 hover:!scale-125 transition-all"
           />
         </>
       ) : kind !== 'end' ? (
-        <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-500" />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!h-2.5 !w-2.5 !border-2 !border-white !bg-slate-400 hover:!bg-blue-600 hover:!scale-125 transition-all"
+        />
       ) : null}
     </div>
   );

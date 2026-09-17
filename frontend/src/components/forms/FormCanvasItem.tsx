@@ -9,7 +9,6 @@ import {
   Lock,
   Eye,
   Trash2,
-  Copy,
   Info,
   ChevronDown,
   Database,
@@ -32,7 +31,6 @@ interface FormCanvasItemProps {
   groupTitle?: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
-  onDuplicate: (id: string) => void;
   style?: CSSProperties;
   className?: string;
 }
@@ -49,7 +47,6 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
       groupTitle,
       onSelect,
       onRemove,
-      onDuplicate,
       style,
       className,
       ...rest
@@ -250,17 +247,6 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
             title="Drag to reposition"
           >
             <GripVertical className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDuplicate(item.i);
-            }}
-            title="Duplicate field"
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-          >
-            <Copy className="h-3 w-3" />
           </button>
           <button
             type="button"

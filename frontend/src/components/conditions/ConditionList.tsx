@@ -32,15 +32,18 @@ export function ConditionList() {
 
   useEffect(() => {
     api.listConditionTypes().then(setConditionTypes).catch(() => setConditionTypes(null));
-    api
-      .listFields()
-      .then((list) => setKnownTypes([...new Set(list.map((f) => f.entity_type))].sort()))
-      .catch(() => {});
+    Promise.all([
+      api.listEntityTypes().catch(() => []),
+      api.listFields().catch(() => []),
+    ]).then(([ets, fs]) => {
+      const names = [...new Set([...(ets as any[]).map((e) => e.name), ...(fs as any[]).map((f) => f.entity_type)])].sort();
+      setKnownTypes(names);
+    });
     refresh();
   }, [refresh]);
 
   const entityTypeOptions = useMemo(
-    () => [...new Set([...knownTypes, ...conditions.map((c) => c.entity_type)])].sort(),
+    () => [...new Set([...knownTypes, ...conditions.map((c) => c.entity_type)])].filter(Boolean).sort(),
     [knownTypes, conditions],
   );
 

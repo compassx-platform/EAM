@@ -39,7 +39,7 @@ interface ConditionModalProps {
 
 const NUMBER_TYPES = ['number', 'integer', 'decimal', 'currency', 'duration'];
 const DATE_TYPES = ['date', 'datetime'];
-const SELECT_TYPES = ['select', 'dropdown', 'list', 'multiselect'];
+const SELECT_TYPES = ['select', 'dropdown', 'list', 'multiselect', 'selection', 'checkbox_group', 'table'];
 
 function operatorCatalogFor(types: ConditionTypeInfo | null, fieldType?: string): string[] {
   if (!types) return ['eq', 'ne'];
@@ -384,7 +384,7 @@ export function ConditionModal({
         </div>
       )}
 
-      {!entityType && (
+      {!initial && (
         <Field label="Entity type">
           <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className={inputCls}>
             <option value="">— choose an entity type —</option>

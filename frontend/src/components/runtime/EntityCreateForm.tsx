@@ -244,6 +244,10 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
           type: f.field_type,
           required: f.required,
           options: fieldOptions(f),
+          checklistItems:
+            f.option_list_key && resolved[f.option_list_key]?.kind === 'checklist'
+              ? (resolved[f.option_list_key].items as ChecklistItem[])
+              : undefined,
         })),
       ];
 
@@ -285,7 +289,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       const res = await api.createEntity(entityType, { custom_fields: custom });
       setSuccess(true);
       window.setTimeout(
-        () => navigate('/entities', { type: entityType, selected: res.entity_id }),
+        () => navigate('/records', { type: entityType, selected: res.entity_id }),
         600
       );
     } catch (e: any) {
@@ -304,7 +308,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
             onClick={onBack}
             className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-xs transition-colors"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Entities
+            <ArrowLeft className="h-3.5 w-3.5" /> Records
           </button>
           <div>
             <h1 className="text-lg font-bold text-gray-900">New {entityType} record</h1>

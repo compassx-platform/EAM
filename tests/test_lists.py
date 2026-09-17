@@ -24,6 +24,26 @@ def save(db, list_key="priority", kind="options", items=("Low", "High"), descrip
     return save_draft(ListDraftRequest(list_key=list_key, kind=kind, items=list(items), description=description), db)
 
 
+def register_field(db, entity_type, field_name, field_type):
+    """Register a form field so form saves only bind to the entity field registry."""
+    if field_type == "dropdown":
+        field_type = "select"
+    exists = db.query(EntityField).filter(
+        EntityField.entity_type == entity_type.lower(),
+        EntityField.field_name == field_name,
+    ).first()
+    if not exists:
+        db.add(EntityField(
+            entity_type=entity_type.lower(),
+            field_name=field_name,
+            field_type=field_type,
+            required=False,
+            select_options=[],
+        ))
+        db.flush()
+        db.commit()
+
+
 def test_draft_save_and_fetch(test_db):
     saved = save(test_db)
     assert saved["status"] == "draft"
@@ -165,24 +185,27 @@ def test_field_validation_resolves_from_published_list(test_db):
     assert field.option_list_key == "priority"
 
 
-def test_field_references_unpublished_list_rejected(test_db):
-    with pytest.raises(HTTPException) as exc:
-        create_or_update_field(
-            EntityFieldRequest(
-                entity_type="workorder",
-                field_name="prio",
-                field_type="select",
-                option_list_key="nope",
-            ),
-            test_db,
-        )
-    assert exc.value.status_code == 400
-    assert "no published version" in exc.value.detail
+def test_field_references_unpublished_list_accepted_at_field_level(test_db):
+    # Unpublished list references are allowed in the registry — options/lists are
+    # configured and enforced in the form builder instead.
+    create_or_update_field(
+        EntityFieldRequest(
+            entity_type="workorder",
+            field_name="prio",
+            field_type="select",
+            option_list_key="nope",
+        ),
+        test_db,
+    )
+    field = test_db.query(EntityField).filter(EntityField.entity_type == "workorder", EntityField.field_name == "prio").one()
+    assert field.option_list_key == "nope"
+    assert field.select_options is None
 
 
 def test_checklist_form_item_requires_published_checklist(test_db):
     save(test_db, kind="checklist", items=[{"label": "A", "required": True}])
     publish_list("priority", test_db)
+    register_field(test_db, "training", "safety_checks", "checklist")
 
     checklist_item = {
         "i": "field:clist", "x": 0, "y": 0, "w": 12, "h": 3,
@@ -199,6 +222,7 @@ def test_checklist_form_item_requires_published_checklist(test_db):
 
 
 def test_checklist_form_item_without_list_rejected(test_db):
+    register_field(test_db, "training", "safety_checks", "checklist")
     item = {
         "i": "field:clist", "x": 0, "y": 0, "w": 12, "h": 3,
         "fieldName": "safety_checks", "fieldType": "checklist",
@@ -216,6 +240,7 @@ def test_checklist_form_item_without_list_rejected(test_db):
 def test_dropdown_may_use_shared_list(test_db):
     save(test_db, items=("Low", "High"))
     publish_list("priority", test_db)
+    register_field(test_db, "training", "prio", "dropdown")
 
     item = {
         "i": "field:prio", "x": 0, "y": 0, "w": 6, "h": 1,
@@ -234,6 +259,7 @@ def test_dropdown_may_use_shared_list(test_db):
 def test_options_kind_list_rejected_for_checklist_field(test_db):
     save(test_db, items=("Low", "High"))
     publish_list("priority", test_db)
+    register_field(test_db, "training", "safety_checks", "checklist")
 
     item = {
         "i": "field:clist", "x": 0, "y": 0, "w": 12, "h": 3,
@@ -252,6 +278,7 @@ def test_options_kind_list_rejected_for_checklist_field(test_db):
 def test_checklist_kind_list_rejected_for_dropdown(test_db):
     save(test_db, kind="checklist", items=[{"label": "A", "required": True}])
     publish_list("priority", test_db)
+    register_field(test_db, "training", "prio", "dropdown")
 
     item = {
         "i": "field:prio", "x": 0, "y": 0, "w": 6, "h": 1,

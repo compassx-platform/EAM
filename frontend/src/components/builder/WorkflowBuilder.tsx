@@ -4,6 +4,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   applyNodeChanges,
@@ -27,6 +28,7 @@ import { ActionInspector } from './studio/ActionInspector';
 import { ConditionModal } from './studio/ConditionModal';
 import { SettingsModal } from './studio/SettingsModal';
 import { DashedButton } from './studio/ui';
+import { useHashRoute } from '../../lib/router';
 
 const nodeTypes = { state: StateNode };
 const edgeTypes = { event: EventEdge };
@@ -41,9 +43,11 @@ interface BuilderInnerProps {
 
 function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const route = useHashRoute();
+  const initialType = route.query.get('type') || 'workorder';
 
   const [id, setId] = useState<string | null>(workflowId);
-  const [entityType, setEntityType] = useState('workorder');
+  const [entityType, setEntityType] = useState(initialType);
   const [versionLabel, setVersionLabel] = useState('draft_v1');
   const [status, setStatus] = useState<Workflow['status']>('draft');
   const [nodes, setNodes] = useState<WorkflowFlowNode[]>([]);
@@ -91,9 +95,11 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   // ---- data loading -------------------------------------------------------
   useEffect(() => {
     api
-      .listWorkflows()
-      .then((list) => setKnownTypes([...new Set(list.map((w) => w.entity_type))].sort()))
-      .catch(() => {});
+      .listEntityTypes()
+      .then((list) => setKnownTypes(list.map((et) => et.name)))
+      .catch(() => {
+        api.listWorkflows().then((wfs) => setKnownTypes([...new Set(wfs.map((w) => w.entity_type))].sort())).catch(() => {});
+      });
     api
       .listConditionTypes()
       .then(setConditionTypes)
@@ -611,7 +617,6 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           canDelete={!!id}
           notice={notice}
           knownTypes={knownTypes}
-          onBack={onBack}
           onAutoArrange={handleAutoArrange}
           onNewCondition={() => setConditionModalOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -650,9 +655,9 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
             fitViewOptions={{ maxZoom: 1 }}
             minZoom={0.2}
             proOptions={{ hideAttribution: true }}
-            className="bg-[#f8fafc]"
+            className="bg-[#fafbfc]"
           >
-            <Background gap={16} size={1} color="#e2e8f0" />
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} color="#cbd5e1" />
             <Controls />
             <MiniMap pannable zoomable className="!bg-white" nodeColor="#bfdbfe" maskColor="rgba(148,163,184,0.12)" />
           </ReactFlow>

@@ -3,12 +3,47 @@
 import pytest
 from fastapi import HTTPException
 
+from backend.models.field_registry import EntityField
 from backend.routers.forms import (
     EntityFormRequest,
     FormItem,
     create_or_update_form,
     get_form,
 )
+
+
+def _register(db, entity_type, layout):
+    """Register the layout's fields so forms only bind to the entity field registry."""
+    for it in layout:
+        name = (it.get("fieldName") or it.get("field_name") or "").strip()
+        if not name:
+            continue
+        ft = it.get("fieldType")
+        if ft == "dropdown":
+            ft = "select"
+        exists = db.query(EntityField).filter(
+            EntityField.entity_type == entity_type.lower(),
+            EntityField.field_name == name,
+        ).first()
+        if not exists and ft:
+            row = EntityField(
+                entity_type=entity_type.lower(),
+                field_name=name,
+                field_type=ft,
+                required=bool(it.get("required")),
+                select_options=list(it.get("options") or []),
+            )
+            db.add(row)
+            db.flush()
+    db.commit()
+
+
+def save(db, entity_type, layout):
+    _register(db, entity_type, layout)
+    return create_or_update_form(
+        EntityFormRequest(entity_type=entity_type, layout=[FormItem(**it) for it in layout]),
+        db,
+    )
 
 
 def make_layout():
@@ -60,13 +95,6 @@ def make_layout():
             "placeholder": None,
         },
     ]
-
-
-def save(db, entity_type, layout):
-    return create_or_update_form(
-        EntityFormRequest(entity_type=entity_type, layout=[FormItem(**it) for it in layout]),
-        db,
-    )
 
 
 def test_save_and_get_generic_form(test_db):
@@ -165,6 +193,17 @@ def test_table_requires_columns_and_round_trips(test_db):
     assert stored["field:test-14"]["w"] == 12
 
 
+def test_duplicate_field_placement_rejected(test_db):
+    layout = make_layout()
+    dup = dict(layout[1])
+    dup["i"] = "field:test-dup"
+    dup["y"] = 9
+    with pytest.raises(HTTPException) as exc:
+        save(test_db, "training", layout + [dup])
+    assert exc.value.status_code == 400
+    assert "only be added to the form once" in str(exc.value.detail)
+
+
 def test_missing_field_name_rejected(test_db):
     layout = make_layout()
     layout[1]["fieldName"] = "  "
@@ -189,7 +228,10 @@ def test_legacy_unregistered_field_item_rejected(test_db):
         {"i": "ghost_field", "x": 0, "y": 0, "w": 6, "h": 1, "isHeader": False, "label": None}
     ]
     with pytest.raises(HTTPException) as exc:
-        save(test_db, "workorder", layout)
+        create_or_update_form(
+            EntityFormRequest(entity_type="workorder", layout=[FormItem(**it) for it in layout]),
+            test_db,
+        )
     assert exc.value.status_code == 400
     assert "not registered" in str(exc.value.detail)
 

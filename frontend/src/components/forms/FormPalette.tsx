@@ -8,15 +8,14 @@ import {
   Database,
   Check,
 } from 'lucide-react';
-import { FIELD_TYPE_DEFS, getFieldTypeIcon, type FieldTypeDef } from './formUtils';
-import type { EntityField, GenericFieldType } from '../../types';
+import type { EntityField } from '../../types';
 
 interface FormPaletteProps {
   registeredFields: EntityField[];
+  /** field_name -> the field is already placed on the form (one placement max). */
   placedFieldNames: Set<string>;
   onAddHeading: () => void;
   onAddGroup: () => void;
-  onAddField: (type: GenericFieldType) => void;
   onAddRegisteredField: (field: EntityField) => void;
 }
 
@@ -68,49 +67,15 @@ export function FormPalette({
   placedFieldNames,
   onAddHeading,
   onAddGroup,
-  onAddField,
   onAddRegisteredField,
 }: FormPaletteProps) {
   const [search, setSearch] = useState('');
 
   const q = search.trim().toLowerCase();
 
-  const filteredDefs = FIELD_TYPE_DEFS.filter(
-    (d) =>
-      !q ||
-      d.label.toLowerCase().includes(q) ||
-      d.hint.toLowerCase().includes(q) ||
-      d.type.toLowerCase().includes(q)
+  const visibleFields = registeredFields.filter(
+    (f) => !q || f.field_name.toLowerCase().includes(q) || f.field_type.toLowerCase().includes(q) || (f.label ?? '').toLowerCase().includes(q)
   );
-
-  const basicDefs = filteredDefs.filter((d) => d.category === 'basic');
-  const dateDefs = filteredDefs.filter((d) => d.category === 'date');
-  const choiceDefs = filteredDefs.filter((d) => d.category === 'choice');
-  const advancedDefs = filteredDefs.filter((d) => d.category === 'advanced');
-
-  const filteredRegistered = registeredFields.filter(
-    (f) => !q || f.field_name.toLowerCase().includes(q) || f.field_type.toLowerCase().includes(q)
-  );
-
-  const renderFieldButton = (def: FieldTypeDef) => {
-    const Icon = getFieldTypeIcon(def.type);
-    return (
-      <div key={def.type} className="group relative flex items-center">
-        <button
-          type="button"
-          onClick={() => onAddField(def.type)}
-          className="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-        >
-          <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400 group-hover:text-blue-600 transition-colors" />
-          <span className="truncate">{def.label}</span>
-          <Plus className="ml-auto h-3 w-3 shrink-0 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-blue-600 transition-opacity" />
-        </button>
-
-        {/* Hover info tooltip */}
-        <InfoTooltip text={def.hint} />
-      </div>
-    );
-  };
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
@@ -122,7 +87,7 @@ export function FormPalette({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search fields &amp; widgets…"
+            placeholder="Search entity fields…"
             className="w-full rounded-lg border border-gray-200 bg-gray-50/70 py-1.5 pl-8 pr-3 text-xs text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:bg-white focus:outline-none transition-colors"
           />
         </div>
@@ -131,111 +96,78 @@ export function FormPalette({
       {/* Palette Items Scrollable List */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3 pt-1">
         {/* Structure Section */}
-        {(!q || 'section heading form group layout'.includes(q)) && (
-          <div className="flex flex-col gap-1">
-            <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Structure &amp; Layout
-            </span>
-            <div className="flex flex-col gap-0.5">
-              <div className="group relative flex items-center">
-                <button
-                  type="button"
-                  onClick={onAddHeading}
-                  className="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                >
-                  <Heading className="h-3.5 w-3.5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
-                  <span>Section Heading</span>
-                  <Plus className="ml-auto h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-indigo-600 transition-opacity" />
-                </button>
-                <InfoTooltip text="Visual section header and divider to organize fields" />
-              </div>
+        <div className="flex flex-col gap-1">
+          <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            Structure &amp; Layout
+          </span>
+          <div className="flex flex-col gap-0.5">
+            <div className="group relative flex items-center">
+              <button
+                type="button"
+                onClick={onAddHeading}
+                className="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+              >
+                <Heading className="h-3.5 w-3.5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+                <span>Section Heading</span>
+                <Plus className="ml-auto h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-indigo-600 transition-opacity" />
+              </button>
+              <InfoTooltip text="Visual section header and divider to organize fields" />
+            </div>
 
-              <div className="group relative flex items-center">
-                <button
-                  type="button"
-                  onClick={onAddGroup}
-                  className="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                >
-                  <Layers className="h-3.5 w-3.5 text-gray-400 group-hover:text-purple-600 transition-colors" />
-                  <span>Form Group</span>
-                  <Plus className="ml-auto h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-purple-600 transition-opacity" />
-                </button>
-                <InfoTooltip text="Boxed grouping container to visually organize related fields" />
-              </div>
+            <div className="group relative flex items-center">
+              <button
+                type="button"
+                onClick={onAddGroup}
+                className="flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+              >
+                <Layers className="h-3.5 w-3.5 text-gray-400 group-hover:text-purple-600 transition-colors" />
+                <span>Form Group</span>
+                <Plus className="ml-auto h-3 w-3 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-purple-600 transition-opacity" />
+              </button>
+              <InfoTooltip text="Boxed grouping container to visually organize related fields" />
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Input Fields */}
-        {basicDefs.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Input Fields
+        {/* Registered Entity Schema Fields */}
+        <div className="flex flex-col gap-1 border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between px-2.5">
+            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <Database className="h-3 w-3 text-blue-700" />
+              Entity Schema ({registeredFields.length})
             </span>
-            <div className="flex flex-col gap-0.5">{basicDefs.map(renderFieldButton)}</div>
           </div>
-        )}
-
-        {/* Choices & Selection */}
-        {choiceDefs.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Selection &amp; Choices
-            </span>
-            <div className="flex flex-col gap-0.5">{choiceDefs.map(renderFieldButton)}</div>
-          </div>
-        )}
-
-        {/* Date & Time */}
-        {dateDefs.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Dates &amp; Times
-            </span>
-            <div className="flex flex-col gap-0.5">{dateDefs.map(renderFieldButton)}</div>
-          </div>
-        )}
-
-        {/* Advanced & Lists */}
-        {advancedDefs.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="px-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Advanced &amp; Lists
-            </span>
-            <div className="flex flex-col gap-0.5">{advancedDefs.map(renderFieldButton)}</div>
-          </div>
-        )}
-
-        {/* Registered Entity Schema Fields (if any) */}
-        {filteredRegistered.length > 0 && (
-          <div className="flex flex-col gap-1 border-t border-gray-100 pt-3">
-            <div className="flex items-center justify-between px-2.5">
-              <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                <Database className="h-3 w-3 text-blue-700" />
-                Entity Schema ({registeredFields.length})
-              </span>
-            </div>
+          {visibleFields.length === 0 ? (
+            <p className="px-2.5 py-1 text-[11px] text-gray-400 italic">
+              {search ? 'No matching fields.' : 'No fields yet — add them in the Entity Designer.'}
+            </p>
+          ) : (
             <div className="flex flex-col gap-0.5">
-              {filteredRegistered.map((f) => {
-                const isPlaced = placedFieldNames.has(f.field_name);
+              {visibleFields.map((f) => {
+                const placed = placedFieldNames.has(f.field_name);
                 return (
                   <button
                     key={f.field_name}
                     type="button"
+                    disabled={placed}
                     onClick={() => onAddRegisteredField(f)}
                     className={`group flex items-center justify-between gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                      isPlaced
-                        ? 'text-gray-400 cursor-default hover:bg-gray-50'
+                      placed
+                        ? 'cursor-not-allowed text-gray-400'
                         : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                     }`}
+                    title={placed ? `${f.label || f.field_name} is already on the form` : `Add ${f.label || f.field_name} to the form`}
                   >
-                    <div className="min-w-0 truncate">
-                      <span className="font-medium">{f.field_name}</span>
-                      <span className="ml-1 font-mono text-[9px] text-gray-400">({f.field_type})</span>
+                    <div className="min-w-0">
+                      <div className="truncate">
+                        <span className="font-medium">{f.label || f.field_name}</span>
+                        <span className="ml-1 font-mono text-[9px] text-gray-400">{f.field_name}</span>
+                      </div>
+                      <div className="truncate font-mono text-[9px] text-gray-400">{f.field_type}</div>
                     </div>
-                    {isPlaced ? (
+                    {placed ? (
                       <span className="flex shrink-0 items-center gap-0.5 text-[9px] font-medium text-gray-400">
-                        <Check className="h-3 w-3 text-emerald-600" /> on form
+                        <Check className="h-3 w-3 text-emerald-600" /> Added
                       </span>
                     ) : (
                       <Plus className="h-3 w-3 shrink-0 text-gray-300 opacity-0 group-hover:opacity-100 group-hover:text-blue-600 transition-opacity" />
@@ -244,8 +176,8 @@ export function FormPalette({
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </aside>
   );

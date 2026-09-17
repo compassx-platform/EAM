@@ -23,9 +23,7 @@ import type {
   ResolvedList,
   ChecklistItem,
   ConditionDefinition,
-  GenericFieldType,
 } from '../../types';
-import { FIELD_TYPE_DEFS } from './formUtils';
 
 interface FormInspectorProps {
   selectedItem: EntityFormItem | null;
@@ -1204,31 +1202,17 @@ export function FormInspector({
 
       {/* Single Continuous Panel with 1-Level Progressive Sections */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {/* Field Type Selection */}
+        {/* Field Type (registry-defined, read-only) */}
         <InspectorField label="Field Type">
-          <select
-            value={selectedItem.fieldType ?? 'text'}
-            onChange={(e) => {
-              const t = e.target.value as GenericFieldType;
-              const def = FIELD_TYPE_DEFS.find((d) => d.type === t);
-              onPatchItem(selectedItem.i, {
-                fieldType: t,
-                options:
-                  t === 'selection' || t === 'checkbox_group' || t === 'dropdown' || t === 'table'
-                    ? selectedItem.options?.length
-                      ? selectedItem.options
-                      : [...(def?.defaultOptions ?? [])]
-                    : selectedItem.options,
-              });
-            }}
-            className={INPUT_CLS}
-          >
-            {FIELD_TYPE_DEFS.map((def) => (
-              <option key={def.type} value={def.type}>
-                {def.label} ({def.type})
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 px-2 py-0.5 font-mono text-[11px] font-medium text-gray-700"
+              title="Type is defined in the Entity Designer and cannot be changed here."
+            >
+              {selectedItem.fieldType ?? 'text'}
+            </span>
+            <InfoTooltip text="Field type is defined in the Entity Designer and cannot be changed in the form builder." />
+          </div>
         </InspectorField>
 
         {/* Placeholder (if plain text / number input) */}

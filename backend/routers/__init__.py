@@ -7,6 +7,7 @@ from backend.routers.system import router as system_router
 from backend.routers.forms import router as forms_router
 from backend.routers.actions import router as actions_router
 from backend.routers.lists import router as lists_router
+from backend.routers.entity_types import router as entity_types_router
 
 __all__ = [
     "auth_router",
@@ -18,4 +19,5 @@ __all__ = [
     "forms_router",
     "actions_router",
     "lists_router",
+    "entity_types_router",
 ]

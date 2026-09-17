@@ -1,1 +1,43 @@
 @import "tailwindcss";
+
+/* 
+ * Custom scrollbar design:
+ * - Slender reduced width (5px)
+ * - Hidden by default, smoothly reveals only when hovering over the scrollable container or scrollbar
+ * - Soft, muted light slate/gray color (low-contrast restraint)
+ */
+
+/* WebKit-based browsers (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* Show muted light thumb when the scrollable container or element is hovered */
+*:hover::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+
+/* Firefox standard scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   GridLayout,
   verticalCompactor,
@@ -12,13 +12,13 @@ import { api } from '../../api/client';
 import type {
   EntityField,
   EntityFormItem,
+  GenericFieldType,
+  EntityFieldType,
   OptionListSummary,
   ResolvedList,
   ConditionDefinition,
-  GenericFieldType,
 } from '../../types';
 import {
-  FIELD_TYPE_DEFS,
   nextItemId,
   nextY,
   normalizeFormLayout,
@@ -36,6 +36,38 @@ interface FormBuilderProps {
   entityType: string;
   onBack: () => void;
   onChanged: () => void;
+}
+
+/** Maps a registry field type to its default form widget + grid size. */
+function widgetForField(fieldType: EntityFieldType): { fieldType: GenericFieldType; w: number; h: number } {
+  switch (fieldType) {
+    case 'select':
+      return { fieldType: 'dropdown', w: 6, h: 1 };
+    case 'selection':
+      return { fieldType: 'selection', w: 6, h: 2 };
+    case 'checkbox_group':
+      return { fieldType: 'checkbox_group', w: 6, h: 2 };
+    case 'boolean':
+      return { fieldType: 'boolean', w: 6, h: 1 };
+    case 'long_text':
+      return { fieldType: 'long_text', w: 12, h: 3 };
+    case 'date':
+    case 'datetime':
+    case 'time':
+    case 'number':
+    case 'email':
+    case 'phone':
+    case 'url':
+      return { fieldType, w: 6, h: 1 };
+    case 'table':
+      return { fieldType: 'table', w: 12, h: 3 };
+    case 'checklist':
+      return { fieldType: 'checklist', w: 12, h: 4 };
+    case 'file':
+      return { fieldType: 'file', w: 12, h: 2 };
+    default:
+      return { fieldType: 'text', w: 6, h: 1 };
+  }
 }
 
 export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps) {
@@ -204,25 +236,6 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setDirty(true);
   };
 
-  const duplicateItem = (id: string) => {
-    const orig = items.find((it) => it.i === id);
-    if (!orig) return;
-    const isGrp = Boolean(orig.isGroup ?? orig.is_group);
-    const isHdr = Boolean(orig.isHeader ?? orig.is_header);
-    const newId = nextItemId(isGrp ? 'group' : isHdr ? 'header' : 'field');
-    const y = nextY(items, cols);
-    const dup: EntityFormItem = {
-      ...orig,
-      i: newId,
-      y,
-      fieldName: orig.fieldName ? `${orig.fieldName}_copy` : undefined,
-      label: orig.label ? `${orig.label} (Copy)` : undefined,
-    };
-    setItems((prev) => [...prev, dup]);
-    setSelected(newId);
-    setDirty(true);
-  };
-
   const addHeading = () => {
     const id = nextItemId('header');
     const y = nextY(items, cols);
@@ -263,54 +276,23 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     return id;
   };
 
-  const addField = (type: GenericFieldType) => {
-    const def = FIELD_TYPE_DEFS.find((d) => d.type === type) || FIELD_TYPE_DEFS[0];
-    const usedNames = new Set(
+  /** Maps a registry field to its default form widget + grid size + options source. */
+  const addRegisteredField = (field: EntityField) => {
+    const alreadyPlaced = new Set(
       items.map((it) => it.fieldName).filter((n): n is string => Boolean(n))
     );
-    let name = def.defaultFieldName;
-    let n = 2;
-    while (usedNames.has(name)) name = `${def.defaultFieldName}_${n++}`;
-
+    if (alreadyPlaced.has(field.field_name)) return;
     const id = nextItemId('field');
     const y = nextY(items, cols);
-    const item: EntityFormItem = {
-      i: id,
-      x: 0,
-      y,
-      w: Math.min(cols, def.defaultWidth || 6),
-      h: def.defaultHeight || 1,
-      label: def.label,
-      fieldName: name,
-      fieldType: type,
-      required: false,
-      options: [...def.defaultOptions],
-      placeholder: type === 'file' ? 'Attach files or documents' : '',
-      accept: type === 'file' ? '' : undefined,
-      maxFileSizeMb: type === 'file' ? 10 : undefined,
-      allowMultiple: type === 'file' ? true : undefined,
-      maxFiles: type === 'file' ? 5 : undefined,
-    };
-    setItems((prev) => [...prev, item]);
-    setSelected(id);
-    setDirty(true);
-  };
-
-  const addRegisteredField = (field: EntityField) => {
-    const id = nextItemId('field');
-    const y = nextY(items, cols);
-    let fieldType: GenericFieldType = 'text';
-    if (field.field_type === 'number') fieldType = 'number';
-    else if (field.field_type === 'date') fieldType = 'date';
-    else if (field.field_type === 'select') fieldType = 'dropdown';
+    const { fieldType, w, h } = widgetForField(field.field_type);
 
     const item: EntityFormItem = {
       i: id,
       x: 0,
       y,
-      w: 6,
-      h: 1,
-      label: field.field_name
+      w,
+      h,
+      label: field.label || field.field_name
         .split('_')
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(' '),
@@ -396,8 +378,9 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     flash('ok', `Condition "${saved.label}" saved and linked.`);
   };
 
-  const placedFieldNames = new Set(
-    items.map((it) => it.fieldName).filter((n): n is string => Boolean(n))
+  const placedFieldNames = useMemo(
+    () => new Set(items.map((it) => it.fieldName).filter((n): n is string => Boolean(n))),
+    [items]
   );
 
   const selectedItem = selected ? items.find((it) => it.i === selected) || null : null;
@@ -410,7 +393,6 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         placedFieldNames={placedFieldNames}
         onAddHeading={addHeading}
         onAddGroup={addGroup}
-        onAddField={addField}
         onAddRegisteredField={addRegisteredField}
       />
 
@@ -471,13 +453,6 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   <div className="flex items-center gap-2 mt-2">
                     <button
                       type="button"
-                      onClick={() => addField('text')}
-                      className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-xs transition-colors"
-                    >
-                      + Add Text Field
-                    </button>
-                    <button
-                      type="button"
                       onClick={addHeading}
                       className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-2xs transition-colors"
                     >
@@ -534,7 +509,6 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                             groupTitle={groupTitle}
                             onSelect={(id) => setSelected(id)}
                             onRemove={removeItem}
-                            onDuplicate={duplicateItem}
                           />
                         );
                       })}

@@ -1,60 +1,123 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, RefreshCw, Trash2, Pencil, Loader2, GitBranch, GitFork, CalendarClock, Layers, PlayCircle } from 'lucide-react';
+import {
+  Plus,
+  RefreshCw,
+  Trash2,
+  Pencil,
+  Loader2,
+  GitBranch,
+  History,
+  ChevronRight,
+  ChevronDown,
+  X,
+} from 'lucide-react';
 import { api } from '../api/client';
-import type { Workflow, WorkflowStatus } from '../types';
+import { navigate } from '../lib/router';
+import type { Workflow, EntityTypeDefinition } from '../types';
 
 interface WorkflowListProps {
   onEdit: (workflow: Workflow) => void;
   onNew: () => void;
 }
 
-const statusBadge: Record<WorkflowStatus, string> = {
-  draft: 'bg-amber-100 text-amber-700 border-amber-200',
-  published: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  deprecated: 'bg-gray-100 text-gray-500 border-gray-200',
-};
+const humanize = (name: string) =>
+  name
+    .split(/[_]+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+function versionDate(wf: Workflow): string {
+  const d = wf.status === 'published' && wf.published_at ? wf.published_at : wf.created_at;
+  return d ? new Date(d).toLocaleDateString() : '—';
+}
+
+function statusText(cur: Workflow, liveVersionLabel?: string): string {
+  if (cur.status === 'published') return 'live';
+  if (cur.status === 'deprecated') return 'deprecated';
+  return liveVersionLabel ? `draft · live ${liveVersionLabel}` : 'draft';
+}
+
+interface EntityRow {
+  entityType: string;
+  displayName: string;
+  current: Workflow;
+  live: Workflow | undefined;
+  history: Workflow[];
+}
 
 export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [filter, setFilter] = useState<string>('all');
+  const [entityTypesList, setEntityTypesList] = useState<EntityTypeDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newModalOpen, setNewModalOpen] = useState(false);
+  const [selectedNewType, setSelectedNewType] = useState('workorder');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    api
-      .listWorkflows()
-      .then(setWorkflows)
+    Promise.all([
+      api.listWorkflows(),
+      api.listEntityTypes().catch(() => [] as EntityTypeDefinition[]),
+    ])
+      .then(([wfs, ets]) => {
+        setWorkflows(wfs);
+        setEntityTypesList(ets);
+        if (ets.length > 0 && !selectedNewType) {
+          setSelectedNewType(ets[0].name);
+        }
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedNewType]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const sections = useMemo(() => {
+  const rows = useMemo<EntityRow[]>(() => {
     const byType = new Map<string, Workflow[]>();
     for (const wf of workflows) {
       const list = byType.get(wf.entity_type) ?? [];
       list.push(wf);
       byType.set(wf.entity_type, list);
     }
-    const types = [...byType.keys()].sort();
-    return types
-      .filter((t) => filter === 'all' || t === filter)
-      .map((t) => {
-        const list = [...byType.get(t)!].sort(
-          (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-        );
-        const live = list.filter((w) => w.status === 'published');
-        return { entityType: t, versions: list, liveId: live.length ? live[live.length - 1].id : undefined };
+    const out: EntityRow[] = [];
+    for (const [t, list] of byType) {
+      const versions = [...list].sort(
+        (a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+      );
+      const live = versions
+        .filter((v) => v.status === 'published')
+        .sort((a, b) => new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime())[0];
+      const typeDef = entityTypesList.find((e) => e.name === t);
+      out.push({
+        entityType: t,
+        displayName: typeDef?.display_name ?? humanize(t),
+        current: versions[0],
+        live,
+        history: versions.slice(1),
       });
-  }, [workflows, filter]);
+    }
+    return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [workflows, entityTypesList]);
 
-  const entityTypes = useMemo(() => [...new Set(workflows.map((wf) => wf.entity_type))].sort(), [workflows]);
+  const allAvailableEntityTypes = useMemo(() => {
+    const names = new Set<string>();
+    entityTypesList.forEach((e) => names.add(e.name));
+    workflows.forEach((w) => names.add(w.entity_type));
+    return [...names].sort();
+  }, [entityTypesList, workflows]);
+
+  const toggleExpand = (entityType: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(entityType)) next.delete(entityType);
+      else next.add(entityType);
+      return next;
+    });
 
   const handleDelete = async (wf: Workflow) => {
     if (!window.confirm(`Delete workflow "${wf.version_label}" (${wf.status})? This cannot be undone.`)) return;
@@ -70,6 +133,11 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
     }
   };
 
+  const handleCreateWorkflow = () => {
+    setNewModalOpen(false);
+    navigate('/workflows/new', { type: selectedNewType });
+  };
+
   return (
     <div className="flex h-full w-full flex-col min-h-0 overflow-hidden">
       {/* Surface Header */}
@@ -81,44 +149,15 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
               <span>Workflow Studio</span>
             </h1>
             <span className="rounded-full bg-gray-100 px-2 py-0.5 font-mono text-xs font-semibold text-gray-600">
-              {workflows.length}
+              {rows.length}
             </span>
           </div>
           <p className="mt-0.5 text-xs text-gray-500">
-            Design state machines with a drag-and-drop canvas, then publish them for use by entities.
+            One workflow per entity — the latest version drives routing. Expand a row for version history.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Filter segmented pills */}
-          <div className="flex items-center gap-1 rounded-xl border border-gray-200/60 bg-gray-100/90 p-1">
-            <button
-              type="button"
-              onClick={() => setFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs transition-all ${
-                filter === 'all'
-                  ? 'border border-gray-200/80 bg-white font-semibold text-gray-900 shadow-xs'
-                  : 'font-medium text-gray-600 hover:bg-white/50 hover:text-gray-900'
-              }`}
-            >
-              All
-            </button>
-            {entityTypes.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setFilter(t)}
-                className={`rounded-lg px-2.5 py-1 font-mono text-xs transition-all ${
-                  filter === t
-                    ? 'border border-gray-200/80 bg-white font-semibold text-gray-900 shadow-xs'
-                    : 'font-medium text-gray-600 hover:bg-white/50 hover:text-gray-900'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-
           <button
             type="button"
             onClick={() => refresh()}
@@ -130,13 +169,80 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
 
           <button
             type="button"
-            onClick={onNew}
+            onClick={() => setNewModalOpen(true)}
             className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
           >
             <Plus className="h-4 w-4" /> New Workflow
           </button>
         </div>
       </div>
+
+      {/* New Workflow Entity Type Selection Modal */}
+      {newModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs"
+          onMouseDown={() => setNewModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-5 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <GitBranch className="h-4 w-4 text-blue-700" />
+                <h3 className="text-sm font-bold text-gray-900">Create Workflow</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewModalOpen(false)}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4 text-xs">
+              <p className="text-gray-600">
+                Select the target entity type for which you want to design a new workflow state machine:
+              </p>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-gray-700">Entity Type</label>
+                <select
+                  value={selectedNewType}
+                  onChange={(e) => setSelectedNewType(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs"
+                >
+                  {allAvailableEntityTypes.map((t) => {
+                    const found = entityTypesList.find((e) => e.name === t);
+                    return (
+                      <option key={t} value={t}>
+                        {found ? `${found.display_name} (${t})` : t}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setNewModalOpen(false)}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateWorkflow}
+                className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-700"
+              >
+                Design Workflow
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -150,97 +256,123 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
           <div className="flex justify-center py-16">
             <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
           </div>
-        ) : sections.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-400">
-            No workflows{filter !== 'all' ? ` for "${filter}"` : ''} yet. Click{' '}
+            No workflows yet. Click{' '}
             <span className="font-medium text-gray-600">New Workflow</span> to build one.
           </div>
         ) : (
-          <div className="flex flex-col gap-5">
-            {sections.map(({ entityType, versions, liveId }) => (
-              <section key={entityType} className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-xs">
-                <header className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50/70 px-4 py-3">
-                  <span className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-xs font-bold text-blue-700">
-                    {entityType}
-                  </span>
-                  <span className="text-xs text-gray-400">{versions.length} version{versions.length > 1 ? 's' : ''}</span>
-                  {liveId && (
-                    <span className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                      <PlayCircle className="h-3 w-3" /> Live · drives routing & forms
-                    </span>
-                  )}
-                  <div className="ml-auto">
-                    <button
-                      type="button"
-                      onClick={onNew}
-                      className="text-xs font-semibold text-blue-700 hover:text-blue-900 transition-colors"
-                    >
-                      + New draft
-                    </button>
-                  </div>
-                </header>
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs">
+            <table className="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                  <th className="px-4 py-2.5">Workflow</th>
+                  <th className="px-3 py-2.5">Version</th>
+                  <th className="px-3 py-2.5">Last updated</th>
+                  <th className="w-36 px-3 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rows.map((row) => {
+                  const cur = row.current;
+                  const isLive = row.live?.id === cur.id;
+                  const hasHistory = row.history.length > 0;
+                  const isExpanded = expanded.has(row.entityType);
+                  return [
+                    <tr key={cur.id} className="align-middle hover:bg-gray-50/60 transition-colors">
+                      {/* Workflow / entity */}
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-gray-900">{row.displayName}</div>
+                        <div className="mt-0.5 font-mono text-[11px] text-gray-500">{row.entityType}</div>
+                      </td>
 
-                <div className="divide-y divide-gray-100">
-                  {versions.map((wf) => {
-                    const live = wf.id === liveId;
-                    const branches = (wf.definition?.transitions ?? []).reduce(
-                      (acc, t) => acc + (t.choices?.length ?? 1),
-                      0
-                    );
-                    return (
-                      <div key={wf.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-gray-50/60 transition-colors">
-                        <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium text-gray-800">
-                          <GitBranch className="h-3.5 w-3.5 text-blue-500" />
-                          {wf.version_label}
-                        </span>
+                      {/* Version */}
+                      <td className="px-3 py-3">
+                        <div className="font-mono text-[12px] font-medium text-gray-800">{cur.version_label}</div>
+                        <div className="mt-0.5 text-[11px] text-gray-500">{statusText(cur, row.live?.version_label)}</div>
+                      </td>
 
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize ${statusBadge[wf.status]}`}>
-                          {wf.status}
-                          {live && <span className="ml-0.5 rounded bg-emerald-600 px-1 text-[9px] font-bold uppercase text-white">active</span>}
-                        </span>
+                      {/* Updated */}
+                      <td className="px-3 py-3 text-[11px] text-gray-500">{versionDate(cur)}</td>
 
-                        <div className="flex items-center gap-3 text-[11px] text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <Layers className="h-3 w-3 text-gray-400" />
-                            {wf.definition?.states?.length ?? 0} states
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <GitFork className="h-3 w-3 text-gray-400" />
-                            {branches} routes
-                          </span>
-                          {wf.created_at && (
-                            <span className="flex items-center gap-1">
-                              <CalendarClock className="h-3 w-3 text-gray-400" />
-                              {new Date(wf.created_at).toLocaleString()}
-                            </span>
+                      {/* Actions */}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {hasHistory && (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(row.entityType)}
+                              className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                              title={isExpanded ? 'Hide version history' : 'View version history'}
+                            >
+                              {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              <History className="h-3.5 w-3.5" />
+                            </button>
                           )}
-                        </div>
-
-                        <div className="ml-auto flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => onEdit(wf)}
-                            className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                            title={live ? 'Edit (forks a new draft)' : 'Edit workflow'}
+                            onClick={() => onEdit(cur)}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                            title={cur.status === 'published' ? 'Edit (forks a new draft)' : 'Edit workflow'}
                           >
                             <Pencil className="h-3.5 w-3.5" /> Edit
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(wf)}
-                            disabled={deleting === wf.id}
-                            className="flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
-                            title="Delete workflow"
+                            onClick={() => handleDelete(cur)}
+                            disabled={isLive}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
+                            title={isLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
                           >
-                            {deleting === wf.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                            {deleting === cur.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </button>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                      </td>
+                    </tr>,
+                    isExpanded && hasHistory ? (
+                      <tr key={`${cur.id}-history`}>
+                        <td colSpan={4} className="bg-gray-50/40 px-4 py-3">
+                          <div className="divide-y divide-gray-100">
+                            {row.history.map((v) => {
+                            const vLive = row.live?.id === v.id;
+                            return (
+                              <div key={v.id} className="flex flex-wrap items-center gap-3 py-2">
+                                <span className="flex items-center gap-2 font-mono text-[12px] font-medium text-gray-700">
+                                  <GitBranch className="h-3.5 w-3.5 text-gray-400" />
+                                  {v.version_label}
+                                </span>
+                                <span className="text-[11px] text-gray-500">{statusText(v)}</span>
+                                <span className="text-[11px] text-gray-500">{versionDate(v)}</span>
+                                <div className="ml-auto flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => onEdit(v)}
+                                    className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                    title={v.status === 'published' ? 'Edit (forks a new draft)' : 'Edit workflow'}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(v)}
+                                    disabled={vLive}
+                                    className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
+                                    title={vLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
+                                  >
+                                    {deleting === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null,
+                  ];
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

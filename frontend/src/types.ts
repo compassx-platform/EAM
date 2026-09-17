@@ -178,10 +178,43 @@ export type GenericFieldType =
 export interface EntityField {
   entity_type: string;
   field_name: string;
-  field_type: 'text' | 'number' | 'date' | 'select' | 'entity_reference';
+  field_type: EntityFieldType;
+  /** Human-readable label (used by the entity designer + auto-generated forms). */
+  label?: string | null;
   required: boolean;
   select_options: string[];
   /** Central published list referenced for a select field's options. */
+  option_list_key?: string | null;
+  reference_entity_type?: string | null;
+}
+
+/** Registry field types — double as the form widget catalog. `select` renders as a dropdown. */
+export type EntityFieldType =
+  | 'text'
+  | 'long_text'
+  | 'email'
+  | 'phone'
+  | 'url'
+  | 'number'
+  | 'date'
+  | 'datetime'
+  | 'time'
+  | 'boolean'
+  | 'select'
+  | 'selection'
+  | 'checkbox_group'
+  | 'entity_reference'
+  | 'table'
+  | 'checklist'
+  | 'file';
+
+/** Field schema submitted when creating an entity via the wizard. */
+export interface EntityFieldInput {
+  field_name: string;
+  field_type: EntityFieldType;
+  label?: string | null;
+  required?: boolean;
+  select_options?: string[];
   option_list_key?: string | null;
   reference_entity_type?: string | null;
 }
@@ -354,4 +387,21 @@ export interface ListUsage {
   form_items: Array<{ entity_type: string; item_id: string }>;
   field_count: number;
   form_item_count: number;
+}
+
+export interface EntityTypeDefinition {
+  name: string;
+  display_name: string;
+  description: string;
+  icon: string;
+  is_system: boolean;
+  field_count?: number;
+  workflow_count?: number;
+  condition_count?: number;
+  form_count?: number;
+  record_count?: number;
+  has_published_workflow?: boolean;
+  has_form?: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
 }

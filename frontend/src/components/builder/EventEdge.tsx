@@ -81,13 +81,17 @@ function EventEdge({
           }}
         >
           {isRouterBranch ? (
-            <div className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-gray-700 shadow-sm pointer-events-none select-none">
-              <span>{isTrue ? 'TRUE' : isFalse ? 'FALSE' : event}</span>
+            <div
+              className="flex max-w-[220px] items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-0.5 font-mono text-[10px] font-bold tracking-wider text-gray-700 shadow-2xs pointer-events-none select-none truncate"
+              title={isTrue ? 'TRUE' : isFalse ? 'FALSE' : event}
+            >
+              <span className="truncate">{isTrue ? 'TRUE' : isFalse ? 'FALSE' : event}</span>
             </div>
           ) : (
             <>
               <input
                 value={value}
+                title={value || event}
                 onChange={(e) => setValue(e.target.value)}
                 onBlur={commit}
                 onKeyDown={(e) => {
@@ -98,17 +102,20 @@ function EventEdge({
                   }
                 }}
                 placeholder="EVENT"
-                className="rounded border border-blue-200 bg-white px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold tracking-wide text-blue-700 shadow-sm outline-none focus:border-blue-500"
-                style={{ width: 'auto', minWidth: '4rem' }}
+                style={{
+                  width: `${Math.max(5, (value || 'EVENT').length + 2.5)}ch`,
+                  maxWidth: '220px',
+                }}
+                className="nodrag nopan rounded border border-gray-200 bg-white px-2 py-0.5 text-center font-mono text-[10px] font-semibold tracking-wide text-gray-700 shadow-2xs outline-none transition-colors hover:border-gray-300 focus:border-blue-500 focus:text-blue-700 focus:ring-1 focus:ring-blue-500/20 truncate"
               />
               <div className="flex items-center gap-0.5">
                 {branching && (
-                  <span className="flex items-center gap-0.5 rounded bg-orange-100 px-1 py-px text-[9px] font-semibold text-orange-700">
+                  <span className="flex items-center gap-0.5 rounded bg-orange-50 border border-orange-200 px-1 py-px text-[9px] font-semibold text-orange-700">
                     <GitFork className="h-2.5 w-2.5" /> {branchCount}
                   </span>
                 )}
                 {guarded && (
-                  <span className="flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold text-amber-700">
+                  <span className="flex items-center gap-0.5 rounded bg-amber-50 border border-amber-200 px-1 py-px text-[9px] font-semibold text-amber-700">
                     <ShieldCheck className="h-2.5 w-2.5" /> condition
                   </span>
                 )}

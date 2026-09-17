@@ -55,10 +55,12 @@ export function FormList({ onBuild }: FormListProps) {
       api.listForms(),
       api.listFields(),
       api.listConditions().catch(() => [] as ConditionDefinition[]),
+      api.listEntityTypes().catch(() => []),
     ])
-      .then(async ([formList, allFields, allConditions]) => {
+      .then(async ([formList, allFields, allConditions, allEntityTypes]) => {
         setForms(formList);
-        setKnownTypes([...new Set(allFields.map((f) => f.entity_type))].sort());
+        const registered = allEntityTypes.map((et: any) => et.name);
+        setKnownTypes([...new Set([...registered, ...allFields.map((f) => f.entity_type)])].sort());
 
         // Condition count by entity type
         const condCounts: Record<string, number> = {};
@@ -167,7 +169,13 @@ export function FormList({ onBuild }: FormListProps) {
             {!creatingOpen ? (
               <button
                 type="button"
-                onClick={() => setCreatingOpen(true)}
+                onClick={() => {
+                  if (!newType && candidates.length > 0) {
+                    const unbuilt = candidates.find((c) => !forms.some((f) => f.entity_type === c));
+                    setNewType(unbuilt || candidates[0]);
+                  }
+                  setCreatingOpen(true);
+                }}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 transition-colors"
               >
                 <Plus className="h-4 w-4" />
@@ -175,27 +183,29 @@ export function FormList({ onBuild }: FormListProps) {
               </button>
             ) : (
               <div className="flex items-center gap-2">
-                <input
+                <select
                   autoFocus
                   value={newType}
                   onChange={(e) => setNewType(e.target.value)}
-                  placeholder="entity type (e.g. training)"
-                  list="form-entity-types"
-                  onKeyDown={(e) => e.key === 'Enter' && startBuild(newType)}
-                  className="w-48 rounded-lg border border-gray-300 px-2.5 py-1.5 font-mono text-xs text-gray-800 focus:border-blue-500 focus:outline-none shadow-xs"
-                />
-                <datalist id="form-entity-types">
-                  {candidates.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
+                  className="w-48 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 focus:border-blue-500 focus:outline-none shadow-xs"
+                >
+                  <option value="" disabled>Select entity type…</option>
+                  {candidates.map((t) => {
+                    const hasForm = forms.some((f) => f.entity_type === t);
+                    return (
+                      <option key={t} value={t}>
+                        {typeLabel(t)} ({t}){hasForm ? ' · Form exists' : ''}
+                      </option>
+                    );
+                  })}
+                </select>
                 <button
                   type="button"
                   onClick={() => startBuild(newType)}
                   disabled={!newType.trim()}
                   className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50 transition-colors shadow-xs"
                 >
-                  Build
+                  Design Form
                 </button>
                 <button
                   type="button"
@@ -203,7 +213,7 @@ export function FormList({ onBuild }: FormListProps) {
                     setCreatingOpen(false);
                     setNewType('');
                   }}
-                  className="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-xs"
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-xs"
                 >
                   Cancel
                 </button>

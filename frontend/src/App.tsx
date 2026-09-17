@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react';
 import { WorkflowList } from './components/WorkflowList';
 import { WorkflowBuilder } from './components/builder/WorkflowBuilder';
-import { EntityConsole } from './components/runtime/EntityConsole';
+import { EntitiesView } from './components/entities/EntitiesView';
+import { EntityDesigner } from './components/entities/EntityDesigner';
+import { RuntimeWorkspace } from './components/runtime/RuntimeWorkspace';
 import { EntityCreateForm } from './components/runtime/EntityCreateForm';
 import { FormList } from './components/forms/FormList';
 import { FormBuilder } from './components/forms/FormBuilder';
@@ -9,10 +11,10 @@ import { ListsView } from './components/lists/ListsView';
 import { ListEditor } from './components/lists/ListEditor';
 import { ConditionList } from './components/conditions/ConditionList';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck } from 'lucide-react';
+import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
-type Tab = 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions';
+type Tab = 'records' | 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions';
 
 function App() {
   const route = useHashRoute();
@@ -20,18 +22,21 @@ function App() {
 
   const refreshList = useCallback(() => setListTick((t) => t + 1), []);
 
-  const tab: Tab = route.path.startsWith('/entities')
-    ? 'entities'
-    : route.path.startsWith('/forms')
-      ? 'forms'
-      : route.path.startsWith('/lists')
-        ? 'lists'
-        : route.path.startsWith('/conditions')
-          ? 'conditions'
-          : 'workflows';
+  const tab: Tab = route.path.startsWith('/records')
+    ? 'records'
+    : route.path.startsWith('/entities')
+      ? 'entities'
+      : route.path.startsWith('/forms')
+        ? 'forms'
+        : route.path.startsWith('/lists')
+          ? 'lists'
+          : route.path.startsWith('/conditions')
+            ? 'conditions'
+            : 'workflows';
 
   const switchTab = (t: Tab) => {
-    if (t === 'entities') navigate('/entities');
+    if (t === 'records') navigate('/records');
+    else if (t === 'entities') navigate('/entities');
     else if (t === 'forms') navigate('/forms');
     else if (t === 'lists') navigate('/lists');
     else if (t === 'conditions') navigate('/conditions');
@@ -42,8 +47,9 @@ function App() {
   const builderId = route.path === '/workflows/new' ? null : route.path.startsWith('/workflows/') ? route.id : undefined;
   const formType = route.path.startsWith('/forms/') ? route.id : null;
   const listKey = route.path.startsWith('/lists/') ? route.id : null;
+  const designerEntity = route.path === '/entities/design' ? null : route.path.startsWith('/entities/design/') ? route.id : undefined;
 
-  const isStudioMode = builderId !== undefined || formType !== null || listKey !== null;
+  const createType = route.path === '/create' ? route.query.get('type') : null;
 
   const navBtn = (t: Tab, label: string, Icon: typeof GitBranch) => (
     <button
@@ -54,7 +60,7 @@ function App() {
           : 'font-medium text-gray-600 hover:bg-white/60 hover:text-gray-900'
       }`}
     >
-      <Icon className={`h-3.5 w-3.5 ${tab === t ? 'text-blue-700' : 'text-gray-500'}`} />
+      <Icon className={`h-3.5 w-3.5 ${tab === t ? 'text-gray-800' : 'text-gray-500'}`} />
       <span>{label}</span>
     </button>
   );
@@ -65,7 +71,7 @@ function App() {
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200/80 bg-white px-5 shadow-xs">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-700 text-white shadow-xs">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-900 text-white shadow-xs">
               <GitBranch className="h-4 w-4" />
             </div>
             <span className="text-sm font-bold tracking-tight text-gray-900">CompassX EAM</span>
@@ -73,6 +79,7 @@ function App() {
 
           {/* Segmented Surface Navigation Bar */}
           <nav className="flex items-center gap-1 rounded-xl border border-gray-200/60 bg-gray-100/90 p-1">
+            {navBtn('records', 'Records', Inbox)}
             {navBtn('workflows', 'Workflows', GitBranch)}
             {navBtn('entities', 'Entities', Layers)}
             {navBtn('forms', 'Forms', PenTool)}
@@ -82,23 +89,28 @@ function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {tab === 'entities' && route.path === '/entities/new' && (
-            <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
-              New {route.query.get('type') || 'entity'}
+          {createType && (
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              New {createType}
+            </span>
+          )}
+          {tab === 'entities' && designerEntity !== undefined && (
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              Entity Designer
             </span>
           )}
           {tab === 'workflows' && builderId !== undefined && (
-            <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-600">
               Workflow Builder
             </span>
           )}
           {tab === 'forms' && formType !== null && (
-            <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
               Form Builder · {formType}
             </span>
           )}
           {tab === 'lists' && (
-            <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-blue-700">
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
               {listKey === 'new' ? 'New List' : listKey ? `List · ${listKey}` : 'Central Lists'}
             </span>
           )}
@@ -113,14 +125,18 @@ function App() {
           data-testid="workspace-surface"
           className="h-full w-full overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-xs flex flex-col min-h-0"
         >
-          {tab === 'entities' ? (
-            route.path === '/entities/new' ? (
-              <EntityCreateForm
-                entityType={route.query.get('type') || 'workorder'}
-                onBack={() => navigate('/entities', { type: route.query.get('type') || undefined })}
-              />
+          {createType !== null ? (
+            <EntityCreateForm
+              entityType={createType}
+              onBack={() => navigate('/records', { type: createType })}
+            />
+          ) : tab === 'records' ? (
+            <RuntimeWorkspace />
+          ) : tab === 'entities' ? (
+            designerEntity !== undefined ? (
+              <EntityDesigner entityName={designerEntity} />
             ) : (
-              <EntityConsole />
+              <EntitiesView />
             )
           ) : tab === 'forms' ? (
             formType !== null ? (
