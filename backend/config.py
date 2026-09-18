@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
     
-    # PostgreSQL Connection Parameters
+    # PostgreSQL Connection Parameters (Production Grade)
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_HOST: str = "localhost"
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "eam_db"
     
     # Database: Optional direct override or assembled PostgreSQL DSN
-    DATABASE_URL: str | None = os.getenv("DATABASE_URL", "sqlite:////tmp/app.db")
+    DATABASE_URL: str | None = None
     
     # Secret Key & Auth
     SECRET_KEY: str = "compassx-workflow-secret-key-2026"
@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     def sync_database_url(self) -> str:
         if self.DATABASE_URL:
             url = self.DATABASE_URL
+            if url.startswith("sqlite"):
+                raise ValueError("SQLite is not supported in production. CompassX EAM strictly requires PostgreSQL.")
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql+psycopg2://", 1)
             elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
@@ -45,3 +47,5 @@ class Settings(BaseSettings):
         return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 settings = Settings()
+
+

@@ -9,8 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.config import settings
-from backend.database import SessionLocal, engine, Base
-from backend.seed_data import seed_all
+from backend.database import SessionLocal, engine, Base, ensure_schema_compatibility
 from backend.services.expiry_worker import check_and_expire_permits
 from backend.routers import (
     auth_router,
@@ -42,15 +41,17 @@ async def periodic_expiry_checker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create tables and seed default data
+    # Startup: Ensure database schema exists without seeding any data or dropping existing records
     try:
+        Base.metadata.create_all(bind=engine)
         db = SessionLocal()
         try:
-            seed_all(db)
+            ensure_schema_compatibility(db)
         finally:
             db.close()
     except Exception as exc:
         print(f"[CompassX] Database startup initialization notice: {exc}")
+
 
     # Start background expiry task
     expiry_task = asyncio.create_task(periodic_expiry_checker())

@@ -4,8 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from backend.database import Base, get_db
-from backend.main import app
-from backend.seed_data import seed_all
+from tests.fixtures import load_test_fixtures
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability
 from backend.models.users import AppUser
 from backend.models.entities import WorkOrder

@@ -14,27 +14,17 @@ from backend.models.entity_type import EntityTypeDefinition
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
 
-def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
-    """Idempotently adds a nullable column to an existing table (create_all will not alter it)."""
-    try:
-        res = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
-        if not res:
-            return
-        cols = {row[1] for row in res}
-        if column in cols:
-            return
-        db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
-        db.commit()
-    except Exception:
-        db.rollback()
+from backend.database import ensure_schema_compatibility
 
-def seed_all(db: Session):
-    """Initializes schema and seeds baseline users, roles, fields, gates, workflows, and sample entities."""
+def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dict:
+    """
+    Initializes schema and seeds baseline users, roles, fields, conditions, workflows,
+    and optionally sample entities.
+    STRICTLY NON-DESTRUCTIVE: Never drops, truncates, deletes, or overwrites existing records.
+    """
     Base.metadata.create_all(bind=db.get_bind())
+    ensure_schema_compatibility(db)
 
-    # Lightweight schema backfills for pre-existing dev databases
-    _ensure_column(db, "entity_field", "label", "label VARCHAR(100)")
-    _ensure_column(db, "app_user", "person_id", "person_id VARCHAR(50)")
 
     # 0. Seed Default Entity Types
     default_entity_types = [
@@ -855,11 +845,19 @@ def seed_all(db: Session):
 
     db.commit()
 
-    # 5f. Seed central option/checklist lists and wire the permit_type field to one
-    seed_lists(db)
+    # 6. Seed Sample Live Entities if requested
+    if include_sample_entities:
+        seed_sample_entities(db)
 
-    # 6. Seed Sample Live Entities if none exist
-    seed_sample_entities(db)
+    return {
+        "entity_types": len(default_entity_types),
+        "roles": len(roles_data),
+        "persons": len(persons_data),
+        "fields": len(fields_data),
+        "conditions": len(conditions_data),
+        "sample_entities_seeded": include_sample_entities,
+    }
+
 
 
 def seed_permit_form_layout(db: Session):
@@ -1117,23 +1115,7 @@ def seed_sample_entities(db: Session):
         payload={"comment": "Hazardous work — will require approved permit before INPRG"}
     )
 
-    # Backfill legacy workorder custom_fields (e.g. "Charlie Stone" -> "CHARLIE.TECH")
-    for wo in db.query(WorkOrder).all():
-        cf = dict(wo.custom_fields or {})
-        changed = False
-        raw_assigned = cf.get("assigned_to")
-        if raw_assigned == "Charlie Stone":
-            cf["assigned_to"] = "CHARLIE.TECH"
-            changed = True
-        elif raw_assigned == "Shift Crew A":
-            cf["assigned_to"] = "CHARLIE.TECH"
-            cf["owner_group"] = "SHIFT_CREW_A"
-            changed = True
-        elif raw_assigned == "Maintenance Crew B":
-            cf["assigned_to"] = "CHARLIE.TECH"
-            cf["owner_group"] = "MAINT_CREW_B"
-            changed = True
-        if changed:
-            wo.custom_fields = cf
-
     db.commit()
+
+
+seed_all = load_test_fixtures

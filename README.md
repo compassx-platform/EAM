@@ -35,14 +35,20 @@ Built strictly according to the **[CompassX Workflow Engine — v1 Spec](compass
 
 ## 2. Quickstart & Running Locally
 
-### Backend (FastAPI + PostgreSQL / SQLite)
+### Backend (FastAPI + PostgreSQL)
 
 ```bash
 # 1. Install dependencies
 cd backend
 pip install -r requirements.txt
 
-# 2. Run backend server (defaults to local SQLite or connects to Postgres via DATABASE_URL)
+# 2. Configure PostgreSQL environment (or set via .env)
+export DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/eam_db"
+
+# 3. Run database migrations
+alembic upgrade head
+
+# 4. Run backend server
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
@@ -70,19 +76,15 @@ Frontend will be available at `http://localhost:5173`.
 
 ## 3. Automated Test Suite
 
-Run pytest test suite verifying all 5 gate types, optimistic concurrency, draft validation, projector rebuilds, and the complete §13 Step 12 checkpoint scenario:
+Run pytest test suite verifying all condition logic, optimistic concurrency, draft validation, projector rebuilds, and workflow execution against PostgreSQL:
 
 ```bash
-python -m pytest -v tests
+PYTHONPATH=. pytest -v tests
 ```
 
 ---
 
-## 4. Default Seed Personas (RBAC)
+## 4. Production Database & RBAC
 
-Use the top-right Persona Switcher in the UI to test role-gated transitions:
-- **Alex Admin** (`admin@compassx.io`): `Admin` (Bypasses all role gates)
-- **Alice Vance** (`alice.safety@compassx.io`): `Safety Officer` (Issues Permits)
-- **Bob Miller** (`bob.supervisor@compassx.io`): `Supervisor` (Approves Work Orders)
-- **Charlie Stone** (`charlie.tech@compassx.io`): `Technician` (Creates & Executes Work)
-- **Diana Ross** (`diana.manager@compassx.io`): `Manager`, `Supervisor`
+The application starts with a clean production schema on PostgreSQL. Administrative users, roles, workflows, entity types, and forms can be configured directly via the Admin API and UI.
+

@@ -1,38 +1,43 @@
+import os
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from backend.database import Base, get_db
 from backend.main import app
-from backend.seed_data import seed_all
+from tests.fixtures import load_test_fixtures
 
-TEST_DATABASE_URL = "sqlite:///:memory:"
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+psycopg2://postgres:postgres@localhost:5432/eam_test_db"
+)
+
+test_engine = create_engine(
+    TEST_DATABASE_URL,
+    poolclass=NullPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 @pytest.fixture(scope="function")
 def test_db():
-    engine = create_engine(
-        TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
     db = TestingSessionLocal()
     
-    # Run seed
-    seed_all(db)
+    # Load test fixtures
+    load_test_fixtures(db)
     
     yield db
     
     db.close()
-    Base.metadata.drop_all(bind=engine)
+    Base.metadata.drop_all(bind=test_engine)
 
 @pytest.fixture(scope="function")
 def client(test_db, monkeypatch):
     monkeypatch.setattr("backend.main.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("backend.database.SessionLocal", lambda: test_db)
     def override_get_db():
         try:
             yield test_db
