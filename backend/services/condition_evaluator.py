@@ -38,9 +38,9 @@ from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.models.conditions import ConditionDefinition
-from backend.models.users import AppUser
 from backend.models.entities import get_entity_models
 from backend.services.expression import evaluate_arithmetic, ExpressionError
+from backend.services.actor import resolve_actor_roles
 
 # Comparison operators understood by the generic attribute atom.
 _ATTR_OPS = {"eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "contains", "starts_with", "ends_with", "is_empty", "is_not_empty"}
@@ -126,13 +126,7 @@ def _apply_numeric_op(op: str, left: float, right: float) -> bool:
 
 
 def _resolve_actor_roles(db: Session, actor_id: str, actor_roles: Optional[List[str]]) -> List[str]:
-    if actor_roles:
-        return list(actor_roles)
-    if actor_id:
-        user = db.query(AppUser).filter((AppUser.email == actor_id) | (AppUser.id == actor_id)).first()
-        if user:
-            return [r.name for r in user.roles]
-    return []
+    return resolve_actor_roles(db, actor_id, actor_roles)
 
 
 def evaluate_atom(atom: Dict[str, Any], db: Session, custom_fields: Dict[str, Any], actor_id: str, actor_type: str, actor_roles: Optional[List[str]] = None) -> Tuple[bool, str]:
@@ -270,8 +264,31 @@ def evaluate_atom(atom: Dict[str, Any], db: Session, custom_fields: Dict[str, An
             return passed, f"Expression '{expression}' = {left} {op} threshold ({right_label})"
         except ExpressionError as ex:
             return False, f"Expression error: {ex.message}"
+    if atom_type == "person_group":
+        rel_field = atom.get("relationship_field") or "assigned_to"
+        group_name = atom.get("group") or atom.get("group_name")
+        person_id = custom_fields.get(rel_field)
+        if not person_id:
+            return False, f"No person assigned in field '{rel_field}'"
+        if not group_name:
+            return False, "No target group specified in person_group rule"
+        try:
+            from backend.models.person import Person, PersonGroupMember
+            member = (
+                db.query(PersonGroupMember)
+                .join(Person, Person.person_id == PersonGroupMember.person_id)
+                .filter(
+                    PersonGroupMember.group_name == str(group_name).strip().upper(),
+                    PersonGroupMember.person_id == str(person_id).strip().upper(),
+                    Person.status == "ACTIVE",
+                )
+                .first()
+            )
+            if member:
+                return True, f"Person '{person_id}' is an active member of group '{group_name}'"
+            return False, f"Person '{person_id}' is not an active member of group '{group_name}'"
         except Exception as ex:
-            return False, f"Expression evaluation exception: {str(ex)}"
+            return False, f"Error evaluating person_group rule: {str(ex)}"
 
     return False, f"Unknown rule type '{atom_type}'"
 

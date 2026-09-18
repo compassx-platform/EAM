@@ -82,7 +82,7 @@ function makeGroup(): DraftGroupNode {
 
 // ---- Import / export ------------------------------------------------------
 function importNode(node: ConditionGroup['rules'][number]): DraftNode {
-  if (node && typeof node === 'object' && 'group' in node && node.group) {
+  if (node && typeof node === 'object' && !('type' in node) && 'group' in node && node.group && typeof node.group === 'object') {
     return { group: importGroup(node.group) };
   }
   const atom = node as ConditionAtom;

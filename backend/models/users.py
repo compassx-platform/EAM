@@ -19,6 +19,9 @@ class AppUser(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     display_name = Column(String(255), nullable=False)
     password_hash = Column(String(255), nullable=True)
+    # IBM Maximo alignment: every user is backed by a Person (PERSONID = User ID
+    # in capital letters). 1:1 — a person record can exist without a user.
+    person_id = Column(String(50), ForeignKey("person.person_id"), nullable=True, unique=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
@@ -29,6 +32,7 @@ class AppUser(Base):
             "id": self.id,
             "email": self.email,
             "display_name": self.display_name,
+            "person_id": self.person_id,
             "active": self.active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "roles": [role.name for role in self.roles],

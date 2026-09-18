@@ -16,6 +16,7 @@ import {
   ListFilter,
   Paperclip,
   Settings2,
+  Table2,
 } from 'lucide-react';
 import type {
   EntityFormItem,
@@ -270,14 +271,12 @@ function ItemVisibilityModal({
 
 function CustomOptionsModal({
   title,
-  isTable,
   options,
   anchorY,
   onSave,
   onClose,
 }: {
   title: string;
-  isTable: boolean;
   options: string[];
   anchorY?: number | null;
   onSave: (options: string[]) => void;
@@ -316,7 +315,7 @@ function CustomOptionsModal({
 
   const handleAdd = () => {
     const n = currentOpts.length + 1;
-    const next = [...currentOpts, isTable ? `Column ${n}` : `Option ${n}`];
+    const next = [...currentOpts, `Option ${n}`];
     onSave(next);
   };
 
@@ -334,9 +333,7 @@ function CustomOptionsModal({
       )}
       <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
         <div>
-          <h3 className="text-sm font-bold text-gray-900">
-            {isTable ? 'Edit Table Columns' : 'Edit Choices'}
-          </h3>
+          <h3 className="text-sm font-bold text-gray-900">Edit Choices</h3>
           <p className="text-xs text-gray-500 truncate max-w-[260px]">
             {title} &bull; Form-specific choices
           </p>
@@ -378,8 +375,268 @@ function CustomOptionsModal({
           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 py-2 text-xs font-medium text-gray-600 hover:border-blue-400 hover:bg-blue-50/50 hover:text-blue-700 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
-          <span>{isTable ? 'Add Column' : 'Add Option'}</span>
+          <span>Add Option</span>
         </button>
+      </div>
+
+      <div className="flex items-center justify-end border-t border-gray-100 bg-gray-50/50 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg bg-blue-600 px-4 py-1 text-xs font-semibold text-white shadow-xs hover:bg-blue-700"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TableConfigModal({
+  title,
+  options,
+  minRows,
+  maxRows,
+  allowAddRows = true,
+  allowDeleteRows = true,
+  emptyStateText,
+  anchorY,
+  onSave,
+  onClose,
+}: {
+  title: string;
+  options: string[];
+  minRows?: number | null;
+  maxRows?: number | null;
+  allowAddRows?: boolean;
+  allowDeleteRows?: boolean;
+  emptyStateText?: string | null;
+  anchorY?: number | null;
+  onSave: (patch: {
+    options?: string[];
+    minRows?: number | null;
+    maxRows?: number | null;
+    allowAddRows?: boolean;
+    allowDeleteRows?: boolean;
+    emptyStateText?: string | null;
+  }) => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const { top, arrowTop } = computeAnchoredDialogStyle(anchorY, 520);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleOutside);
+    }, 10);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleOutside);
+    };
+  }, [onClose]);
+
+  const currentCols = options && options.length > 0 ? options : ['Column 1', 'Column 2', 'Column 3'];
+
+  const handleUpdateCol = (idx: number, val: string) => {
+    const next = [...currentCols];
+    next[idx] = val;
+    onSave({ options: next });
+  };
+
+  const handleRemoveCol = (idx: number) => {
+    if (currentCols.length <= 1) return;
+    const next = currentCols.filter((_, i) => i !== idx);
+    onSave({ options: next });
+  };
+
+  const handleAddCol = () => {
+    const n = currentCols.length + 1;
+    const next = [...currentCols, `Column ${n}`];
+    onSave({ options: next });
+  };
+
+  const handleMoveCol = (idx: number, dir: -1 | 1) => {
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= currentCols.length) return;
+    const next = [...currentCols];
+    const temp = next[idx];
+    next[idx] = next[targetIdx];
+    next[targetIdx] = temp;
+    onSave({ options: next });
+  };
+
+  return (
+    <div
+      ref={dialogRef}
+      style={{ top: `${top}px` }}
+      className="fixed right-[332px] z-40 flex max-h-[88vh] w-[400px] flex-col rounded-xl border border-gray-200 bg-white shadow-2xl origin-right animate-in fade-in zoom-in-95 duration-150"
+    >
+      {arrowTop !== null && (
+        <div
+          className="pointer-events-none absolute -right-[7px] z-10 h-3.5 w-3.5 rotate-45 border-r border-t border-gray-200 bg-white"
+          style={{ top: `${arrowTop}px` }}
+        />
+      )}
+      <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900">Table Configuration</h3>
+          <p className="text-xs text-gray-500 truncate max-w-[280px]">
+            {title} &bull; Columns &amp; row rules
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        {/* Columns Management */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Columns ({currentCols.length})
+            </span>
+            <span className="text-[10px] text-gray-400">Header names &amp; order</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {currentCols.map((col, idx) => (
+              <div key={idx} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/50 p-1.5">
+                <span className="w-5 text-center font-mono text-xs text-gray-400">
+                  {idx + 1}.
+                </span>
+                <input
+                  type="text"
+                  value={col}
+                  onChange={(e) => handleUpdateCol(idx, e.target.value)}
+                  placeholder={`Column ${idx + 1}`}
+                  className="flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={idx === 0}
+                  onClick={() => handleMoveCol(idx, -1)}
+                  title="Move left/up"
+                  className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={idx === currentCols.length - 1}
+                  onClick={() => handleMoveCol(idx, 1)}
+                  title="Move right/down"
+                  className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={currentCols.length <= 1}
+                  onClick={() => handleRemoveCol(idx)}
+                  title={currentCols.length <= 1 ? 'Table must have at least one column' : 'Remove column'}
+                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAddCol}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 py-2 text-xs font-medium text-gray-600 hover:border-blue-400 hover:bg-blue-50/50 hover:text-blue-700 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Add Column</span>
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-gray-100" />
+
+        {/* Row Settings & Limits */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Row Behavior &amp; Constraints
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-gray-600">Minimum Rows</label>
+              <input
+                type="number"
+                min="0"
+                value={minRows ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? null : Math.max(0, parseInt(e.target.value, 10));
+                  onSave({ minRows: Number.isNaN(val) ? null : val });
+                }}
+                placeholder="0 (no minimum)"
+                className={INPUT_CLS}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-gray-600">Maximum Rows</label>
+              <input
+                type="number"
+                min="1"
+                value={maxRows ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value === '' ? null : Math.max(1, parseInt(e.target.value, 10));
+                  onSave({ maxRows: Number.isNaN(val) ? null : val });
+                }}
+                placeholder="Unlimited"
+                className={INPUT_CLS}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-medium text-gray-600">Empty State Prompt</label>
+            <input
+              type="text"
+              value={emptyStateText ?? ''}
+              onChange={(e) => onSave({ emptyStateText: e.target.value || null })}
+              placeholder="e.g. No rows yet — click “Add row”."
+              className={INPUT_CLS}
+            />
+          </div>
+
+          <div className="space-y-2 pt-1">
+            <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowAddRows}
+                onChange={(e) => onSave({ allowAddRows: e.target.checked })}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Allow users to add dynamic rows at runtime</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowDeleteRows}
+                onChange={(e) => onSave({ allowDeleteRows: e.target.checked })}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Allow users to remove rows at runtime</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div className="flex items-center justify-end border-t border-gray-100 bg-gray-50/50 px-4 py-2.5">
@@ -500,8 +757,26 @@ function FileUploadRulesModal({
             type="number"
             min={1}
             max={100}
-            value={maxFileSizeMb ?? 10}
-            onChange={(e) => onSave({ maxFileSizeMb: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+            value={maxFileSizeMb !== null && maxFileSizeMb !== undefined ? maxFileSizeMb : ''}
+            placeholder="10"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') {
+                onSave({ maxFileSizeMb: null as any });
+              } else {
+                const parsed = parseInt(raw, 10);
+                if (!Number.isNaN(parsed)) {
+                  onSave({ maxFileSizeMb: parsed });
+                }
+              }
+            }}
+            onBlur={() => {
+              if (maxFileSizeMb === null || maxFileSizeMb === undefined || maxFileSizeMb < 1) {
+                onSave({ maxFileSizeMb: 10 });
+              } else if (maxFileSizeMb > 100) {
+                onSave({ maxFileSizeMb: 100 });
+              }
+            }}
             className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
           />
         </div>
@@ -524,10 +799,28 @@ function FileUploadRulesModal({
             <label className="text-xs font-semibold text-gray-700">Max Number of Files</label>
             <input
               type="number"
-              min={2}
+              min={1}
               max={50}
-              value={maxFiles ?? 5}
-              onChange={(e) => onSave({ maxFiles: Math.max(2, parseInt(e.target.value, 10) || 2) })}
+              value={maxFiles !== null && maxFiles !== undefined ? maxFiles : ''}
+              placeholder="5"
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') {
+                  onSave({ maxFiles: null as any });
+                } else {
+                  const parsed = parseInt(raw, 10);
+                  if (!Number.isNaN(parsed)) {
+                    onSave({ maxFiles: parsed });
+                  }
+                }
+              }}
+              onBlur={() => {
+                if (maxFiles === null || maxFiles === undefined || maxFiles < 1) {
+                  onSave({ maxFiles: 5 });
+                } else if (maxFiles > 50) {
+                  onSave({ maxFiles: 50 });
+                }
+              }}
               className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
             />
           </div>
@@ -659,8 +952,23 @@ function GeneralSettingsModal({
                 type="number"
                 min={1}
                 max={cols}
-                value={w}
-                onChange={(e) => onSave({ w: Math.max(1, Math.min(cols, Number(e.target.value) || 1)) })}
+                value={w !== null && w !== undefined && w !== ('' as any) ? w : ''}
+                placeholder="6"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    onSave({ w: '' as any });
+                  } else {
+                    const parsed = parseInt(raw, 10);
+                    if (!Number.isNaN(parsed)) {
+                      onSave({ w: parsed });
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  const num = Number(w) || 1;
+                  onSave({ w: Math.max(1, Math.min(cols, num)) });
+                }}
                 className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
               />
             </div>
@@ -670,8 +978,23 @@ function GeneralSettingsModal({
                 type="number"
                 min={1}
                 max={20}
-                value={h}
-                onChange={(e) => onSave({ h: Math.max(1, Number(e.target.value) || 1) })}
+                value={h !== null && h !== undefined && h !== ('' as any) ? h : ''}
+                placeholder="1"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    onSave({ h: '' as any });
+                  } else {
+                    const parsed = parseInt(raw, 10);
+                    if (!Number.isNaN(parsed)) {
+                      onSave({ h: parsed });
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  const num = Number(h) || 1;
+                  onSave({ h: Math.max(1, Math.min(20, num)) });
+                }}
                 className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
               />
             </div>
@@ -725,7 +1048,7 @@ export function FormInspector({
 }: FormInspectorProps) {
   // Modal state tracker
   const [activeModal, setActiveModal] = useState<
-    'visibility' | 'custom_options' | 'file_rules' | 'general_settings' | null
+    'visibility' | 'custom_options' | 'file_rules' | 'general_settings' | 'table_config' | null
   >(null);
   const [modalAnchorY, setModalAnchorY] = useState<number | null>(null);
   const [optionsPickerOpen, setOptionsPickerOpen] = useState(false);
@@ -1165,9 +1488,10 @@ export function FormInspector({
   // 3. Regular Form Field Inspector
   // -------------------------------------------------------------------------
   const fieldType = selectedItem.fieldType || 'text';
-  const isOptionsType = ['selection', 'checkbox_group', 'dropdown', 'table', 'checklist'].includes(
+  const isOptionsType = ['selection', 'checkbox_group', 'dropdown', 'checklist'].includes(
     fieldType
   );
+  const isTableType = fieldType === 'table';
   const isFileType = ['file', 'file_attachment', 'attachment'].includes(fieldType);
 
   const optionLists = publishedLists.filter((l) => l.kind === 'options');
@@ -1216,7 +1540,7 @@ export function FormInspector({
         </InspectorField>
 
         {/* Placeholder (if plain text / number input) */}
-        {!isOptionsType && !isFileType && (
+        {!isOptionsType && !isFileType && !isTableType && (
           <InspectorField label="Placeholder / Prompt">
             <input
               value={selectedItem.placeholder ?? ''}
@@ -1228,7 +1552,87 @@ export function FormInspector({
         )}
 
         {/* -------------------------------------------------------------------
-            High-Level Section 1: Options & Choices (Progressive 1-Level)
+            High-Level Section 1A: Table Configuration (Progressive 1-Level)
+        ------------------------------------------------------------------- */}
+        {isTableType && (
+          <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Table2 className="h-3.5 w-3.5 text-blue-700" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                  Table Configuration
+                </span>
+                <InfoTooltip text="Configure dynamic grid columns, headers, and row constraints." />
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  const anchor =
+                    e.currentTarget.getBoundingClientRect().top +
+                    e.currentTarget.getBoundingClientRect().height / 2;
+                  setModalAnchorY(anchor);
+                  setActiveModal('table_config');
+                }}
+                title="Configure table columns & row rules"
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              >
+                <MoreVertical className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5 rounded-lg border border-gray-200/80 bg-gray-50/60 p-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-gray-700">
+                  {(selectedItem.options?.length ?? 0) === 0
+                    ? '3 columns (default)'
+                    : `${selectedItem.options?.length} column${(selectedItem.options?.length ?? 0) === 1 ? '' : 's'}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const anchor =
+                      e.currentTarget.getBoundingClientRect().top +
+                      e.currentTarget.getBoundingClientRect().height / 2;
+                    setModalAnchorY(anchor);
+                    setActiveModal('table_config');
+                  }}
+                  className="text-[11px] font-medium text-blue-600 hover:underline"
+                >
+                  Edit columns
+                </button>
+              </div>
+
+              {/* Column pill preview */}
+              <div className="flex flex-wrap gap-1">
+                {(selectedItem.options && selectedItem.options.length > 0
+                  ? selectedItem.options
+                  : ['Column 1', 'Column 2', 'Column 3']
+                ).map((col, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center rounded border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-gray-600"
+                  >
+                    {col}
+                  </span>
+                ))}
+              </div>
+
+              {/* Row rules subtext if configured */}
+              {(selectedItem.minRows || selectedItem.maxRows || selectedItem.allowAddRows === false || selectedItem.allowDeleteRows === false) && (
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-gray-200/60 pt-1 text-[10px] text-gray-500">
+                  {selectedItem.minRows ? <span>Min: {selectedItem.minRows}</span> : null}
+                  {selectedItem.maxRows ? <span>Max: {selectedItem.maxRows}</span> : null}
+                  {selectedItem.allowAddRows === false ? <span>Add: disabled</span> : null}
+                  {selectedItem.allowDeleteRows === false ? <span>Delete: disabled</span> : null}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* -------------------------------------------------------------------
+            High-Level Section 1B: Options & Choices (Progressive 1-Level)
         ------------------------------------------------------------------- */}
         {isOptionsType && (
           <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
@@ -1741,10 +2145,24 @@ export function FormInspector({
         />
       )}
 
+      {activeModal === 'table_config' && isTableType && (
+        <TableConfigModal
+          title={selectedItem.label ?? 'Table Field'}
+          options={selectedItem.options ?? []}
+          minRows={selectedItem.minRows}
+          maxRows={selectedItem.maxRows}
+          allowAddRows={selectedItem.allowAddRows ?? true}
+          allowDeleteRows={selectedItem.allowDeleteRows ?? true}
+          emptyStateText={selectedItem.emptyStateText}
+          anchorY={modalAnchorY}
+          onSave={(patch) => onPatchItem(selectedItem.i, patch)}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
       {activeModal === 'custom_options' && (
         <CustomOptionsModal
           title={selectedItem.label ?? 'Field'}
-          isTable={fieldType === 'table'}
           options={selectedItem.options ?? []}
           anchorY={modalAnchorY}
           onSave={(opts) => onPatchItem(selectedItem.i, { options: opts })}
@@ -1774,7 +2192,7 @@ export function FormInspector({
           h={selectedItem.h}
           cols={cols}
           required={selectedItem.required}
-          showPlaceholder={!isOptionsType && !isFileType}
+          showPlaceholder={!isOptionsType && !isFileType && !isTableType}
           anchorY={modalAnchorY}
           onSave={(patch) => onPatchItem(selectedItem.i, patch)}
           onClose={() => setActiveModal(null)}

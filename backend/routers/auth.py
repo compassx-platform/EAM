@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.users import AppUser, AppRole, app_user_role
+from backend.models.person import Person
 from backend.models.base import generate_uuid
 
 router = APIRouter(prefix="/auth", tags=["Auth & RBAC"])
@@ -20,8 +21,29 @@ class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str
+    person_id: Optional[str] = None
     active: bool
     roles: List[str]
+
+def _default_person_id(email: str) -> str:
+    """Maximo PERSONID = the User ID (the login id) in capital letters."""
+    return email.strip().upper()
+
+def _ensure_person_for_user(db: Session, email: str, display_name: str) -> Person:
+    """Creates/returns the backing Person for an app user (1:1, Maximo suite sync)."""
+    pid = _default_person_id(email)
+    person = db.query(Person).filter(Person.person_id == pid).first()
+    if not person:
+        person = Person(
+            person_id=pid,
+            display_name=display_name,
+            primary_email=email.strip().lower(),
+            status="ACTIVE",
+            created_by="system",
+        )
+        db.add(person)
+        db.flush()
+    return person
 
 @router.get("/users", response_model=List[UserResponse])
 def list_users(db: Session = Depends(get_db)):
@@ -31,6 +53,7 @@ def list_users(db: Session = Depends(get_db)):
             id=u.id,
             email=u.email,
             display_name=u.display_name,
+            person_id=u.person_id,
             active=u.active,
             roles=[r.name for r in u.roles]
         )
@@ -66,18 +89,23 @@ def create_user(req: UserCreateRequest, db: Session = Depends(get_db)):
         active=True
     )
     db.add(user)
-    
+
     # Assign roles
     if req.roles:
         roles = db.query(AppRole).filter(AppRole.name.in_(req.roles)).all()
         user.roles = roles
-        
+
+    # Every user is backed by a Person (IBM Maximo: PERSONID = User ID in caps)
+    person = _ensure_person_for_user(db, user.email, user.display_name)
+    user.person_id = person.person_id
+
     db.commit()
     db.refresh(user)
     return UserResponse(
         id=user.id,
         email=user.email,
         display_name=user.display_name,
+        person_id=user.person_id,
         active=user.active,
         roles=[r.name for r in user.roles]
     )
@@ -102,6 +130,7 @@ def get_current_actor(
         return {
             "actor_id": user.email,
             "display_name": user.display_name,
+            "person_id": user.person_id,
             "roles": roles,
             "active": user.active,
         }

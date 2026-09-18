@@ -374,7 +374,7 @@ function ControlPreviewWidget({
                   onChange={() => {}}
                   className="accent-blue-600 h-3.5 w-3.5"
                 />
-                <span className={isDone ? 'text-gray-500 line-through' : t.required ? 'font-semibold text-gray-800' : 'text-gray-700'}>
+                <span className={isDone ? 'font-medium text-gray-900' : t.required ? 'font-semibold text-gray-800' : 'text-gray-700'}>
                   {t.label}
                 </span>
                 {t.required && (
@@ -392,7 +392,7 @@ function ControlPreviewWidget({
 
   // 4. Dynamic Table
   if (type === 'table') {
-    const rawCols = item.options && item.options.length > 0 ? item.options : ['Column 1', 'Column 2'];
+    const rawCols = item.options && item.options.length > 0 ? item.options : ['Column 1', 'Column 2', 'Column 3'];
     const cols = rawCols.filter((c) => !hiddenSet.has(c));
     return (
       <div className="w-full overflow-hidden rounded-md border border-gray-300 bg-white text-xs text-gray-700 shadow-2xs" onClick={(e) => e.stopPropagation()}>
@@ -406,8 +406,18 @@ function ControlPreviewWidget({
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-blue-600 hover:bg-blue-50/50 cursor-pointer">
-          <Plus className="h-3 w-3" /> Add dynamic rows at fill time
+        <div className="flex items-center justify-between px-3 py-2 text-[11px] text-gray-500 bg-gray-50/30">
+          <div className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 cursor-pointer">
+            <Plus className="h-3 w-3" />
+            <span>{item.emptyStateText || 'Add dynamic rows at fill time'}</span>
+          </div>
+          {(item.minRows || item.maxRows) && (
+            <span className="font-mono text-[10px] text-gray-400">
+              {item.minRows ? `Min: ${item.minRows}` : ''}
+              {item.minRows && item.maxRows ? ' • ' : ''}
+              {item.maxRows ? `Max: ${item.maxRows}` : ''}
+            </span>
+          )}
         </div>
       </div>
     );

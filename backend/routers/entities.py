@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.entities import get_entity_models, ENTITY_REGISTRY
 from backend.models.workflow import WorkflowDefinition
-from backend.models.users import AppUser
 from backend.services.command_handler import (
     create_entity,
     propose_transition,
@@ -17,6 +16,7 @@ from backend.services.command_handler import (
 from backend.services.field_validator import FieldValidationError
 from backend.services.simulator import simulate_transition
 from backend.services.projector import rebuild_entity_from_events
+from backend.services.actor import resolve_actor_roles
 
 router = APIRouter(tags=["Entities (Command & Query API)"])
 
@@ -54,16 +54,11 @@ def resolve_actor(
     db: Session
 ) -> tuple[str, list[str]]:
     actor_id = explicit_actor_id or header_actor_id or "admin@compassx.io"
-    roles = list(explicit_roles or [])
-    
-    if not roles:
-        user = db.query(AppUser).filter((AppUser.email == actor_id) | (AppUser.id == actor_id)).first()
-        if user:
-            roles = [r.name for r in user.roles]
-            
+    roles = list(resolve_actor_roles(db, actor_id, explicit_roles))
+
     if header_role and header_role not in roles:
         roles.append(header_role)
-        
+
     return actor_id, roles
 
 # COMMAND API (Section 5)

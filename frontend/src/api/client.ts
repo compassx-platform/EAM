@@ -16,11 +16,17 @@ import type {
   OptionListSummary,
   ListDefinition,
   ResolvedList,
-  ListUsage,
   ListKind,
   ChecklistItem,
+  ListUsage,
   EntityTypeDefinition,
   EntityFieldInput,
+  Person,
+  PersonGroup,
+  PersonGroupMember,
+  PersonAvailability,
+  PersonAudit,
+  PersonRelated,
 } from '../types';
 
 const API_BASE = '/api';
@@ -218,6 +224,16 @@ export const api = {
             allow_multiple: Boolean(it.allowMultiple ?? (it as any).allow_multiple),
             maxFiles: it.maxFiles ?? (it as any).max_files ?? null,
             max_files: it.maxFiles ?? (it as any).max_files ?? null,
+            minRows: it.minRows ?? (it as any).min_rows ?? null,
+            min_rows: it.minRows ?? (it as any).min_rows ?? null,
+            maxRows: it.maxRows ?? (it as any).max_rows ?? null,
+            max_rows: it.maxRows ?? (it as any).max_rows ?? null,
+            allowAddRows: it.allowAddRows ?? (it as any).allow_add_rows ?? true,
+            allow_add_rows: it.allowAddRows ?? (it as any).allow_add_rows ?? true,
+            allowDeleteRows: it.allowDeleteRows ?? (it as any).allow_delete_rows ?? true,
+            allow_delete_rows: it.allowDeleteRows ?? (it as any).allow_delete_rows ?? true,
+            emptyStateText: it.emptyStateText ?? (it as any).empty_state_text ?? null,
+            empty_state_text: it.emptyStateText ?? (it as any).empty_state_text ?? null,
           };
         }),
       }),
@@ -360,6 +376,177 @@ export const api = {
 
   deleteEntityType(name: string): Promise<{ deleted: boolean; name: string }> {
     return request(`/entity-types/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  },
+
+  // ---- People & Person Groups (IBM Maximo People Management) --------------
+
+  listPersons(opts?: {
+    status?: string;
+    search?: string;
+    group?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ total: number; limit: number; offset: number; items: Person[] }> {
+    const params = new URLSearchParams();
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.search) params.set('search', opts.search);
+    if (opts?.group) params.set('group', opts.group);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.offset) params.set('offset', String(opts.offset));
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return request<{ total: number; limit: number; offset: number; items: Person[] }>(`/persons${q}`);
+  },
+
+  getPerson(personId: string): Promise<Person> {
+    return request<Person>(`/persons/${encodeURIComponent(personId)}`);
+  },
+
+  createPerson(input: Partial<Person> & { display_name: string }): Promise<Person> {
+    return request<Person>('/persons', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updatePerson(personId: string, input: Partial<Person>): Promise<Person> {
+    return request<Person>(`/persons/${encodeURIComponent(personId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deletePerson(personId: string): Promise<{ deleted: boolean; person_id: string }> {
+    return request(`/persons/${encodeURIComponent(personId)}`, { method: 'DELETE' });
+  },
+
+  inactivatePerson(personId: string): Promise<{
+    inactivated: boolean;
+    person_id: string;
+    inactivated_user_id?: string | null;
+    already?: boolean;
+  }> {
+    return request(`/persons/${encodeURIComponent(personId)}/inactivate`, { method: 'POST' });
+  },
+
+  activatePerson(personId: string): Promise<{ activated: boolean; person_id: string }> {
+    return request(`/persons/${encodeURIComponent(personId)}/activate`, { method: 'POST' });
+  },
+
+  getPersonRelated(personId: string): Promise<PersonRelated> {
+    return request<PersonRelated>(`/persons/${encodeURIComponent(personId)}/related`);
+  },
+
+  createPersonAvailability(
+    personId: string,
+    input: { reason: string; available_from: string; available_to: string }
+  ): Promise<PersonAvailability> {
+    return request<PersonAvailability>(`/persons/${encodeURIComponent(personId)}/availability`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  listPersonAvailability(personId: string): Promise<{ person_id: string; items: PersonAvailability[] }> {
+    return request(`/persons/${encodeURIComponent(personId)}/availability`);
+  },
+
+  listPersonAudit(personId: string): Promise<{ person_id: string; items: PersonAudit[] }> {
+    return request(`/persons/${encodeURIComponent(personId)}/audit`);
+  },
+
+  listPersonGroups(search?: string): Promise<{ items: PersonGroup[] }> {
+    const q = search ? `?search=${encodeURIComponent(search)}` : '';
+    return request<{ items: PersonGroup[] }>(`/person-groups${q}`);
+  },
+
+  getPersonGroup(groupName: string): Promise<PersonGroup> {
+    return request<PersonGroup>(`/person-groups/${encodeURIComponent(groupName)}`);
+  },
+
+  createPersonGroup(input: {
+    group_name: string;
+    description?: string;
+    is_crew_work_group?: boolean;
+    use_for_org?: string;
+    use_for_site?: string;
+    members?: Array<{
+      person_id: string;
+      sequence?: number;
+      is_group_default?: boolean;
+      is_org_default?: boolean;
+      is_site_default?: boolean;
+    }>;
+  }): Promise<PersonGroup> {
+    return request<PersonGroup>('/person-groups', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updatePersonGroup(
+    groupName: string,
+    input: {
+      description?: string;
+      is_crew_work_group?: boolean;
+      use_for_org?: string;
+      use_for_site?: string;
+    }
+  ): Promise<PersonGroup> {
+    return request<PersonGroup>(`/person-groups/${encodeURIComponent(groupName)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deletePersonGroup(groupName: string): Promise<{ deleted: boolean; group_name: string }> {
+    return request(`/person-groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+  },
+
+  addGroupMember(
+    groupName: string,
+    input: {
+      person_id: string;
+      sequence?: number;
+      is_group_default?: boolean;
+      is_org_default?: boolean;
+      is_site_default?: boolean;
+    }
+  ): Promise<PersonGroup> {
+    return request<PersonGroup>(`/person-groups/${encodeURIComponent(groupName)}/members`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateGroupMember(
+    groupName: string,
+    personId: string,
+    input: {
+      sequence?: number;
+      is_group_default?: boolean;
+      is_org_default?: boolean;
+      is_site_default?: boolean;
+    }
+  ): Promise<PersonGroup> {
+    return request<PersonGroup>(
+      `/person-groups/${encodeURIComponent(groupName)}/members/${encodeURIComponent(personId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  removeGroupMember(
+    groupName: string,
+    personId: string
+  ): Promise<{ deleted: boolean; group_name: string; person_id: string }> {
+    return request(
+      `/person-groups/${encodeURIComponent(groupName)}/members/${encodeURIComponent(personId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
   },
 };
 

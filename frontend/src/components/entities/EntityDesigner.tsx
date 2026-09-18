@@ -60,6 +60,7 @@ interface DesignerRow {
   field_type: EntityFieldInput['field_type'];
   required: boolean;
   pinned: boolean;
+  blockers?: string[];
 }
 
 const RESERVED = new Set([
@@ -95,7 +96,13 @@ function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+/** Sanitizes input on-the-fly while typing (keeps trailing underscore so user can type on the go). */
 function fieldSlug(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+}
+
+/** Trims leading and trailing underscores for storage, validation, and API submission. */
+function cleanFieldSlug(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
@@ -104,10 +111,11 @@ function humanize(name: string): string {
 }
 
 function rowToInput(r: DesignerRow): EntityFieldInput {
+  const cleanName = cleanFieldSlug(r.field_name);
   return {
-    field_name: r.field_name,
+    field_name: cleanName,
     field_type: r.field_type,
-    label: (r.label || '').trim() || humanize(r.field_name),
+    label: (r.label || '').trim() || humanize(cleanName),
     required: r.required,
   };
 }
@@ -129,6 +137,7 @@ function fieldFromRegistry(f: EntityField): DesignerRow {
     field_type: f.field_type,
     required: f.required,
     pinned: isPinned,
+    blockers: f.blockers || [],
   };
 }
 
@@ -141,6 +150,7 @@ function baselineRows(): DesignerRow[] {
       field_type: 'text',
       required: true,
       pinned: true,
+      blockers: [],
     },
     {
       localId: 'description',
@@ -149,6 +159,7 @@ function baselineRows(): DesignerRow[] {
       field_type: 'text',
       required: false,
       pinned: true,
+      blockers: [],
     },
   ];
 }
@@ -247,31 +258,32 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
         field_type: 'text',
         required: false,
         pinned: false,
+        blockers: [],
       },
     ]);
   };
 
   const removeRow = (localId: string) => {
     const target = rows.find((r) => r.localId === localId);
-    if (!target || target.pinned) return;
+    if (!target || target.pinned || (target.blockers && target.blockers.length > 0)) return;
     setRows((prev) => prev.filter((r) => r.localId !== localId));
   };
 
   // ---- validation ----
   const metadataError = useMemo(() => {
     if (!displayName.trim()) return 'Enter a display name.';
-    const slug = (isEdit ? name : slugify(displayName)).trim();
+    const slug = (isEdit ? name : (autoSlug ? slugify(displayName) : cleanFieldSlug(name))).trim();
     if (slug.length < 2) return 'Identifier must be at least 2 characters.';
     return null;
-  }, [displayName, name, isEdit]);
+  }, [displayName, name, isEdit, autoSlug]);
 
   const validateFields = useCallback(() => {
     const errors: Record<string, string> = {};
     const seen = new Set<string>();
     for (const r of rows) {
-      const key = fieldSlug(r.field_name);
-      if (key.length < 2) {
-        errors[r.localId] = 'Field name is invalid — use lowercase letters, numbers and underscores.';
+      const key = cleanFieldSlug(r.field_name);
+      if (key.length < 2 || !/^[a-z][a-z0-9_]*$/.test(key)) {
+        errors[r.localId] = 'Field name is invalid — must start with a letter and contain only lowercase letters, numbers and underscores.';
         continue;
       }
       if (RESERVED.has(key)) {
@@ -350,7 +362,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
         flash('ok', `Entity "${displayName}" updated.`);
       } else {
         const createdEntity = await api.createEntityType({
-          name: (autoSlug ? slugify(displayName) : name.trim()).toLowerCase(),
+          name: (autoSlug ? slugify(displayName) : cleanFieldSlug(name)).toLowerCase(),
           display_name: displayName.trim(),
           description: description.trim(),
           icon,
@@ -378,7 +390,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   }
 
   const isSystem = isEdit && (systemFlag ?? created?.is_system === true);
-  const effectiveName = isEdit ? name : (autoSlug ? slugify(displayName) : slugify(name));
+  const effectiveName = isEdit ? name : (autoSlug ? slugify(displayName) : cleanFieldSlug(name));
 
   return (
     <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-white">
@@ -598,7 +610,7 @@ function Step1(p: {
               type="text"
               disabled={p.isEdit || p.autoSlug}
               value={p.name}
-              onChange={(e) => p.onName(slugify(e.target.value))}
+              onChange={(e) => p.onName(fieldSlug(e.target.value))}
               placeholder="e.g. workorder"
               className={`w-full rounded-lg border px-3 py-2 font-mono text-xs ${
                 p.isEdit || p.autoSlug
@@ -707,6 +719,11 @@ function FieldRow(p: {
   onRemove: () => void;
 }) {
   const r = p.row;
+  const isBlocked = Boolean(r.blockers && r.blockers.length > 0);
+  const blockerTooltip = isBlocked
+    ? `Cannot delete: referenced by ${r.blockers?.join(', ')}`
+    : undefined;
+
   return (
     <>
       <tr className={`align-top ${p.error ? 'bg-red-50/40' : 'hover:bg-gray-50/50'}`}>
@@ -715,7 +732,7 @@ function FieldRow(p: {
           <input
             type="text"
             value={r.field_name}
-            disabled={r.pinned}
+            disabled={r.pinned || isBlocked}
             onChange={(e) => {
               const slug = fieldSlug(e.target.value);
               p.onPatch({
@@ -724,8 +741,9 @@ function FieldRow(p: {
               });
             }}
             placeholder="field_name"
+            title={r.pinned ? 'Baseline field' : isBlocked ? blockerTooltip : undefined}
             className={`w-full rounded-md border px-2 py-1.5 font-mono text-xs ${
-              r.pinned
+              r.pinned || isBlocked
                 ? 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-500'
                 : 'border-gray-300 bg-white text-gray-900 focus:border-blue-500 focus:outline-none'
             }`}
@@ -772,11 +790,27 @@ function FieldRow(p: {
         </td>
 
         {/* Actions */}
-        <td className="px-2 py-2 align-middle">
+        <td className="px-2 py-2 align-middle text-center">
           {r.pinned ? (
-            <span title="Baseline field — cannot be removed" className="text-gray-300">
+            <span title="Baseline field — cannot be removed" className="inline-flex items-center justify-center p-1.5 text-gray-300">
               <Lock className="h-3.5 w-3.5" />
             </span>
+          ) : isBlocked ? (
+            <div className="relative inline-flex items-center justify-center group/tooltip">
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                title={blockerTooltip}
+                className="rounded-md p-1.5 text-gray-300 cursor-not-allowed"
+              >
+                <MinusCircle className="h-4 w-4" />
+              </button>
+              <div className="pointer-events-none absolute right-full top-1/2 -translate-y-1/2 mr-2 z-50 hidden group-hover/tooltip:flex w-max max-w-xs items-center rounded-md bg-gray-900 px-2.5 py-1.5 text-[11px] leading-tight text-white shadow-lg animate-in fade-in zoom-in-95">
+                <span>{blockerTooltip}</span>
+                <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-1 h-2 w-2 rotate-45 bg-gray-900" />
+              </div>
+            </div>
           ) : (
             <span className="flex items-center justify-center gap-0.5">
               <button

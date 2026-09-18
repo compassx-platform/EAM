@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "eam_db"
     
     # Database: Optional direct override or assembled PostgreSQL DSN
-    DATABASE_URL: str | None = None
+    DATABASE_URL: str | None = os.getenv("DATABASE_URL", "sqlite:////tmp/app.db")
     
     # Secret Key & Auth
     SECRET_KEY: str = "compassx-workflow-secret-key-2026"

@@ -209,6 +209,12 @@ export function evaluateConditionAtom(
       return true;
     }
 
+    case 'person_group': {
+      const rawVal = getFieldValue(values, atom.relationship_field);
+      if (!rawVal) return false;
+      return true;
+    }
+
     case 'expression': {
       return true;
     }
@@ -230,7 +236,7 @@ export function evaluateConditionGroup(
 
   const isOr = (group.logic || 'AND').toUpperCase() === 'OR';
   const evaluateChild = (node: ConditionRuleNode): boolean => {
-    if ('group' in node && node.group) {
+    if (node && typeof node === 'object' && !('type' in node) && 'group' in node && node.group && typeof node.group === 'object') {
       return evaluateConditionGroup(node.group, values, userContext);
     }
     return evaluateConditionAtom(node as ConditionAtom, values, userContext);

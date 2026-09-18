@@ -43,6 +43,11 @@ ATOM_TYPES_CATALOG = [
         "name": "Arithmetic expression",
         "description": "Evaluates a whitelisted arithmetic expression over fields and compares the result.",
     },
+    {
+        "type": "person_group",
+        "name": "Person Group member",
+        "description": "Checks if the person in a relationship field is an active member of a specified Person Group.",
+    },
 ]
 
 # Operators grouped by value kind, for the guided rule editor.

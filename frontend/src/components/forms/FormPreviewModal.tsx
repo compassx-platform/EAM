@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Info,
   Database,
+  Minus,
 } from 'lucide-react';
 import {
   GridLayout,
@@ -445,6 +446,66 @@ function InteractiveControl({
     );
   }
 
+  if (type === 'checklist') {
+    const rawTasks = resolved?.kind === 'checklist' ? (resolved.items as ChecklistItem[]) : [];
+    const tasks = rawTasks.filter((t) => !hiddenSet.has(t.label));
+    let checkedSet = new Set<string>();
+    if (Array.isArray(value)) {
+      checkedSet = new Set(value.map((s) => String(s)));
+    } else if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) checkedSet = new Set(parsed.map((s) => String(s)));
+      } catch {
+        checkedSet = new Set(value.split(',').map((s) => s.trim()));
+      }
+    }
+
+    const toggle = (label: string) => {
+      if (readOnly) return;
+      const next = new Set(checkedSet);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      onChange(JSON.stringify([...next]));
+    };
+
+    return (
+      <div className="flex w-full flex-col gap-1.5">
+        {tasks.map((t) => {
+          const isDone = checkedSet.has(t.label);
+          return (
+            <label
+              key={t.label}
+              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-all ${
+                readOnly
+                  ? 'cursor-not-allowed border-gray-200 bg-gray-100/70 text-gray-400'
+                  : isDone
+                  ? 'border-blue-200 bg-blue-50/50 cursor-pointer'
+                  : 'border-gray-300 bg-white hover:border-gray-400 cursor-pointer'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={isDone}
+                disabled={readOnly}
+                onChange={() => toggle(t.label)}
+                className="accent-blue-600 h-3.5 w-3.5"
+              />
+              <span className={isDone ? 'font-medium text-gray-900' : 'text-gray-700'}>
+                {t.label}
+              </span>
+              {t.required && (
+                <span className={`ml-auto text-[10px] font-medium ${isDone ? 'text-blue-600' : 'text-amber-600'}`}>
+                  {isDone ? '✓ Completed' : 'Required'}
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
+
   if (type === 'dropdown') {
     const rawOpts = resolved?.kind === 'options' ? (resolved.items as string[]) : item.options || [];
     const opts = rawOpts.filter((o) => !hiddenSet.has(o));
@@ -496,6 +557,126 @@ function InteractiveControl({
         >
           No
         </button>
+      </div>
+    );
+  }
+
+  if (type === 'table') {
+    const rawCols = item.options && item.options.length > 0 ? item.options : ['Column 1', 'Column 2', 'Column 3'];
+    const cols = rawCols.filter((c) => !hiddenSet.has(c));
+    let rows: Record<string, string>[] = [];
+    if (Array.isArray(value)) {
+      rows = value as Record<string, string>[];
+    } else if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) rows = parsed;
+      } catch {}
+    }
+
+    const commitRows = (next: Record<string, string>[]) => {
+      if (readOnly) return;
+      onChange(JSON.stringify(next));
+    };
+
+    const addRow = () => {
+      if (readOnly) return;
+      if (item.maxRows && rows.length >= item.maxRows) return;
+      const empty = Object.fromEntries(cols.map((c) => [c, ''])) as Record<string, string>;
+      commitRows([...rows, empty]);
+    };
+
+    const removeRow = (idx: number) => {
+      if (readOnly) return;
+      if (item.minRows && rows.length <= item.minRows) return;
+      commitRows(rows.filter((_, i) => i !== idx));
+    };
+
+    const setCell = (rowIdx: number, col: string, cellVal: string) => {
+      if (readOnly) return;
+      const next = rows.map((r, i) => (i === rowIdx ? { ...r, [col]: cellVal } : r));
+      commitRows(next);
+    };
+
+    const canAdd = !readOnly && item.allowAddRows !== false && (!item.maxRows || rows.length < item.maxRows);
+    const canDelete = !readOnly && item.allowDeleteRows !== false && (!item.minRows || rows.length > item.minRows);
+
+    return (
+      <div className="w-full overflow-hidden rounded-md border border-gray-300 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-gray-50 text-left text-gray-500">
+                {cols.map((c) => (
+                  <th key={c} className="border-b border-gray-200 px-2.5 py-1.5 font-medium">
+                    {c}
+                  </th>
+                ))}
+                {!readOnly && <th className="w-8 border-b border-gray-200" />}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={cols.length + (readOnly ? 0 : 1)} className="px-3 py-3 text-center text-xs text-gray-400">
+                    {readOnly ? 'No table rows recorded.' : (item.emptyStateText || 'No rows yet — click “Add row”.')}
+                  </td>
+                </tr>
+              )}
+              {rows.map((row, ri) => (
+                <tr key={ri} className="border-b border-gray-100 last:border-b-0">
+                  {cols.map((c) => (
+                    <td key={c} className="border-r border-gray-100 px-1 py-1 last:border-r-0">
+                      <input
+                        value={row[c] ?? ''}
+                        disabled={readOnly}
+                        readOnly={readOnly}
+                        onChange={(e) => setCell(ri, c, e.target.value)}
+                        className={`w-full rounded border px-2 py-1 text-xs ${
+                          readOnly
+                            ? 'border-transparent bg-gray-50 text-gray-600'
+                            : 'border-transparent text-gray-800 focus:border-blue-400 focus:outline-none'
+                        }`}
+                      />
+                    </td>
+                  ))}
+                  {!readOnly && (
+                    <td className="px-1 py-1 text-center">
+                      <button
+                        type="button"
+                        disabled={!canDelete}
+                        onClick={() => removeRow(ri)}
+                        title="Remove row"
+                        className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!readOnly && (
+          <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/50 px-3 py-1.5 text-[11px]">
+            <button
+              type="button"
+              disabled={!canAdd}
+              onClick={addRow}
+              className="flex items-center gap-1 font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:hover:text-blue-600"
+            >
+              <Plus className="h-3 w-3" /> Add row
+            </button>
+            {(item.minRows || item.maxRows) && (
+              <span className="font-mono text-[10px] text-gray-400">
+                {item.minRows ? `Min: ${item.minRows}` : ''}
+                {item.minRows && item.maxRows ? ' • ' : ''}
+                {item.maxRows ? `Max: ${item.maxRows}` : ''}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     );
   }

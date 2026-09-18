@@ -85,7 +85,8 @@ export type ConditionAtom =
       operator?: string;
       value?: unknown;
     }
-  | { type: 'expression'; expression: string; operator?: string; value?: unknown };
+  | { type: 'expression'; expression: string; operator?: string; value?: unknown }
+  | { type: 'person_group'; relationship_field: string; group: string };
 
 export interface ConditionGroup {
   logic: 'AND' | 'OR';
@@ -186,6 +187,8 @@ export interface EntityField {
   /** Central published list referenced for a select field's options. */
   option_list_key?: string | null;
   reference_entity_type?: string | null;
+  /** Active references (in forms, workflows, conditions) blocking field deletion */
+  blockers?: string[];
 }
 
 /** Registry field types — double as the form widget catalog. `select` renders as a dropdown. */
@@ -322,6 +325,17 @@ export interface EntityFormItem {
   allow_multiple?: boolean;
   maxFiles?: number | null;
   max_files?: number | null;
+  /** Dynamic Table configuration */
+  minRows?: number | null;
+  min_rows?: number | null;
+  maxRows?: number | null;
+  max_rows?: number | null;
+  allowAddRows?: boolean;
+  allow_add_rows?: boolean;
+  allowDeleteRows?: boolean;
+  allow_delete_rows?: boolean;
+  emptyStateText?: string | null;
+  empty_state_text?: string | null;
 }
 
 export interface EntityForm {
@@ -404,4 +418,77 @@ export interface EntityTypeDefinition {
   has_form?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+// ---- Person & Person Group (IBM Maximo People & Person Groups) -------------
+
+export interface Person {
+  person_id: string;
+  display_name: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  primary_email?: string | null;
+  phone?: string | null;
+  site?: string | null;
+  supervisor_id?: string | null;
+  primary_calendar?: string | null;
+  primary_shift?: string | null;
+  workflow_delegate_id?: string | null;
+  delegate_from?: string | null;
+  delegate_to?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  user_id?: string | null;
+  linked_roles?: string[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PersonGroupMember {
+  group_name: string;
+  person_id: string;
+  sequence: number;
+  is_group_default: boolean;
+  is_org_default: boolean;
+  is_site_default: boolean;
+  display_name?: string | null;
+  status?: string | null;
+}
+
+export interface PersonGroup {
+  group_name: string;
+  description?: string | null;
+  is_crew_work_group: boolean;
+  use_for_org?: string | null;
+  use_for_site?: string | null;
+  member_count: number;
+  members?: PersonGroupMember[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PersonAvailability {
+  id: string;
+  person_id: string;
+  reason: 'Holiday' | 'Sick' | 'Overtime' | 'Other';
+  available_from: string;
+  available_to: string;
+  created_at?: string | null;
+}
+
+export interface PersonAudit {
+  id: string;
+  person_id: string;
+  changed_by: string;
+  field_name: string;
+  old_value?: string | null;
+  new_value?: string | null;
+  occurred_at: string;
+}
+
+export interface PersonRelated {
+  person_id: string;
+  workorders: Array<{ id: string; status: string; title: string; open: boolean }>;
+  permits: Array<{ id: string; status: string; title: string; open: boolean }>;
+  supervises: string[];
+  groups: string[];
 }

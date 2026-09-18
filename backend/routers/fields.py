@@ -33,8 +33,11 @@ class EntityFieldRequest(BaseModel):
 
 def _field_refs_in(obj: Any, field_name: str, refs: List[str], where: str) -> None:
     """Recursively finds explicit ``field`` references to ``field_name`` in a JSON tree."""
+    fname_lower = field_name.strip().lower()
     if isinstance(obj, dict):
-        if "field" in obj and str(obj["field"]) == field_name:
+        f_val = str(obj.get("field") or "").strip().lower()
+        rf_val = str(obj.get("relationship_field") or "").strip().lower()
+        if f_val == fname_lower or rf_val == fname_lower:
             label = str(obj.get("label") or obj.get("type") or "rule")
             refs.append(f"{where}: {label}")
         for v in obj.values():
@@ -45,28 +48,41 @@ def _field_refs_in(obj: Any, field_name: str, refs: List[str], where: str) -> No
 
 def _delete_blockers(db: Session, entity_type: str, field_name: str) -> List[str]:
     blockers: List[str] = []
+    fname_lower = field_name.strip().lower()
 
-    form = db.query(EntityForm).filter(EntityForm.entity_type == entity_type).first()
+    form = db.query(EntityForm).filter(EntityForm.entity_type == entity_type.lower()).first()
     if form and form.layout:
         for it in form.layout:
+            if it.get("isHeader") or it.get("isGroup") or it.get("is_header") or it.get("is_group"):
+                continue
             names = {
-                str(it.get("id") or ""),
-                str(it.get("i") or ""),
-                str(it.get("fieldName") or it.get("field_name") or ""),
+                str(it.get("id") or "").strip().lower(),
+                str(it.get("i") or "").strip().lower(),
+                str(it.get("fieldName") or it.get("field_name") or "").strip().lower(),
             }
-            if field_name in names:
-                label = it.get("label") or it.get("i") or it.get("id") or "form item"
+            i_val = str(it.get("i") or "").strip().lower()
+            if i_val.startswith("field:"):
+                names.add(i_val[6:])
+            if fname_lower in names:
+                label = it.get("label") or it.get("fieldName") or it.get("field_name") or it.get("i") or "form item"
                 blockers.append(f"Form layout item '{label}'")
                 break
 
-    for wf in db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == entity_type).all():
+        for it in form.layout:
+            vis = it.get("visibilityCondition") or it.get("visibility_condition")
+            if vis:
+                vis_refs: List[str] = []
+                _field_refs_in(vis, fname_lower, vis_refs, f"Form visibility condition on '{it.get('label') or it.get('i')}'")
+                blockers.extend(vis_refs)
+
+    for wf in db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == entity_type.lower()).all():
         refs: List[str] = []
-        _field_refs_in(wf.definition or {}, field_name, refs, f"Workflow '{wf.version_label}'")
+        _field_refs_in(wf.definition or {}, fname_lower, refs, f"Workflow '{wf.version_label}'")
         blockers.extend(refs)
 
-    for cond in db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == entity_type).all():
+    for cond in db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == entity_type.lower()).all():
         refs = []
-        _field_refs_in(cond.definition or {}, field_name, refs, f"Condition '{cond.label}'")
+        _field_refs_in(cond.definition or {}, fname_lower, refs, f"Condition '{cond.label}'")
         blockers.extend(refs)
 
     return blockers
@@ -77,7 +93,12 @@ def list_fields(entity_type: Optional[str] = Query(None), db: Session = Depends(
     if entity_type:
         query = query.filter(EntityField.entity_type == entity_type.lower())
     fields = query.order_by(EntityField.entity_type, EntityField.field_name).all()
-    return [f.to_dict() for f in fields]
+    results = []
+    for f in fields:
+        d = f.to_dict()
+        d["blockers"] = _delete_blockers(db, f.entity_type, f.field_name)
+        results.append(d)
+    return results
 
 @router.post("")
 def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db)):
@@ -133,7 +154,9 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
 
     db.commit()
     db.refresh(field)
-    return field.to_dict()
+    d = field.to_dict()
+    d["blockers"] = _delete_blockers(db, field.entity_type, field.field_name)
+    return d
 
 @router.delete("/{entity_type}/{field_name}")
 def delete_field(entity_type: str, field_name: str, db: Session = Depends(get_db)):

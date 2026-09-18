@@ -8,6 +8,7 @@ from backend.models.workflow import WorkflowDefinition
 from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.forms import EntityForm
 from backend.models.entities import WorkOrder, Permit, PMSchedule
+from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability, PersonAudit
 from backend.models.lists import ListDefinition
 from backend.models.entity_type import EntityTypeDefinition
 from backend.models.base import generate_uuid, utc_now
@@ -15,11 +16,17 @@ from backend.services.command_handler import create_entity, propose_transition
 
 def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
     """Idempotently adds a nullable column to an existing table (create_all will not alter it)."""
-    inspector = inspect(db.get_bind())
-    cols = {c["name"] for c in inspector.get_columns(table)}
-    if column in cols:
-        return
-    db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+    try:
+        res = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        if not res:
+            return
+        cols = {row[1] for row in res}
+        if column in cols:
+            return
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+        db.commit()
+    except Exception:
+        db.rollback()
 
 def seed_all(db: Session):
     """Initializes schema and seeds baseline users, roles, fields, gates, workflows, and sample entities."""
@@ -27,6 +34,7 @@ def seed_all(db: Session):
 
     # Lightweight schema backfills for pre-existing dev databases
     _ensure_column(db, "entity_field", "label", "label VARCHAR(100)")
+    _ensure_column(db, "app_user", "person_id", "person_id VARCHAR(50)")
 
     # 0. Seed Default Entity Types
     default_entity_types = [
@@ -59,13 +67,88 @@ def seed_all(db: Session):
             db.refresh(role)
         role_objs[r_name] = role
 
-    # 2. Seed Users
+    # 2. Seed Persons and Users (IBM Maximo alignment: PERSONID = User ID in capital letters)
+    persons_data = [
+        {
+            "person_id": "ADMIN",
+            "display_name": "Alex Admin",
+            "first_name": "Alex",
+            "last_name": "Admin",
+            "primary_email": "admin@compassx.io",
+            "site": "HQ",
+            "primary_shift": "Day",
+            "supervisor_id": None,
+        },
+        {
+            "person_id": "DIANA.MANAGER",
+            "display_name": "Diana Ross (Plant Manager)",
+            "first_name": "Diana",
+            "last_name": "Ross",
+            "primary_email": "diana.manager@compassx.io",
+            "site": "HQ",
+            "primary_shift": "Day",
+            "supervisor_id": None,
+        },
+        {
+            "person_id": "BOB.SUPERVISOR",
+            "display_name": "Bob Miller (Supervisor)",
+            "first_name": "Bob",
+            "last_name": "Miller",
+            "primary_email": "bob.supervisor@compassx.io",
+            "site": "HQ",
+            "primary_shift": "Day",
+            "supervisor_id": "DIANA.MANAGER",
+        },
+        {
+            "person_id": "ALICE.SAFETY",
+            "display_name": "Alice Vance (Safety Officer)",
+            "first_name": "Alice",
+            "last_name": "Vance",
+            "primary_email": "alice.safety@compassx.io",
+            "site": "HQ",
+            "primary_shift": "Day",
+            "supervisor_id": "DIANA.MANAGER",
+        },
+        {
+            "person_id": "CHARLIE.TECH",
+            "display_name": "Charlie Stone (Technician)",
+            "first_name": "Charlie",
+            "last_name": "Stone",
+            "primary_email": "charlie.tech@compassx.io",
+            "site": "HQ",
+            "primary_shift": "Day",
+            "supervisor_id": "BOB.SUPERVISOR",
+        },
+    ]
+
+    for p_info in persons_data:
+        p = db.query(Person).filter(Person.person_id == p_info["person_id"]).first()
+        if not p:
+            p = Person(
+                person_id=p_info["person_id"],
+                display_name=p_info["display_name"],
+                first_name=p_info["first_name"],
+                last_name=p_info["last_name"],
+                primary_email=p_info["primary_email"],
+                site=p_info["site"],
+                primary_shift=p_info["primary_shift"],
+                supervisor_id=p_info["supervisor_id"],
+                status="ACTIVE",
+                created_by="system",
+            )
+            db.add(p)
+            db.flush()
+        else:
+            if not p.supervisor_id and p_info["supervisor_id"]:
+                p.supervisor_id = p_info["supervisor_id"]
+    db.commit()
+
     users_data = [
-        {"email": "admin@compassx.io", "name": "Alex Admin", "roles": ["Admin"]},
-        {"email": "alice.safety@compassx.io", "name": "Alice Vance (Safety Officer)", "roles": ["Safety Officer"]},
-        {"email": "bob.supervisor@compassx.io", "name": "Bob Miller (Supervisor)", "roles": ["Supervisor"]},
-        {"email": "charlie.tech@compassx.io", "name": "Charlie Stone (Technician)", "roles": ["Technician"]},
-        {"email": "diana.manager@compassx.io", "name": "Diana Ross (Plant Manager)", "roles": ["Manager", "Supervisor"]},
+        {"email": "admin@compassx.io", "name": "Alex Admin", "roles": ["Admin"], "person_id": "ADMIN"},
+        {"email": "alice.safety@compassx.io", "name": "Alice Vance (Safety Officer)", "roles": ["Safety Officer"], "person_id": "ALICE.SAFETY"},
+        {"email": "bob.supervisor@compassx.io", "name": "Bob Miller (Supervisor)", "roles": ["Supervisor"], "person_id": "BOB.SUPERVISOR"},
+        {"email": "charlie.tech@compassx.io", "name": "Charlie Stone (Technician)", "roles": ["Technician"], "person_id": "CHARLIE.TECH"},
+        {"email": "diana.manager@compassx.io", "name": "Diana Ross (Plant Manager)", "roles": ["Manager", "Supervisor"], "person_id": "DIANA.MANAGER"},
     ]
     for u_info in users_data:
         user = db.query(AppUser).filter(AppUser.email == u_info["email"]).first()
@@ -74,10 +157,58 @@ def seed_all(db: Session):
                 id=generate_uuid(),
                 email=u_info["email"],
                 display_name=u_info["name"],
+                person_id=u_info["person_id"],
                 active=True
             )
             user.roles = [role_objs[rn] for rn in u_info["roles"]]
             db.add(user)
+            db.commit()
+        else:
+            if not user.person_id:
+                user.person_id = u_info["person_id"]
+                db.commit()
+
+    # 2b. Seed Person Groups (Teams)
+    groups_data = [
+        {
+            "group_name": "SHIFT_CREW_A",
+            "description": "Shift Crew A - Day mechanical team",
+            "is_crew_work_group": False,
+            "use_for_site": "HQ",
+            "members": [
+                {"person_id": "CHARLIE.TECH", "sequence": 1, "is_group_default": True},
+                {"person_id": "BOB.SUPERVISOR", "sequence": 2, "is_group_default": False},
+            ],
+        },
+        {
+            "group_name": "MAINT_CREW_B",
+            "description": "Maintenance Crew B - Electrical & Instrumentation",
+            "is_crew_work_group": False,
+            "use_for_site": "HQ",
+            "members": [
+                {"person_id": "CHARLIE.TECH", "sequence": 1, "is_group_default": True},
+                {"person_id": "ALICE.SAFETY", "sequence": 2, "is_group_default": False},
+            ],
+        },
+    ]
+    for g_info in groups_data:
+        g = db.query(PersonGroup).filter(PersonGroup.group_name == g_info["group_name"]).first()
+        if not g:
+            g = PersonGroup(
+                group_name=g_info["group_name"],
+                description=g_info["description"],
+                is_crew_work_group=g_info["is_crew_work_group"],
+                use_for_site=g_info["use_for_site"],
+            )
+            db.add(g)
+            db.flush()
+            for m in g_info["members"]:
+                db.add(PersonGroupMember(
+                    group_name=g.group_name,
+                    person_id=m["person_id"],
+                    sequence=m["sequence"],
+                    is_group_default=m["is_group_default"],
+                ))
             db.commit()
 
     # 3. Seed Entity Fields (Section 3.2)
@@ -206,10 +337,18 @@ def seed_all(db: Session):
         {
             "entity_type": "workorder",
             "field_name": "assigned_to",
-            "field_type": "text",
+            "field_type": "entity_reference",
             "required": False,
             "select_options": None,
-            "reference_entity_type": None,
+            "reference_entity_type": "person",
+        },
+        {
+            "entity_type": "workorder",
+            "field_name": "owner_group",
+            "field_type": "entity_reference",
+            "required": False,
+            "select_options": None,
+            "reference_entity_type": "person_group",
         },
         {
             "entity_type": "workorder",
@@ -359,6 +498,10 @@ def seed_all(db: Session):
         if not existing:
             f = EntityField(**f_info)
             db.add(f)
+        else:
+            if f_info.get("reference_entity_type") and existing.reference_entity_type != f_info["reference_entity_type"]:
+                existing.reference_entity_type = f_info["reference_entity_type"]
+                existing.field_type = f_info["field_type"]
     db.commit()
 
     # 4. Seed Conditions (central, reusable, versioned rule registry — replaces gates)
@@ -929,7 +1072,7 @@ def seed_sample_entities(db: Session):
             "hazardous": "No",
             "estlabcost": 12000,
             "estmatcost": 6000,
-            "assigned_to": "Charlie Stone",
+            "assigned_to": "CHARLIE.TECH",
             "linked_permit_id": p1_id,
         },
         payload={"comment": "Work order created for outage repair (cost high -> manager approval layer)"}
@@ -948,7 +1091,8 @@ def seed_sample_entities(db: Session):
             "hazardous": "No",
             "estlabcost": 1500,
             "estmatcost": 800,
-            "assigned_to": "Shift Crew A",
+            "owner_group": "SHIFT_CREW_A",
+            "assigned_to": "CHARLIE.TECH",
         },
         payload={"comment": "Emergency work order — routed straight to INPRG"}
     )
@@ -966,10 +1110,30 @@ def seed_sample_entities(db: Session):
             "hazardous": "Yes",
             "estlabcost": 2500,
             "estmatcost": 900,
-            "assigned_to": "Maintenance Crew B",
+            "owner_group": "MAINT_CREW_B",
+            "assigned_to": "CHARLIE.TECH",
             "linked_permit_id": p2_id,
         },
         payload={"comment": "Hazardous work — will require approved permit before INPRG"}
     )
+
+    # Backfill legacy workorder custom_fields (e.g. "Charlie Stone" -> "CHARLIE.TECH")
+    for wo in db.query(WorkOrder).all():
+        cf = dict(wo.custom_fields or {})
+        changed = False
+        raw_assigned = cf.get("assigned_to")
+        if raw_assigned == "Charlie Stone":
+            cf["assigned_to"] = "CHARLIE.TECH"
+            changed = True
+        elif raw_assigned == "Shift Crew A":
+            cf["assigned_to"] = "CHARLIE.TECH"
+            cf["owner_group"] = "SHIFT_CREW_A"
+            changed = True
+        elif raw_assigned == "Maintenance Crew B":
+            cf["assigned_to"] = "CHARLIE.TECH"
+            cf["owner_group"] = "MAINT_CREW_B"
+            changed = True
+        if changed:
+            wo.custom_fields = cf
 
     db.commit()

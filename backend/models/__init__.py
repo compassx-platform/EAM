@@ -14,6 +14,13 @@ from backend.models.entities import (
     ENTITY_REGISTRY,
     get_entity_models,
 )
+from backend.models.person import (
+    Person,
+    PersonGroup,
+    PersonGroupMember,
+    PersonAvailability,
+    PersonAudit,
+)
 
 __all__ = [
     "EntityBaseMixin",
@@ -36,4 +43,9 @@ __all__ = [
     "ListDefinition",
     "ENTITY_REGISTRY",
     "get_entity_models",
+    "Person",
+    "PersonGroup",
+    "PersonGroupMember",
+    "PersonAvailability",
+    "PersonAudit",
 ]

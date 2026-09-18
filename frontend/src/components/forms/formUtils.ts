@@ -117,7 +117,13 @@ export function normalizeFormLayout(rawItems: any[], cols: number = 12): EntityF
       field_name: undefined,
       fieldType: it.fieldType ?? it.field_type ?? null,
       field_type: undefined,
-      options: Array.isArray(it.options) ? it.options : [],
+      options: Array.isArray(it.options) && it.options.length > 0
+        ? it.options
+        : (it.fieldType === 'table' || it.field_type === 'table')
+        ? ['Column 1', 'Column 2', 'Column 3']
+        : Array.isArray(it.options)
+        ? it.options
+        : [],
       optionsList: it.optionsList ?? it.options_list ?? null,
       options_list: undefined,
       hiddenOptions: it.hiddenOptions ?? it.hidden_options ?? [],
@@ -136,6 +142,16 @@ export function normalizeFormLayout(rawItems: any[], cols: number = 12): EntityF
       allow_multiple: undefined,
       maxFiles: it.maxFiles ?? it.max_files ?? 5,
       max_files: undefined,
+      minRows: it.minRows ?? it.min_rows ?? null,
+      min_rows: undefined,
+      maxRows: it.maxRows ?? it.max_rows ?? null,
+      max_rows: undefined,
+      allowAddRows: it.allowAddRows ?? it.allow_add_rows ?? true,
+      allow_add_rows: undefined,
+      allowDeleteRows: it.allowDeleteRows ?? it.allow_delete_rows ?? true,
+      allow_delete_rows: undefined,
+      emptyStateText: it.emptyStateText ?? it.empty_state_text ?? null,
+      empty_state_text: undefined,
     };
   });
 }

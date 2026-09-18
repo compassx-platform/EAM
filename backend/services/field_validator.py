@@ -122,6 +122,27 @@ def validate_custom_fields(
                 raise FieldValidationError(f"Field '{f.field_name}' must be a valid time (HH:MM:SS), got '{val}'", field_name=f.field_name)
 
         elif f.field_type == "entity_reference":
-            cleaned_fields[f.field_name] = str(val) if val else None
+            if val:
+                ref_target = (f.reference_entity_type or "").strip().lower()
+                if ref_target == "person":
+                    from backend.models.person import Person
+                    target_pid = str(val).strip().upper()
+                    p = db.query(Person).filter(Person.person_id == target_pid).first()
+                    if not p:
+                        raise FieldValidationError(f"Referenced person '{val}' does not exist", field_name=f.field_name)
+                    if p.status != "ACTIVE":
+                        raise FieldValidationError(f"Referenced person '{val}' is not ACTIVE", field_name=f.field_name)
+                    cleaned_fields[f.field_name] = p.person_id
+                elif ref_target == "person_group":
+                    from backend.models.person import PersonGroup
+                    target_gname = str(val).strip().upper()
+                    g = db.query(PersonGroup).filter(PersonGroup.group_name == target_gname).first()
+                    if not g:
+                        raise FieldValidationError(f"Referenced person group '{val}' does not exist", field_name=f.field_name)
+                    cleaned_fields[f.field_name] = g.group_name
+                else:
+                    cleaned_fields[f.field_name] = str(val)
+            else:
+                cleaned_fields[f.field_name] = None
 
     return cleaned_fields

@@ -246,3 +246,28 @@ def test_delete_field_blocked_by_workflow_definition_reference(test_db):
         delete_field("incident_report", "reported_cost", test_db)
     assert exc.value.status_code == 400
     assert "Workflow 'v1'" in str(exc.value.detail)
+
+
+def test_list_fields_returns_blockers_for_referenced_fields(test_db):
+    create_entity_type(CreateEntityTypeRequest(
+        name="blocker_test",
+        display_name="Blocker Test",
+        fields=[
+            EntityFieldIn(field_name="checklist1", field_type="text", label="Checklist1"),
+            EntityFieldIn(field_name="custom_note", field_type="text", label="Custom Note"),
+        ],
+    ), test_db)
+
+    # Both fields exist in auto-generated form layout
+    fields = {f["field_name"]: f for f in list_fields("blocker_test", test_db)}
+    assert "checklist1" in fields
+    assert any("Form layout item" in b for b in fields["checklist1"].get("blockers", []))
+
+    # Remove custom_note from form layout
+    form = test_db.query(EntityForm).filter(EntityForm.entity_type == "blocker_test").first()
+    form.layout = [it for it in form.layout if (it.get("fieldName") or it.get("field_name") or it.get("i")) != "checklist1:custom_note" and it.get("fieldName") != "custom_note" and it.get("i") != "field:custom_note"]
+    test_db.commit()
+
+    fields_after = {f["field_name"]: f for f in list_fields("blocker_test", test_db)}
+    assert fields_after["custom_note"].get("blockers") == []
+    assert any("Form layout item" in b for b in fields_after["checklist1"].get("blockers", []))

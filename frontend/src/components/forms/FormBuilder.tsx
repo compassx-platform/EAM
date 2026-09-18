@@ -299,8 +299,17 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       fieldName: field.field_name,
       fieldType,
       required: Boolean(field.required),
-      options: field.select_options ? [...field.select_options] : [],
+      options: field.select_options && field.select_options.length > 0
+        ? [...field.select_options]
+        : fieldType === 'table'
+        ? ['Column 1', 'Column 2', 'Column 3']
+        : [],
       optionsList: field.option_list_key || null,
+      minRows: fieldType === 'table' ? null : undefined,
+      maxRows: fieldType === 'table' ? null : undefined,
+      allowAddRows: fieldType === 'table' ? true : undefined,
+      allowDeleteRows: fieldType === 'table' ? true : undefined,
+      emptyStateText: fieldType === 'table' ? null : undefined,
     };
     setItems((prev) => [...prev, item]);
     setSelected(id);

@@ -19,6 +19,7 @@ import {
   X,
   Zap,
   Info,
+  Users,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { isItemVisible, withWorkflowStatus } from '../../lib/conditions';
@@ -32,6 +33,8 @@ import type {
   ResolvedList,
   ConditionDefinition,
   ConditionTraceItem,
+  Person,
+  PersonGroup,
 } from '../../types';
 import type { AttachedFile } from './EntityCreateForm';
 
@@ -57,6 +60,7 @@ interface ResolvedField {
   maxFileSizeMb?: number;
   allowMultiple?: boolean;
   maxFiles?: number;
+  referenceEntityType?: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -136,6 +140,8 @@ export function EntityFormView({
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
   const [conditionMap, setConditionMap] = useState<Record<string, { label: string; type: string }>>({});
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
+  const [persons, setPersons] = useState<Person[]>([]);
+  const [personGroups, setPersonGroups] = useState<PersonGroup[]>([]);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
@@ -156,10 +162,12 @@ export function EntityFormView({
     setErr(null);
 
     try {
-      const [formRes, condList, fieldsRes] = await Promise.all([
+      const [formRes, condList, fieldsRes, personsRes, groupsRes] = await Promise.all([
         api.getForm(entityType).catch(() => ({ layout: [], fields: [], cols: 12, row_height: 40 })),
         api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
         api.listFields(entityType).catch(() => [] as EntityField[]),
+        api.listPersons({ limit: 200 }).catch(() => ({ items: [] })),
+        api.listPersonGroups().catch(() => ({ items: [] })),
       ]);
 
       const cMap: Record<string, { label: string; type: string }> = {};
@@ -167,6 +175,8 @@ export function EntityFormView({
       setConditionMap(cMap);
       setConditions(condList);
       setFields(fieldsRes);
+      setPersons(personsRes.items || []);
+      setPersonGroups(groupsRes.items || []);
 
       const layout = ((formRes.layout || []) as Array<any>).map((it) => {
         const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
@@ -282,6 +292,10 @@ export function EntityFormView({
         maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? 10,
         allowMultiple: it.allowMultiple ?? (it as any).allow_multiple ?? false,
         maxFiles: it.maxFiles ?? (it as any).max_files ?? 5,
+        referenceEntityType:
+          (it as any).referenceEntityType ||
+          (it as any).reference_entity_type ||
+          (it.fieldName === 'assigned_to' ? 'person' : it.fieldName === 'owner_group' ? 'person_group' : null),
       };
     }
     const f = byName.get(it.i);
@@ -298,6 +312,9 @@ export function EntityFormView({
       required: f.required,
       options,
       checklistItems: undefined,
+      referenceEntityType:
+        f.reference_entity_type ||
+        (f.field_name === 'assigned_to' ? 'person' : f.field_name === 'owner_group' ? 'person_group' : null),
     };
   };
 
@@ -577,6 +594,8 @@ export function EntityFormView({
                             def={fieldDef}
                             value={rawVal}
                             itemHeight={it.h}
+                            persons={persons}
+                            personGroups={personGroups}
                           />
                         );
                       })}
@@ -594,7 +613,19 @@ export function EntityFormView({
                     {Object.entries(customFields).map(([k, v]) => (
                       <div key={k} className="flex flex-col gap-1.5">
                         <span className="text-xs font-semibold text-gray-900">{k}</span>
-                        <ReadOnlyWidget def={{ key: k, name: k, type: 'text', required: false, options: [] }} value={v} />
+                        <ReadOnlyWidget
+                          def={{
+                            key: k,
+                            name: k,
+                            type: k === 'assigned_to' || k.toLowerCase().includes('person') ? 'entity_reference' : k === 'owner_group' || k.toLowerCase().includes('group') ? 'entity_reference' : 'text',
+                            required: false,
+                            options: [],
+                            referenceEntityType: k === 'assigned_to' ? 'person' : k === 'owner_group' ? 'person_group' : null,
+                          }}
+                          value={v}
+                          persons={persons}
+                          personGroups={personGroups}
+                        />
                       </div>
                     ))}
                   </div>
@@ -697,10 +728,12 @@ const ReadOnlyFillCell = forwardRef<
     def: ResolvedField;
     value: unknown;
     itemHeight?: number;
+    persons?: Person[];
+    personGroups?: PersonGroup[];
     className?: string;
     style?: CSSProperties;
   }
->(function ReadOnlyFillCell({ def, value, itemHeight = 1, className, style }, ref) {
+>(function ReadOnlyFillCell({ def, value, itemHeight = 1, persons = [], personGroups = [], className, style }, ref) {
   return (
     <div
       ref={ref}
@@ -714,7 +747,7 @@ const ReadOnlyFillCell = forwardRef<
         {def.required && <span className="text-red-500">*</span>}
       </label>
       <div className="min-w-0 flex-1">
-        <ReadOnlyWidget def={def} value={value} itemHeight={itemHeight} />
+        <ReadOnlyWidget def={def} value={value} itemHeight={itemHeight} persons={persons} personGroups={personGroups} />
       </div>
     </div>
   );
@@ -725,10 +758,14 @@ function ReadOnlyWidget({
   def,
   value,
   itemHeight = 1,
+  persons = [],
+  personGroups = [],
 }: {
   def: ResolvedField;
   value: unknown;
   itemHeight?: number;
+  persons?: Person[];
+  personGroups?: PersonGroup[];
 }) {
   const boxCls = 'w-full rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-900 font-medium shadow-2xs';
 
@@ -1018,7 +1055,77 @@ function ReadOnlyWidget({
     );
   }
 
-  // 8. Text / Date / Time / Email / Phone / URL / Number
+  // 8. Entity Reference (Person or Person Group)
+  if (def.type === 'entity_reference' || def.referenceEntityType) {
+    const isPerson = def.referenceEntityType === 'person' || def.name === 'assigned_to' || def.name.toLowerCase().includes('person');
+    const isGroup = def.referenceEntityType === 'person_group' || def.name === 'owner_group' || def.name.toLowerCase().includes('group');
+
+    if (isPerson) {
+      const pid = String(value || '');
+      const p = persons.find((x) => x.person_id === pid);
+      return (
+        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs font-medium text-gray-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Users className="h-3.5 w-3.5 text-gray-500" />
+            <span>
+              {p ? (
+                <span>
+                  <strong className="font-semibold text-gray-900">{p.display_name}</strong>{' '}
+                  <span className="font-mono text-gray-400 text-[11px]">({p.person_id})</span>
+                </span>
+              ) : pid ? (
+                <span className="font-mono font-semibold text-gray-900">{pid}</span>
+              ) : (
+                <span className="text-gray-400 italic">Unassigned</span>
+              )}
+            </span>
+          </div>
+          {pid && (
+            <a
+              href={`#/people/${encodeURIComponent(pid)}`}
+              className="text-[11px] font-semibold text-blue-600 hover:underline"
+            >
+              View Person
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    if (isGroup) {
+      const gname = String(value || '');
+      const g = personGroups.find((x) => x.group_name === gname);
+      return (
+        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs font-medium text-gray-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Layers className="h-3.5 w-3.5 text-gray-500" />
+            <span>
+              {g ? (
+                <span>
+                  <strong className="font-mono font-semibold text-gray-900">{g.group_name}</strong>
+                  {g.description ? <span className="text-gray-500"> — {g.description}</span> : ''}
+                </span>
+              ) : gname ? (
+                <span className="font-mono font-semibold text-gray-900">{gname}</span>
+              ) : (
+                <span className="text-gray-400 italic">No Group</span>
+              )}
+            </span>
+          </div>
+          {gname && (
+            <a
+              href={`#/people/groups/${encodeURIComponent(gname)}`}
+              className="text-[11px] font-semibold text-blue-600 hover:underline"
+            >
+              View Group
+            </a>
+          )}
+        </div>
+      );
+    }
+  }
+
+  // 9. Text / Date / Time / Email / Phone / URL / Number
   return (
     <div className={boxCls}>
       {value !== undefined && value !== null && String(value).trim() !== '' ? (

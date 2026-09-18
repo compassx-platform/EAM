@@ -2,11 +2,11 @@ import { forwardRef, useEffect, useId, useMemo, useRef, useState, type CSSProper
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap, Info, ChevronDown, Database } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap, Info, ChevronDown, Database, Users } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
 import { isItemVisible, isItemReadOnly, withWorkflowStatus } from '../../lib/conditions';
-import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition, ConditionDefinition } from '../../types';
+import type { EntityField, EntityFormItem, ChecklistItem, ResolvedList, VisibilityCondition, ConditionDefinition, Person, PersonGroup } from '../../types';
 
 interface EntityCreateFormProps {
   entityType: string;
@@ -30,6 +30,7 @@ interface ResolvedField {
   maxFileSizeMb?: number;
   allowMultiple?: boolean;
   maxFiles?: number;
+  referenceEntityType?: string | null;
 }
 
 // The layout container only mounts once the form definition is loaded, so
@@ -63,6 +64,8 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
+  const [persons, setPersons] = useState<Person[]>([]);
+  const [personGroups, setPersonGroups] = useState<PersonGroup[]>([]);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
@@ -78,12 +81,16 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     let cancelled = false;
     (async () => {
       try {
-        const [form, condList] = await Promise.all([
+        const [form, condList, personsRes, groupsRes] = await Promise.all([
           api.getForm(entityType),
           api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
+          api.listPersons({ status: 'ACTIVE', limit: 200 }).catch(() => ({ items: [] })),
+          api.listPersonGroups().catch(() => ({ items: [] })),
         ]);
         if (cancelled) return;
         setConditions(condList);
+        setPersons(personsRes.items || []);
+        setPersonGroups(groupsRes.items || []);
         const layout = ((form.layout || []) as Array<any>).map((it) => {
           const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
           const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
@@ -170,6 +177,10 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? 10,
         allowMultiple: it.allowMultiple ?? (it as any).allow_multiple ?? false,
         maxFiles: it.maxFiles ?? (it as any).max_files ?? 5,
+        referenceEntityType:
+          (it as any).referenceEntityType ||
+          (it as any).reference_entity_type ||
+          (it.fieldName === 'assigned_to' ? 'person' : it.fieldName === 'owner_group' ? 'person_group' : null),
       };
     }
     const f = byName.get(it.i);
@@ -186,6 +197,9 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       required: f.required,
       options,
       checklistItems: undefined,
+      referenceEntityType:
+        f.reference_entity_type ||
+        (f.field_name === 'assigned_to' ? 'person' : f.field_name === 'owner_group' ? 'person_group' : null),
     };
   };
 
@@ -403,6 +417,8 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                               value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
                               itemHeight={it.h}
                               readOnly={isReadOnly}
+                              persons={persons}
+                              personGroups={personGroups}
                               onChange={(v) => handleValueChange(it, v)}
                             />
                           );
@@ -423,8 +439,19 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                         {fallbackFields.map((f) => (
                           <FieldRow
                             key={`fallback-${f.field_name}`}
-                            def={{ key: f.field_name, name: f.field_name, type: f.field_type, required: f.required, options: fieldOptions(f) }}
+                            def={{
+                              key: f.field_name,
+                              name: f.field_name,
+                              type: f.field_type,
+                              required: f.required,
+                              options: fieldOptions(f),
+                              referenceEntityType:
+                                f.reference_entity_type ||
+                                (f.field_name === 'assigned_to' ? 'person' : f.field_name === 'owner_group' ? 'person_group' : null),
+                            }}
                             value={values[f.field_name] ?? ''}
+                            persons={persons}
+                            personGroups={personGroups}
                             onChange={(v) => handleFallbackChange(f.field_name, v)}
                           />
                         ))}
@@ -485,13 +512,15 @@ const FillCell = forwardRef<HTMLDivElement, {
   value: string;
   itemHeight?: number;
   readOnly?: boolean;
+  persons?: Person[];
+  personGroups?: PersonGroup[];
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, onChange, className, style }, ref) {
+}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], onChange, className, style }, ref) {
   const id = useId();
   const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
-  const input = makeInput(def, id, value, onChange, rows, readOnly);
+  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups);
   return (
     <div
       ref={ref}
@@ -523,10 +552,14 @@ const FillCell = forwardRef<HTMLDivElement, {
 function FieldRow({
   def,
   value,
+  persons = [],
+  personGroups = [],
   onChange,
 }: {
   def: ResolvedField;
   value: string;
+  persons?: Person[];
+  personGroups?: PersonGroup[];
   onChange: (v: string) => void;
 }) {
   const id = useId();
@@ -536,7 +569,7 @@ function FieldRow({
         {def.label || def.name}
         {def.required && <span className="text-red-500">*</span>}
       </label>
-      {makeInput(def, id, value, onChange, 3)}
+      {makeInput(def, id, value, onChange, 3, false, persons, personGroups)}
     </div>
   );
 }
@@ -547,7 +580,9 @@ function makeInput(
   value: string,
   onChange: (v: string) => void,
   textareaRows?: number,
-  readOnly = false
+  readOnly = false,
+  persons: Person[] = [],
+  personGroups: PersonGroup[] = []
 ) {
   const cls = `w-full rounded-md border px-3 py-2 text-xs transition-colors shadow-2xs ${
     readOnly
@@ -727,7 +762,7 @@ function makeInput(
                 onChange={() => toggle(t.label)}
                 className="accent-blue-600 h-3.5 w-3.5"
               />
-              <span className={done ? 'text-gray-500 line-through' : readOnly ? 'text-gray-500' : 'text-gray-800'}>
+              <span className={done ? 'font-medium text-gray-900' : readOnly ? 'text-gray-500' : 'text-gray-800'}>
                 {t.label}
               </span>
               {t.required && (
@@ -767,6 +802,56 @@ function makeInput(
         <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
       </div>
     );
+  }
+  if (def.type === 'entity_reference' || def.referenceEntityType) {
+    const isPerson = def.referenceEntityType === 'person' || def.name === 'assigned_to' || def.name.toLowerCase().includes('person');
+    const isGroup = def.referenceEntityType === 'person_group' || def.name === 'owner_group' || def.name.toLowerCase().includes('group');
+
+    if (isPerson) {
+      return (
+        <div className="relative w-full">
+          <select
+            id={id}
+            value={value}
+            disabled={readOnly}
+            onChange={(e) => !readOnly && onChange(e.target.value)}
+            className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
+          >
+            <option value="">{def.placeholder || 'Select Person…'}</option>
+            {persons.map((p) => (
+              <option key={p.person_id} value={p.person_id}>
+                {p.display_name} ({p.person_id})
+              </option>
+            ))}
+          </select>
+          <Users className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        </div>
+      );
+    }
+
+    if (isGroup) {
+      return (
+        <div className="relative w-full">
+          <select
+            id={id}
+            value={value}
+            disabled={readOnly}
+            onChange={(e) => !readOnly && onChange(e.target.value)}
+            className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
+          >
+            <option value="">{def.placeholder || 'Select Person Group…'}</option>
+            {personGroups.map((g) => (
+              <option key={g.group_name} value={g.group_name}>
+                {g.group_name} {g.description ? `— ${g.description}` : ''}
+              </option>
+            ))}
+          </select>
+          <Layers className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        </div>
+      );
+    }
   }
   const nativeType: Record<string, string> = {
     number: 'number',
