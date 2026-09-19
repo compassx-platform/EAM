@@ -177,41 +177,41 @@ def _terminal_states(db: Session, entity_type: str, workflow_version: str) -> se
 
 
 def _workorders_referencing_person(db: Session, person_id: str) -> List[Dict[str, Any]]:
-    from backend.models.entities import WorkOrder
+    from backend.models.entities import DynamicEntity
     refs = []
     pid_u = person_id.upper()
-    for wo in db.query(WorkOrder).all():
-        cf = wo.custom_fields or {}
+    for ent in db.query(DynamicEntity).all():
+        cf = ent.custom_fields or {}
         assigned = str(cf.get("assigned_to") or "").upper()
         owner = str(cf.get("owner") or "").upper()
         reported = str(cf.get("reported_by") or "").upper()
         if assigned == pid_u or owner == pid_u or reported == pid_u:
-            terminal = _terminal_states(db, "workorder", wo.workflow_version)
+            terminal = _terminal_states(db, ent.entity_type, ent.workflow_version)
             refs.append({
-                "id": wo.id,
-                "status": wo.status,
-                "title": cf.get("title") or wo.id,
-                "open": wo.status not in terminal,
+                "id": ent.id,
+                "status": ent.status,
+                "title": cf.get("title") or ent.id,
+                "open": ent.status not in terminal,
             })
     return refs
 
 
 def _permits_referencing_person(db: Session, person_id: str) -> List[Dict[str, Any]]:
-    from backend.models.entities import Permit
+    from backend.models.entities import DynamicEntity
     refs = []
     pid_u = person_id.upper()
-    for p in db.query(Permit).all():
-        cf = p.custom_fields or {}
+    for ent in db.query(DynamicEntity).all():
+        cf = ent.custom_fields or {}
         owner = str(cf.get("owner") or "").upper()
         reported = str(cf.get("reported_by") or "").upper()
         affected = str(cf.get("affected_person") or "").upper()
         if owner == pid_u or reported == pid_u or affected == pid_u:
-            terminal = _terminal_states(db, "permit", p.workflow_version)
+            terminal = _terminal_states(db, ent.entity_type, ent.workflow_version)
             refs.append({
-                "id": p.id,
-                "status": p.status,
-                "title": cf.get("title") or p.id,
-                "open": p.status not in terminal,
+                "id": ent.id,
+                "status": ent.status,
+                "title": cf.get("title") or ent.id,
+                "open": ent.status not in terminal,
             })
     return refs
 
@@ -221,11 +221,11 @@ def _inactivate_blockers(db: Session, person: Person) -> List[str]:
 
     open_wos = [r for r in _workorders_referencing_person(db, person.person_id) if r["open"]]
     if open_wos:
-        blockers.append(f"assigned to open work order(s): {', '.join(r['id'] for r in open_wos[:3])}")
+        blockers.append(f"assigned to open record(s): {', '.join(r['id'] for r in open_wos[:3])}")
 
     for r in _permits_referencing_person(db, person.person_id):
         if r["open"]:
-            blockers.append(f"owner/reporter on open permit '{r['id']}'")
+            blockers.append(f"owner/reporter on open record '{r['id']}'")
             break
 
     if db.query(Person).filter(Person.supervisor_id == person.person_id, Person.status == "ACTIVE").count():
@@ -573,12 +573,12 @@ def update_group(group_name: str, req: PersonGroupUpdate, db: Session = Depends(
 @groups_router.delete("/{group_name}")
 def delete_group(group_name: str, db: Session = Depends(get_db)):
     group = _get_group(db, group_name)
-    from backend.models.entities import WorkOrder
-    used_by = [wo.id for wo in db.query(WorkOrder).all() if (wo.custom_fields or {}).get("owner_group") == group.group_name]
+    from backend.models.entities import DynamicEntity
+    used_by = [ent.id for ent in db.query(DynamicEntity).all() if (ent.custom_fields or {}).get("owner_group") == group.group_name]
     if used_by:
         raise HTTPException(
             status_code=409,
-            detail={"error_code": "delete_blocked", "message": "Group is referenced by work orders.", "blockers": [f"work order '{uid}'" for uid in used_by[:5]]},
+            detail={"error_code": "delete_blocked", "message": "Group is referenced by entity records.", "blockers": [f"record '{uid}'" for uid in used_by[:5]]},
         )
     db.delete(group)
     db.commit()

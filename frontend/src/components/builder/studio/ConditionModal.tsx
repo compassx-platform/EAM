@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
-import { Loader2, Plus, ShieldPlus, Trash2, GitBranch, X } from 'lucide-react';
+import { Loader2, Plus, ShieldPlus, Trash2, GitBranch, X, History, Calendar } from 'lucide-react';
 import { api } from '../../../api/client';
-import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, EntityField } from '../../../types';
+import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, ConditionVersion, EntityField } from '../../../types';
 import { Field } from './ui';
 
 const OP_LABEL: Record<string, string> = {
@@ -274,6 +274,30 @@ export function ConditionModal({
   const [root, setRoot] = useState<DraftGroup>(() => (initial ? importGroup(initial.definition) : { logic: 'AND', rules: [makeAtom('attribute')] }));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<ConditionVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+
+  const handleOpenHistory = async () => {
+    if (!initial?.id) return;
+    setHistoryOpen(true);
+    setLoadingVersions(true);
+    try {
+      const vers = await api.listConditionVersions(initial.id);
+      setVersions(vers);
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const handleRestoreVersion = (v: ConditionVersion) => {
+    setRoot(importGroup(v.definition));
+    setLabel(v.label);
+    setFailurePolicy((v.failure_policy as 'block' | 'allow') || 'block');
+    setHistoryOpen(false);
+  };
 
   const pickType = (path: number[], type: string) => {
     setErr(null);
@@ -377,10 +401,20 @@ export function ConditionModal({
   const Editor = () => (
     <div className="flex flex-col gap-3">
       {initial && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-800">
-          <span className="font-mono text-xs font-semibold">{initial.id}</span>
-          <span className="rounded-full bg-white px-1.5 py-0.5 font-semibold">v{initial.current_version}</span>
-          <span className="text-blue-700">Edits apply live to every workflow &amp; form that references this condition.</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-700">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs font-semibold">{initial.id}</span>
+            <span className="rounded-md bg-white px-2 py-0.5 font-semibold border border-gray-200">v{initial.current_version}</span>
+            <span className="text-gray-500">Auto-versioned rule AST</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenHistory}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-2xs hover:bg-gray-100 transition-colors"
+          >
+            <History className="h-3.5 w-3.5 text-gray-400" />
+            <span>History</span>
+          </button>
         </div>
       )}
 
@@ -459,6 +493,81 @@ export function ConditionModal({
     </div>
   );
 
+  const VersionHistory = () => (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+        <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
+          Version History ({versions.length})
+        </span>
+        <button
+          type="button"
+          onClick={() => setHistoryOpen(false)}
+          className="text-xs font-semibold text-blue-600 hover:underline"
+        >
+          ← Back to Editor
+        </button>
+      </div>
+
+      {loadingVersions ? (
+        <div className="flex items-center justify-center py-12 text-gray-400">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="ml-2 text-xs">Loading versions…</span>
+        </div>
+      ) : versions.length === 0 ? (
+        <p className="py-8 text-center text-xs text-gray-400">No previous version snapshots found.</p>
+      ) : (
+        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+          {versions.map((v) => {
+            const isCurrent = v.version === initial?.current_version;
+            const ruleCount = v.definition?.rules?.length ?? 0;
+
+            return (
+              <div
+                key={v.id}
+                className={`flex items-center justify-between p-3 transition-colors ${
+                  isCurrent ? 'bg-blue-50/40' : 'hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-gray-900">v{v.version}</span>
+                    <span className="text-xs text-gray-700 font-medium">{v.label}</span>
+                    {isCurrent && (
+                      <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                    <span>{ruleCount} rule{ruleCount === 1 ? '' : 's'}</span>
+                    <span>·</span>
+                    <span>Policy: {v.failure_policy}</span>
+                    {v.created_at && (
+                      <>
+                        <span>·</span>
+                        <span>{new Date(v.created_at).toLocaleDateString()}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => handleRestoreVersion(v)}
+                    className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                  >
+                    Restore
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   if (variant === 'dialog') {
     const PADDING = 16;
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
@@ -498,7 +607,9 @@ export function ConditionModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {atoms.length === 0 ? (
+          {historyOpen ? (
+            <VersionHistory />
+          ) : atoms.length === 0 ? (
             <p className="text-xs text-gray-400">No condition rule types available.</p>
           ) : (
             <Editor />
@@ -514,15 +625,17 @@ export function ConditionModal({
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving || atoms.length === 0}
-            className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldPlus className="h-3.5 w-3.5" />}
-            {initial ? `Save v${(initial.current_version ?? 0) + 1}` : 'Create condition'}
-          </button>
+          {!historyOpen && (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={saving || atoms.length === 0}
+              className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldPlus className="h-3.5 w-3.5" />}
+              {initial ? `Save v${(initial.current_version ?? 0) + 1}` : 'Create condition'}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -545,7 +658,9 @@ export function ConditionModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {atoms.length === 0 ? (
+          {historyOpen ? (
+            <VersionHistory />
+          ) : atoms.length === 0 ? (
             <p className="text-xs text-gray-400">No condition rule types available.</p>
           ) : (
             <Editor />
@@ -561,15 +676,17 @@ export function ConditionModal({
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={saving || atoms.length === 0}
-            className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldPlus className="h-4 w-4" />}
-            {initial ? `Save v${(initial.current_version ?? 0) + 1}` : 'Create condition'}
-          </button>
+          {!historyOpen && (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={saving || atoms.length === 0}
+              className="flex items-center gap-1.5 rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldPlus className="h-4 w-4" />}
+              {initial ? `Save v${(initial.current_version ?? 0) + 1}` : 'Create condition'}
+            </button>
+          )}
         </div>
       </div>
     </div>

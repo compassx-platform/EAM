@@ -26,7 +26,7 @@ function App() {
 
   const refreshList = useCallback(() => setListTick((t) => t + 1), []);
 
-  const tab: Tab = route.path.startsWith('/records')
+  const tab: Tab = route.path.startsWith('/records') || route.path.startsWith('/create')
     ? 'records'
     : route.path.startsWith('/entities')
       ? 'entities'

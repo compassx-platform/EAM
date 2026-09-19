@@ -7,7 +7,6 @@ from backend.database import Base, get_db
 from tests.fixtures import load_test_fixtures
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability
 from backend.models.users import AppUser
-from backend.models.entities import WorkOrder
 from backend.services.field_validator import validate_custom_fields, FieldValidationError
 from backend.services.condition_evaluator import evaluate_atom
 

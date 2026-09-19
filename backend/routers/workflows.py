@@ -7,14 +7,27 @@ from backend.models.workflow import WorkflowDefinition
 from backend.models.base import generate_uuid, utc_now
 from backend.services.workflow_validator import validate_workflow_definition, WorkflowValidationError
 
+import re
+
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
 
 class WorkflowDraftRequest(BaseModel):
     id: Optional[str] = None
     entity_type: str
-    version_label: str
+    version_label: Optional[str] = None
     definition: Dict[str, Any]  # {"states": [...], "transitions": [...]}
     created_by: Optional[str] = "admin@compassx.io"
+
+def _next_workflow_version(db: Session, entity_type: str) -> str:
+    all_wfs = db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == entity_type.lower()).all()
+    max_v = 0
+    for w in all_wfs:
+        m = re.search(r'v(\d+)', w.version_label or "")
+        if m:
+            max_v = max(max_v, int(m.group(1)))
+        elif w.version_label and w.version_label.isdigit():
+            max_v = max(max_v, int(w.version_label))
+    return f"v{max_v + 1}"
 
 @router.get("")
 def list_workflows(
@@ -29,6 +42,17 @@ def list_workflows(
         query = query.filter(WorkflowDefinition.status == status)
     
     workflows = query.order_by(WorkflowDefinition.entity_type, WorkflowDefinition.created_at.desc()).all()
+    return [w.to_dict() for w in workflows]
+
+@router.get("/entity/{entity_type}/history")
+def get_workflow_history(entity_type: str, db: Session = Depends(get_db)):
+    et = entity_type.lower().strip()
+    workflows = (
+        db.query(WorkflowDefinition)
+        .filter(WorkflowDefinition.entity_type == et)
+        .order_by(WorkflowDefinition.created_at.desc())
+        .all()
+    )
     return [w.to_dict() for w in workflows]
 
 @router.get("/active/{entity_type}")
@@ -52,7 +76,7 @@ def get_workflow(id: str, db: Session = Depends(get_db)):
 @router.post("/draft")
 def save_draft(req: WorkflowDraftRequest, db: Session = Depends(get_db)):
     """
-    Saves or creates a workflow draft definition.
+    Saves or creates a workflow draft definition with automatic versioning.
     """
     entity_type = req.entity_type.lower()
     
@@ -62,10 +86,11 @@ def save_draft(req: WorkflowDraftRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Workflow draft not found")
         if wf.status == "published":
             # Fork into new draft per Section 3.4 (published rows are immutable)
+            version_label = req.version_label or _next_workflow_version(db, entity_type)
             wf = WorkflowDefinition(
                 id=generate_uuid(),
                 entity_type=entity_type,
-                version_label=req.version_label,
+                version_label=version_label,
                 status="draft",
                 definition=req.definition,
                 created_by=req.created_by,
@@ -73,13 +98,17 @@ def save_draft(req: WorkflowDraftRequest, db: Session = Depends(get_db)):
             )
             db.add(wf)
         else:
-            wf.version_label = req.version_label
+            if req.version_label and req.version_label.strip():
+                wf.version_label = req.version_label.strip()
+            elif not wf.version_label:
+                wf.version_label = _next_workflow_version(db, entity_type)
             wf.definition = req.definition
     else:
+        version_label = req.version_label or _next_workflow_version(db, entity_type)
         wf = WorkflowDefinition(
             id=generate_uuid(),
             entity_type=entity_type,
-            version_label=req.version_label,
+            version_label=version_label,
             status="draft",
             definition=req.definition,
             created_by=req.created_by,

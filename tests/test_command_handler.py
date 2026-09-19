@@ -7,7 +7,7 @@ from backend.services.command_handler import (
     ConditionFailedError,
 )
 from backend.services.projector import rebuild_entity_from_events
-from backend.models.entities import WorkOrder, WorkOrderEvent
+from backend.models.entities import DynamicEntity, DynamicEntityEvent
 
 def test_create_and_transition_workorder(test_db):
     res_create = create_entity(
@@ -27,11 +27,11 @@ def test_create_and_transition_workorder(test_db):
     assert res_create["workflow_version"] == "standard_v1"
 
     # Check database state
-    wo = test_db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == wo_id).first()
     assert wo is not None
     assert wo.status == "Draft"
 
-    events = test_db.query(WorkOrderEvent).filter(WorkOrderEvent.entity_id == wo_id).all()
+    events = test_db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id == wo_id).all()
     assert len(events) == 1
     assert events[0].event_type == "CREATED"
 
@@ -46,7 +46,7 @@ def test_create_and_transition_workorder(test_db):
     assert res_trans["accepted"] is True
     assert res_trans["new_status"] == "Submitted"
 
-    events = test_db.query(WorkOrderEvent).filter(WorkOrderEvent.entity_id == wo_id).all()
+    events = test_db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id == wo_id).all()
     assert len(events) == 2
     assert events[1].event_type == "SUBMITTED"
     assert events[1].from_state == "Draft"
@@ -64,7 +64,7 @@ def test_optimistic_concurrency_stale_write(test_db):
     original_event_id = res_create["event_id"]
     
     # Simulate a concurrent worker modifying the entity behind our back
-    wo = test_db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == wo_id).first()
     wo.last_event_id = "concurrently-altered-id"
     test_db.commit()
 
@@ -91,7 +91,7 @@ def test_projector_event_replay(test_db):
     propose_transition(test_db, "workorder", wo_id, "SUBMITTED", "tech@compassx.io")
 
     # Manually corrupt current status
-    wo = test_db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == wo_id).first()
     wo.status = "CorruptedState"
     test_db.commit()
 

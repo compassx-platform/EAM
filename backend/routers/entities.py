@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models.entities import get_entity_models, ENTITY_REGISTRY, DynamicEntity, DynamicEntityEvent
+from backend.models.entities import get_entity_models, DynamicEntity, DynamicEntityEvent
 from backend.models.entity_type import EntityTypeDefinition
 from backend.models.workflow import WorkflowDefinition
 from backend.services.command_handler import (
@@ -51,8 +51,6 @@ def _verify_entity_type(db: Session, entity_type: str) -> str:
     key = (entity_type or "").strip().lower()
     if not key:
         raise HTTPException(status_code=404, detail="Entity type cannot be empty")
-    if key in ENTITY_REGISTRY:
-        return key
     exists = db.query(EntityTypeDefinition).filter(EntityTypeDefinition.name == key).first()
     if not exists:
         raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")

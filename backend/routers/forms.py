@@ -340,17 +340,37 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
 
     form = db.query(EntityForm).filter(EntityForm.entity_type == et).first()
     if form:
+        new_version = (form.version_number or 1) + 1
+        form.version_number = new_version
+        form.version_label = f"v{new_version}"
         form.layout = cleaned
         form.cols = req.cols
         form.row_height = req.row_height
     else:
         form = EntityForm(
             entity_type=et,
+            version_number=1,
+            version_label="v1",
             layout=cleaned,
             cols=req.cols,
             row_height=req.row_height,
         )
         db.add(form)
+
+    from backend.models.forms import FormVersion
+    from backend.models.base import generate_uuid, utc_now
+    fv = FormVersion(
+        id=generate_uuid(),
+        entity_type=et,
+        version_number=form.version_number,
+        version_label=form.version_label,
+        layout=cleaned,
+        sections=[],
+        cols=req.cols,
+        row_height=req.row_height,
+        created_at=utc_now(),
+    )
+    db.add(fv)
 
     db.commit()
     db.refresh(form)
@@ -364,12 +384,26 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
     result["initial_state"] = initial_state
     return result
 
+@router.get("/{entity_type}/history")
+def get_form_history(entity_type: str, db: Session = Depends(get_db)):
+    et = entity_type.lower().strip()
+    from backend.models.forms import FormVersion
+    versions = (
+        db.query(FormVersion)
+        .filter(FormVersion.entity_type == et)
+        .order_by(FormVersion.version_number.desc(), FormVersion.created_at.desc())
+        .all()
+    )
+    return [v.to_dict() for v in versions]
+
 @router.delete("/{entity_type}")
 def delete_form(entity_type: str, db: Session = Depends(get_db)):
     et = entity_type.lower()
     form = db.query(EntityForm).filter(EntityForm.entity_type == et).first()
     if not form:
         raise HTTPException(status_code=404, detail=f"No form layout for entity type '{et}'")
+    from backend.models.forms import FormVersion
+    db.query(FormVersion).filter(FormVersion.entity_type == et).delete(synchronize_session=False)
     db.delete(form)
     db.commit()
     return {"deleted": True, "entity_type": et}

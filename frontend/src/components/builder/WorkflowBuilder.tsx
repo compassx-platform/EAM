@@ -14,7 +14,7 @@ import {
   type NodeChange,
   type EdgeChange,
 } from '@xyflow/react';
-import { Loader2, MousePointer } from 'lucide-react';
+import { Loader2, MousePointer, History, Calendar, X, GitCommitHorizontal } from 'lucide-react';
 import { api } from '../../api/client';
 import type { Workflow, WorkflowAction, WorkflowAutoTransition, WorkflowChoice, ConditionDefinition, ConditionTypeInfo, EntityField } from '../../types';
 import StateNode from './StateNode';
@@ -44,7 +44,7 @@ interface BuilderInnerProps {
 function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const route = useHashRoute();
-  const initialType = route.query.get('type') || 'workorder';
+  const initialType = route.query.get('type') || '';
 
   const [id, setId] = useState<string | null>(workflowId);
   const [entityType, setEntityType] = useState(initialType);
@@ -71,10 +71,41 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const [targetEdgeId, setTargetEdgeId] = useState<string | null>(null);
   const [targetNodeId, setTargetNodeId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [workflowHistory, setWorkflowHistory] = useState<Workflow[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const flash = (kind: 'ok' | 'err', text: string) => {
     setNotice({ kind, text });
     window.setTimeout(() => setNotice(null), 3500);
+  };
+
+  const handleOpenHistory = async () => {
+    setHistoryOpen(true);
+    setLoadingHistory(true);
+    try {
+      const history = await api.getWorkflowHistory(entityType);
+      setWorkflowHistory(history);
+    } catch {
+      setWorkflowHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleLoadWorkflowSnapshot = (wf: Workflow) => {
+    setId(wf.id);
+    setEntityType(wf.entity_type);
+    setVersionLabel(wf.version_label);
+    setStatus(wf.status);
+    const flow = definitionToFlow(wf.definition);
+    setNodes(hydrateNodes(flow.nodes));
+    setEdges(hydrateEdges(flow.edges));
+    setTerminalStates(wf.definition.terminal_states || []);
+    setAutoTransitions(wf.definition.auto_transitions || []);
+    setDirty(false);
+    setHistoryOpen(false);
+    flash('ok', `Loaded version ${wf.version_label}`);
   };
 
   // Handlers can be captured by node/edge `data` callbacks at hydrate time, so
@@ -96,9 +127,24 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   useEffect(() => {
     api
       .listEntityTypes()
-      .then((list) => setKnownTypes(list.map((et) => et.name)))
+      .then((list) => {
+        const names = list.map((et) => et.name);
+        setKnownTypes(names);
+        if (!initialType && names.length > 0) {
+          setEntityType((cur) => cur || names[0]);
+        }
+      })
       .catch(() => {
-        api.listWorkflows().then((wfs) => setKnownTypes([...new Set(wfs.map((w) => w.entity_type))].sort())).catch(() => {});
+        api
+          .listWorkflows()
+          .then((wfs) => {
+            const names = [...new Set(wfs.map((w) => w.entity_type))].sort();
+            setKnownTypes(names);
+            if (!initialType && names.length > 0) {
+              setEntityType((cur) => cur || names[0]);
+            }
+          })
+          .catch(() => {});
       });
     api
       .listConditionTypes()
@@ -135,7 +181,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         .finally(() => setLoading(false));
     } else {
       const seed = definitionToFlow({
-        entity_type: 'workorder',
+        entity_type: entityType || initialType || 'entity',
         version_label: 'draft_v1',
         states: ['Start'],
         nodes: [{ name: 'Start', kind: 'start', position: { x: 48, y: 64 } }],
@@ -540,10 +586,26 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   };
 
   const handlePublish = async () => {
-    if (!id) await handleSave();
+    if (nodes.length === 0) {
+      flash('err', 'Add at least one state before publishing.');
+      return;
+    }
     setSaving(true);
     try {
-      const res = await api.publishWorkflow(id!);
+      let targetId = id;
+      if (!targetId || dirty) {
+        const saved = await api.saveDraft({
+          id: targetId || undefined,
+          entity_type: entityType,
+          version_label: versionLabel,
+          definition: buildDefinition(),
+        });
+        targetId = saved.id;
+        setId(saved.id);
+        setStatus(saved.status);
+      }
+
+      const res = await api.publishWorkflow(targetId);
       setId(res.workflow.id);
       setStatus(res.workflow.status);
       setDirty(false);
@@ -558,13 +620,27 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   };
 
   const handleValidate = async () => {
-    if (!id) {
-      flash('err', 'Save the draft first, then validate.');
+    if (nodes.length === 0) {
+      flash('err', 'Add at least one state before validating.');
       return;
     }
     setSaving(true);
     try {
-      const res = await api.validateWorkflow(id);
+      let targetId = id;
+      if (!targetId || dirty) {
+        const saved = await api.saveDraft({
+          id: targetId || undefined,
+          entity_type: entityType,
+          version_label: versionLabel,
+          definition: buildDefinition(),
+        });
+        targetId = saved.id;
+        setId(saved.id);
+        setStatus(saved.status);
+        setDirty(false);
+        onListRefresh();
+      }
+      const res = await api.validateWorkflow(targetId);
       if (res.valid) flash('ok', 'Validation passed.');
       else flash('err', `Validation failed: ${res.errors.join('; ') || 'invalid workflow'}`);
     } catch (err: any) {
@@ -607,10 +683,6 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
             setDirty(true);
           }}
           versionLabel={versionLabel}
-          onVersionLabel={(v) => {
-            setVersionLabel(v);
-            setDirty(true);
-          }}
           status={status}
           dirty={dirty}
           saving={saving}
@@ -620,6 +692,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           onAutoArrange={handleAutoArrange}
           onNewCondition={() => setConditionModalOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenHistory={handleOpenHistory}
           onValidate={handleValidate}
           onSave={handleSave}
           onPublish={handlePublish}
@@ -825,6 +898,116 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
           }}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+
+      {historyOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          onMouseDown={() => setHistoryOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-gray-500" />
+                <h3 className="text-sm font-bold text-gray-900">
+                  Workflow History · <span className="font-mono text-gray-600">{entityType}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {loadingHistory ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="ml-2 text-xs">Loading workflow history…</span>
+                </div>
+              ) : workflowHistory.length === 0 ? (
+                <p className="py-8 text-center text-xs text-gray-400">No previous workflow versions found.</p>
+              ) : (
+                <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                  {workflowHistory.map((wf) => {
+                    const isCurrent = wf.id === id;
+                    const stateCount = wf.definition?.states?.length ?? 0;
+                    const transitionCount = wf.definition?.transitions?.length ?? 0;
+
+                    return (
+                      <div
+                        key={wf.id}
+                        className={`flex items-center justify-between p-3.5 transition-colors ${
+                          isCurrent ? 'bg-blue-50/40' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-gray-900">{wf.version_label}</span>
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                                wf.status === 'published'
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                  : 'border-amber-200 bg-amber-50 text-amber-700'
+                              }`}
+                            >
+                              {wf.status}
+                            </span>
+                            {isCurrent && (
+                              <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                                Active in Editor
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                            <span>{stateCount} states</span>
+                            <span>·</span>
+                            <span>{transitionCount} transitions</span>
+                            {wf.published_at && (
+                              <>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-gray-400" />
+                                  Published {new Date(wf.published_at).toLocaleDateString()}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => handleLoadWorkflowSnapshot(wf)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                          >
+                            <span>Load</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end border-t border-gray-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

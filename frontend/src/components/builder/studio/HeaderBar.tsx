@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, GitFork, LayoutGrid, Loader2, MoreHorizontal, Pencil, Rocket, Save, Settings, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, GitFork, History, LayoutGrid, Loader2, MoreHorizontal, Pencil, Rocket, Save, Settings, Trash2 } from 'lucide-react';
 import type { Workflow } from '../../../types';
 
 export interface StudioNotice {
@@ -11,7 +11,6 @@ interface HeaderBarProps {
   entityType: string;
   onEntityType: (v: string) => void;
   versionLabel: string;
-  onVersionLabel: (v: string) => void;
   status: Workflow['status'];
   dirty: boolean;
   saving: boolean;
@@ -21,6 +20,7 @@ interface HeaderBarProps {
   onAutoArrange: () => void;
   onNewCondition: () => void;
   onOpenSettings: () => void;
+  onOpenHistory?: () => void;
   onValidate: () => void;
   onSave: () => void;
   onPublish: () => void;
@@ -53,13 +53,12 @@ export function HeaderBar(p: HeaderBarProps) {
           ))}
         </select>
         <span className="text-gray-300 font-medium">/</span>
-        <input
-          value={p.versionLabel}
-          onChange={(e) => p.onVersionLabel(e.target.value)}
-          placeholder="draft_v1"
-          title="Version label"
-          className="w-28 rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-gray-600 hover:border-gray-200 hover:bg-gray-50 focus:border-blue-500 focus:bg-white focus:outline-none transition-colors"
-        />
+        <span
+          title="Auto-assigned version"
+          className="font-mono text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded border border-gray-200"
+        >
+          {p.versionLabel || 'v1'}
+        </span>
       </div>
 
       <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusPill[p.status]}`}>
@@ -80,6 +79,18 @@ export function HeaderBar(p: HeaderBarProps) {
             {p.notice.kind === 'ok' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
             {p.notice.text}
           </span>
+        )}
+
+        {p.onOpenHistory && (
+          <button
+            type="button"
+            onClick={p.onOpenHistory}
+            title="View workflow version history"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+          >
+            <History className="h-3.5 w-3.5 text-gray-400" />
+            <span>History</span>
+          </button>
         )}
 
         <button

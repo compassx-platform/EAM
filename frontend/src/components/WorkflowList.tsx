@@ -3,7 +3,6 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  Pencil,
   Loader2,
   GitBranch,
   History,
@@ -52,7 +51,7 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newModalOpen, setNewModalOpen] = useState(false);
-  const [selectedNewType, setSelectedNewType] = useState('workorder');
+  const [selectedNewType, setSelectedNewType] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(() => {
@@ -65,13 +64,11 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
       .then(([wfs, ets]) => {
         setWorkflows(wfs);
         setEntityTypesList(ets);
-        if (ets.length > 0 && !selectedNewType) {
-          setSelectedNewType(ets[0].name);
-        }
+        setSelectedNewType((prev) => prev || (ets.length > 0 ? ets[0].name : ''));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [selectedNewType]);
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -279,10 +276,16 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                   const hasHistory = row.history.length > 0;
                   const isExpanded = expanded.has(row.entityType);
                   return [
-                    <tr key={cur.id} className="align-middle hover:bg-gray-50/60 transition-colors">
+                    <tr
+                      key={cur.id}
+                      onClick={() => onEdit(cur)}
+                      className="align-middle hover:bg-gray-50/80 cursor-pointer transition-colors group"
+                    >
                       {/* Workflow / entity */}
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-gray-900">{row.displayName}</div>
+                        <div className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                          {row.displayName}
+                        </div>
                         <div className="mt-0.5 font-mono text-[11px] text-gray-500">{row.entityType}</div>
                       </td>
 
@@ -296,12 +299,15 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                       <td className="px-3 py-3 text-[11px] text-gray-500">{versionDate(cur)}</td>
 
                       {/* Actions */}
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
                           {hasHistory && (
                             <button
                               type="button"
-                              onClick={() => toggleExpand(row.entityType)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpand(row.entityType);
+                              }}
                               className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
                               title={isExpanded ? 'Hide version history' : 'View version history'}
                             >
@@ -311,15 +317,10 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                           )}
                           <button
                             type="button"
-                            onClick={() => onEdit(cur)}
-                            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                            title={cur.status === 'published' ? 'Edit (forks a new draft)' : 'Edit workflow'}
-                          >
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(cur)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(cur);
+                            }}
                             disabled={isLive}
                             className="flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
                             title={isLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
@@ -334,37 +335,36 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                         <td colSpan={4} className="bg-gray-50/40 px-4 py-3">
                           <div className="divide-y divide-gray-100">
                             {row.history.map((v) => {
-                            const vLive = row.live?.id === v.id;
-                            return (
-                              <div key={v.id} className="flex flex-wrap items-center gap-3 py-2">
-                                <span className="flex items-center gap-2 font-mono text-[12px] font-medium text-gray-700">
-                                  <GitBranch className="h-3.5 w-3.5 text-gray-400" />
-                                  {v.version_label}
-                                </span>
-                                <span className="text-[11px] text-gray-500">{statusText(v)}</span>
-                                <span className="text-[11px] text-gray-500">{versionDate(v)}</span>
-                                <div className="ml-auto flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => onEdit(v)}
-                                    className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                                    title={v.status === 'published' ? 'Edit (forks a new draft)' : 'Edit workflow'}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDelete(v)}
-                                    disabled={vLive}
-                                    className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
-                                    title={vLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
-                                  >
-                                    {deleting === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                  </button>
+                              const vLive = row.live?.id === v.id;
+                              return (
+                                <div
+                                  key={v.id}
+                                  onClick={() => onEdit(v)}
+                                  className="flex flex-wrap items-center gap-3 py-2 px-2 rounded-lg hover:bg-white/80 cursor-pointer transition-colors group/hist"
+                                >
+                                  <span className="flex items-center gap-2 font-mono text-[12px] font-medium text-gray-700 group-hover/hist:text-blue-700 transition-colors">
+                                    <GitBranch className="h-3.5 w-3.5 text-gray-400" />
+                                    {v.version_label}
+                                  </span>
+                                  <span className="text-[11px] text-gray-500">{statusText(v)}</span>
+                                  <span className="text-[11px] text-gray-500">{versionDate(v)}</span>
+                                  <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDelete(v);
+                                      }}
+                                      disabled={vLive}
+                                      className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
+                                      title={vLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
+                                    >
+                                      {deleting === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
                           </div>
                         </td>
                       </tr>

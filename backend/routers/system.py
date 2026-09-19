@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from backend.database import get_db, Base, engine
-from backend.models.entities import WorkOrder, WorkOrderEvent, Permit, PermitEvent, ENTITY_REGISTRY
+from backend.models.entities import DynamicEntity, DynamicEntityEvent
+from backend.models.entity_type import EntityTypeDefinition
 from backend.models.workflow import WorkflowDefinition
 from backend.models.conditions import ConditionDefinition
 from backend.models.field_registry import EntityField
@@ -16,37 +17,30 @@ router = APIRouter(prefix="/system", tags=["System & Admin"])
 _start_time = time.time()
 
 @router.get("/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
+    registered = [et.name for et in db.query(EntityTypeDefinition).order_by(EntityTypeDefinition.name.asc()).all()]
     return {
         "status": "healthy",
         "service": "compassx-eam-backend",
         "version": "1.0.0",
         "uptime_seconds": round(time.time() - _start_time, 2),
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "registered_entities": list(ENTITY_REGISTRY.keys()),
+        "registered_entities": registered,
     }
 
 @router.get("/stats")
 def get_system_stats(db: Session = Depends(get_db)):
-    workorders_count = db.query(WorkOrder).count()
-    permits_count = db.query(Permit).count()
-    active_permits = db.query(Permit).filter(Permit.status == "Active").count()
-    in_progress_wo = db.query(WorkOrder).filter(WorkOrder.status == "InProgress").count()
-    total_events = db.query(WorkOrderEvent).count() + db.query(PermitEvent).count()
+    entities_count = db.query(DynamicEntity).count()
+    total_events = db.query(DynamicEntityEvent).count()
+    entity_types_count = db.query(EntityTypeDefinition).count()
     workflows_count = db.query(WorkflowDefinition).count()
     conditions_count = db.query(ConditionDefinition).count()
     fields_count = db.query(EntityField).count()
     users_count = db.query(AppUser).count()
 
     return {
-        "workorders": {
-            "total": workorders_count,
-            "in_progress": in_progress_wo,
-        },
-        "permits": {
-            "total": permits_count,
-            "active": active_permits,
-        },
+        "entities_count": entities_count,
+        "entity_types_count": entity_types_count,
         "total_events": total_events,
         "workflows_count": workflows_count,
         "conditions_count": conditions_count,
@@ -59,21 +53,8 @@ def list_all_events(limit: int = 50, db: Session = Depends(get_db)):
     """
     Returns unified recent event audit stream across all entities.
     """
-    wo_events = db.query(WorkOrderEvent).order_by(WorkOrderEvent.transaction_time.desc()).limit(limit).all()
-    permit_events = db.query(PermitEvent).order_by(PermitEvent.transaction_time.desc()).limit(limit).all()
-
-    combined = []
-    for e in wo_events:
-        d = e.to_dict()
-        d["entity_type"] = "workorder"
-        combined.append(d)
-    for e in permit_events:
-        d = e.to_dict()
-        d["entity_type"] = "permit"
-        combined.append(d)
-
-    combined.sort(key=lambda x: x["transaction_time"] or "", reverse=True)
-    return combined[:limit]
+    events = db.query(DynamicEntityEvent).order_by(DynamicEntityEvent.transaction_time.desc()).limit(limit).all()
+    return [e.to_dict() for e in events]
 
 @router.post("/check-expiry")
 def trigger_expiry_check(db: Session = Depends(get_db)):
@@ -86,5 +67,3 @@ def trigger_expiry_check(db: Session = Depends(get_db)):
         "expired_count": len(expired),
         "expired_permits": expired,
     }
-
-

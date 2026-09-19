@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from backend.services.command_handler import create_entity, propose_transition
 from backend.services.expiry_worker import check_and_expire_permits
-from backend.models.entities import Permit, PermitEvent
+from backend.models.entities import DynamicEntity, DynamicEntityEvent
 
 def test_permit_auto_expiry_system_actor(test_db):
     # Create permit with past expiry_date
@@ -28,7 +28,7 @@ def test_permit_auto_expiry_system_actor(test_db):
     propose_transition(test_db, "permit", p_id, "ACTIVATED", "charlie.tech@compassx.io")
 
     # Verify permit is Active
-    p = test_db.query(Permit).filter(Permit.id == p_id).first()
+    p = test_db.query(DynamicEntity).filter(DynamicEntity.id == p_id).first()
     assert p.status == "Active"
 
     # Run expiry checker
@@ -42,8 +42,8 @@ def test_permit_auto_expiry_system_actor(test_db):
 
     # Verify event row has actor_type='system' and actor_id='system:expiry-checker'
     event = (
-        test_db.query(PermitEvent)
-        .filter(PermitEvent.entity_id == p_id, PermitEvent.event_type == "EXPIRED")
+        test_db.query(DynamicEntityEvent)
+        .filter(DynamicEntityEvent.entity_id == p_id, DynamicEntityEvent.event_type == "EXPIRED")
         .first()
     )
     assert event is not None

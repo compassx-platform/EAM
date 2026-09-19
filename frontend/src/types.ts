@@ -338,8 +338,22 @@ export interface EntityFormItem {
   empty_state_text?: string | null;
 }
 
+export interface FormVersion {
+  id: string;
+  entity_type: string;
+  version_number: number;
+  version_label: string;
+  cols: number;
+  row_height: number;
+  layout: EntityFormItem[];
+  created_by?: string | null;
+  created_at?: string | null;
+}
+
 export interface EntityForm {
   entity_type: string;
+  version_number?: number;
+  version_label?: string;
   layout: EntityFormItem[];
   sections: string[];
   cols: number;
@@ -403,12 +417,27 @@ export interface ListUsage {
   form_item_count: number;
 }
 
+export interface EntityTypeVersion {
+  id: string;
+  entity_name: string;
+  version_number: number;
+  version_label: string;
+  display_name: string;
+  description?: string | null;
+  icon?: string | null;
+  fields: EntityFieldInput[];
+  created_by?: string | null;
+  created_at?: string | null;
+}
+
 export interface EntityTypeDefinition {
   name: string;
   display_name: string;
   description: string;
   icon: string;
   is_system: boolean;
+  version_number?: number;
+  version_label?: string;
   field_count?: number;
   workflow_count?: number;
   condition_count?: number;

@@ -7,7 +7,7 @@ from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition
 from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.forms import EntityForm
-from backend.models.entities import WorkOrder, Permit, PMSchedule
+from backend.models.entities import DynamicEntity
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability, PersonAudit
 from backend.models.lists import ListDefinition
 from backend.models.entity_type import EntityTypeDefinition
@@ -996,7 +996,7 @@ def seed_legacy_workflow_if_absent(db: Session, entity_type: str, version_label:
 
 
 def seed_sample_entities(db: Session):
-    if db.query(Permit).count() > 0:
+    if db.query(DynamicEntity).filter(DynamicEntity.entity_type == "permit").count() > 0:
         return
 
     # --- Sample Permit 1: hot-work permit walked through permit_v2 to ACTIVE ---

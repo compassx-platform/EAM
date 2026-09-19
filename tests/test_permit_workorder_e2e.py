@@ -5,7 +5,6 @@ from backend.services.command_handler import (
     propose_transition,
     ConditionFailedError,
 )
-from backend.models.entities import WorkOrder, Permit
 
 def test_full_spec_checkpoint_scenario(test_db):
     """

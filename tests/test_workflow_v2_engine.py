@@ -26,11 +26,8 @@ from backend.services.command_handler import (
 )
 from backend.models.conditions import ConditionDefinition
 from backend.models.entities import (
-    WorkOrder,
-    WorkOrderEvent,
-    Permit,
-    PMSchedule,
-    PMScheduleEvent,
+    DynamicEntity,
+    DynamicEntityEvent,
 )
 
 
@@ -244,8 +241,8 @@ def test_emergency_workorder_auto_routes_to_inprg(test_db):
     assert res["settled"], "expected an auto-transition to be fired on create"
 
     auto_events = (
-        test_db.query(WorkOrderEvent)
-        .filter(WorkOrderEvent.entity_id == res["entity_id"], WorkOrderEvent.event_type == "AUTO_EMR")
+        test_db.query(DynamicEntityEvent)
+        .filter(DynamicEntityEvent.entity_id == res["entity_id"], DynamicEntityEvent.event_type == "AUTO_EMR")
         .all()
     )
     assert len(auto_events) == 1
@@ -290,7 +287,7 @@ def test_express_path_no_permit_no_variance_no_failure(test_db):
 
     assert "side_effects" not in out
 
-    wo = test_db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == wo_id).first()
     assert wo.status == "CLOSED"
 
 
@@ -311,7 +308,7 @@ def test_full_v2_hazardous_flow_with_actions(test_db):
     assert res_p["status"] == "Requested"
     propose_transition(db=test_db, entity_type="permit", entity_id=permit_id, event_type="RISK_ASSESSMENT_COMPLETED", actor_id="charlie.tech@compassx.io")
     propose_transition(db=test_db, entity_type="permit", entity_id=permit_id, event_type="APPROVED", actor_id="alice.safety@compassx.io", actor_roles=["Safety Officer"])
-    permit = test_db.query(Permit).filter(Permit.id == permit_id).first()
+    permit = test_db.query(DynamicEntity).filter(DynamicEntity.id == permit_id).first()
     assert permit.status == "Approved"
 
     # --- PM schedule that closing work will update ---
@@ -406,12 +403,12 @@ def test_full_v2_hazardous_flow_with_actions(test_db):
     assert side_effects["create_related_entity"]["success"] is True
 
     # 8a. PM schedule last_completion_date updated via a FIELD_UPDATE event
-    pm = test_db.query(PMSchedule).filter(PMSchedule.id == pm_id).first()
+    pm = test_db.query(DynamicEntity).filter(DynamicEntity.id == pm_id).first()
     assert pm.custom_fields.get("last_completion_date") is not None
 
     pm_event = (
-        test_db.query(PMScheduleEvent)
-        .filter(PMScheduleEvent.entity_id == pm_id, PMScheduleEvent.event_type == "FIELD_UPDATE")
+        test_db.query(DynamicEntityEvent)
+        .filter(DynamicEntityEvent.entity_id == pm_id, DynamicEntityEvent.event_type == "FIELD_UPDATE")
         .first()
     )
     assert pm_event is not None
@@ -419,11 +416,11 @@ def test_full_v2_hazardous_flow_with_actions(test_db):
     assert pm_event.payload["custom_fields_delta"]["last_completion_date"] is not None
 
     # 8b. Next work order generated, new id written back to the closing WO
-    wo = test_db.query(WorkOrder).filter(WorkOrder.id == wo_id).first()
+    wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == wo_id).first()
     next_wo_id = wo.custom_fields.get("next_wo_id")
     assert next_wo_id is not None
 
-    next_wo = test_db.query(WorkOrder).filter(WorkOrder.id == next_wo_id).first()
+    next_wo = test_db.query(DynamicEntity).filter(DynamicEntity.id == next_wo_id).first()
     assert next_wo is not None
     assert next_wo.status == "WAPPR"
     assert next_wo.workflow_version == "standard_v2"
@@ -438,7 +435,7 @@ def test_full_v2_hazardous_flow_with_actions(test_db):
 
 def test_seed_emergency_sample_auto_settled(test_db):
     wo = None
-    for row in test_db.query(WorkOrder).all():
+    for row in test_db.query(DynamicEntity).all():
         if (row.custom_fields or {}).get("title") == "Cooling Water Line Burst — Urgent Isolation":
             wo = row
             break
@@ -447,8 +444,8 @@ def test_seed_emergency_sample_auto_settled(test_db):
     assert wo.workflow_version == "standard_v2"
 
     sample_events = (
-        test_db.query(WorkOrderEvent)
-        .filter(WorkOrderEvent.entity_id == wo.id, WorkOrderEvent.event_type == "AUTO_EMR")
+        test_db.query(DynamicEntityEvent)
+        .filter(DynamicEntityEvent.entity_id == wo.id, DynamicEntityEvent.event_type == "AUTO_EMR")
         .count()
     )
     assert sample_events == 1

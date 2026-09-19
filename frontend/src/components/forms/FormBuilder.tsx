@@ -7,13 +7,14 @@ import {
 } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { Loader2 } from 'lucide-react';
+import { Loader2, History, Calendar, X } from 'lucide-react';
 import { api } from '../../api/client';
 import type {
   EntityField,
   EntityFormItem,
   GenericFieldType,
   EntityFieldType,
+  FormVersion,
   OptionListSummary,
   ResolvedList,
   ConditionDefinition,
@@ -76,6 +77,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const [workflowStates, setWorkflowStates] = useState<string[]>([]);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
+  const [versionLabel, setVersionLabel] = useState('v1');
   const [selected, setSelected] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, any>>({});
 
@@ -99,6 +101,9 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const [conditionToEdit, setConditionToEdit] = useState<ConditionDefinition | null>(null);
   const [conditionAnchorY, setConditionAnchorY] = useState<number | null>(null);
   const [centralConditionsListOpen, setCentralConditionsListOpen] = useState(false);
+  const [formHistoryOpen, setFormHistoryOpen] = useState(false);
+  const [formHistory, setFormHistory] = useState<FormVersion[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Canvas container measurement
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -109,6 +114,30 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setNotice({ kind, text });
     setTimeout(() => setNotice(null), 3500);
   }, []);
+
+  const handleOpenHistory = async () => {
+    setFormHistoryOpen(true);
+    setLoadingHistory(true);
+    try {
+      const history = await api.getFormHistory(entityType);
+      setFormHistory(history);
+    } catch {
+      setFormHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleLoadFormSnapshot = (snap: FormVersion) => {
+    const normalized = normalizeFormLayout(snap.layout || [], snap.cols || cols);
+    setItems(normalized);
+    setCols(snap.cols || cols);
+    setRowHeight(snap.row_height || rowHeight);
+    setVersionLabel(snap.version_label);
+    setDirty(false);
+    setFormHistoryOpen(false);
+    flash('ok', `Loaded layout snapshot ${snap.version_label}`);
+  };
 
   const refreshConditions = useCallback(async () => {
     try {
@@ -156,6 +185,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         setWorkflowStates(formData.workflow_states || []);
         setCols(formData.cols || 12);
         setRowHeight(formData.row_height || 40);
+        setVersionLabel(formData.version_label || (formData.version_number ? `v${formData.version_number}` : 'v1'));
         setConditions(condList);
         setConditionTypes(condTypes);
         setPublishedLists(lists.filter((l) => l.status === 'published'));
@@ -331,6 +361,11 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       if (res && Array.isArray(res.layout)) {
         setItems(normalizeFormLayout(res.layout, cols));
       }
+      if (res && res.version_label) {
+        setVersionLabel(res.version_label);
+      } else if (res && res.version_number) {
+        setVersionLabel(`v${res.version_number}`);
+      }
       setDirty(false);
       onChanged();
       flash('ok', 'Form layout saved successfully.');
@@ -410,6 +445,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         {/* Top Toolbar */}
         <FormToolbar
           entityType={entityType}
+          versionLabel={versionLabel}
           itemCount={items.length}
           conditions={conditions}
           dirty={dirty}
@@ -421,6 +457,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
           onDelete={handleDelete}
           onOpenJson={() => setJsonOpen(true)}
           onOpenPreview={() => setPreviewOpen(true)}
+          onOpenHistory={handleOpenHistory}
           onOpenConditionsList={() => setCentralConditionsListOpen(true)}
         />
 
@@ -617,6 +654,107 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <ConditionList />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form Version History Modal */}
+      {formHistoryOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          onMouseDown={() => setFormHistoryOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-gray-500" />
+                <h3 className="text-sm font-bold text-gray-900">
+                  Form History · <span className="font-mono text-gray-600">{entityType}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormHistoryOpen(false)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {loadingHistory ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="ml-2 text-xs">Loading form history…</span>
+                </div>
+              ) : formHistory.length === 0 ? (
+                <p className="py-8 text-center text-xs text-gray-400">No previous form layout versions found.</p>
+              ) : (
+                <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                  {formHistory.map((snap) => {
+                    const isCurrent = snap.version_label === versionLabel;
+                    const itemCount = snap.layout?.length ?? 0;
+
+                    return (
+                      <div
+                        key={snap.id}
+                        className={`flex items-center justify-between p-3.5 transition-colors ${
+                          isCurrent ? 'bg-blue-50/40' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-gray-900">{snap.version_label}</span>
+                            {isCurrent && (
+                              <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                                Active in Editor
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                            <span>{itemCount} item{itemCount === 1 ? '' : 's'}</span>
+                            <span>·</span>
+                            <span>{snap.cols} columns</span>
+                            {snap.created_at && (
+                              <>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-gray-400" />
+                                  Saved {new Date(snap.created_at).toLocaleDateString()}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => handleLoadFormSnapshot(snap)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                          >
+                            <span>Restore</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end border-t border-gray-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setFormHistoryOpen(false)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

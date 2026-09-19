@@ -12,6 +12,8 @@ import {
   CheckSquare,
   GitCommitHorizontal,
   Link2,
+  History,
+  Calendar,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { ChecklistItem, ListDefinition, ListKind } from '../../types';
@@ -40,6 +42,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [versions, setVersions] = useState<ListDefinition[]>([]);
   const [usage, setUsage] = useState<{ field_count: number; form_item_count: number } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     if (isNew) return;
@@ -83,6 +86,21 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
     () => items.filter((i): i is ChecklistItem => typeof i !== 'string'),
     [items]
   );
+
+  const latestVersion = useMemo(() => {
+    const pub = versions.find((v) => v.status === 'published');
+    if (pub) return pub.version_label;
+    if (versions.length > 0) return versions[0].version_label;
+    return 'v1 (draft)';
+  }, [versions]);
+
+  const handleRestoreVersionItems = (snap: ListDefinition) => {
+    setItems(snap.items);
+    setKind(snap.kind);
+    if (snap.description) setDescription(snap.description);
+    setHistoryOpen(false);
+    flash('ok', `Restored items from ${snap.version_label} into draft.`);
+  };
 
   const setOption = (idx: number, value: string) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? value : it)));
@@ -193,9 +211,34 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
             </p>
           </div>
         </div>
-        <span className="flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 font-mono text-xs font-semibold text-blue-700">
-          <ListChecks className="h-3.5 w-3.5" /> list · {kind}
-        </span>
+        <div className="flex items-center gap-2">
+          {!isNew && (
+            <span
+              title="Auto-assigned list version"
+              className="rounded-md bg-gray-100 px-2 py-1 font-mono text-xs font-semibold text-gray-700 border border-gray-200"
+            >
+              {latestVersion}
+            </span>
+          )}
+          <span className="flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 font-mono text-xs font-semibold text-blue-700">
+            <ListChecks className="h-3.5 w-3.5" /> list · {kind}
+          </span>
+          {!isNew && (
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+            >
+              <History className="h-3.5 w-3.5 text-gray-500" />
+              <span>History</span>
+              {versions.length > 0 && (
+                <span className="rounded bg-gray-100 px-1 font-mono text-[10px] text-gray-600">
+                  {versions.length}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {!loaded && (
@@ -406,6 +449,99 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* List Version History Modal */}
+      {historyOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          onMouseDown={() => setHistoryOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-gray-500" />
+                <h3 className="text-sm font-bold text-gray-900">
+                  List History · <span className="font-mono text-gray-600">{key}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {versions.length === 0 ? (
+                <p className="py-8 text-center text-xs text-gray-400">No published version snapshots found.</p>
+              ) : (
+                <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                  {versions.map((snap) => {
+                    return (
+                      <div
+                        key={snap.id}
+                        className="flex items-center justify-between p-3.5 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-gray-900">{snap.version_label}</span>
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                                snap.status === 'published'
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                  : 'border-gray-200 bg-gray-50 text-gray-600'
+                              }`}
+                            >
+                              {snap.status}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                            <span>{snap.items.length} item{snap.items.length === 1 ? '' : 's'}</span>
+                            <span>·</span>
+                            <span>{snap.kind}</span>
+                            {snap.published_at && (
+                              <>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-gray-400" />
+                                  Published {new Date(snap.published_at).toLocaleDateString()}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreVersionItems(snap)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                        >
+                          <span>Restore items</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end border-t border-gray-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -13,6 +13,7 @@ import type {
   ValidTransition,
   EntityForm,
   EntityFormItem,
+  FormVersion,
   OptionListSummary,
   ListDefinition,
   ResolvedList,
@@ -20,6 +21,7 @@ import type {
   ChecklistItem,
   ListUsage,
   EntityTypeDefinition,
+  EntityTypeVersion,
   EntityFieldInput,
   Person,
   PersonGroup,
@@ -64,6 +66,10 @@ export const api = {
   listWorkflows(entityType?: string): Promise<Workflow[]> {
     const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : '';
     return request<Workflow[]>(`/workflows${q}`);
+  },
+
+  getWorkflowHistory(entityType: string): Promise<Workflow[]> {
+    return request<Workflow[]>(`/workflows/entity/${encodeURIComponent(entityType)}/history`);
   },
 
   getWorkflow(id: string): Promise<Workflow> {
@@ -184,6 +190,10 @@ export const api = {
 
   getForm(entityType: string): Promise<EntityForm & { fields: EntityField[] }> {
     return request(`/forms/${encodeURIComponent(entityType)}`);
+  },
+
+  getFormHistory(entityType: string): Promise<FormVersion[]> {
+    return request<FormVersion[]>(`/forms/${encodeURIComponent(entityType)}/history`);
   },
 
   saveForm(input: {
@@ -349,6 +359,10 @@ export const api = {
 
   getEntityType(name: string): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`);
+  },
+
+  getEntityTypeHistory(name: string): Promise<EntityTypeVersion[]> {
+    return request<EntityTypeVersion[]>(`/entity-types/${encodeURIComponent(name)}/history`);
   },
 
   createEntityType(input: {
@@ -549,9 +563,3 @@ export const api = {
     );
   },
 };
-
-export const ENTITY_TYPES: Array<{ value: string; label: string }> = [
-  { value: 'workorder', label: 'Work Order' },
-  { value: 'permit', label: 'Permit to Work' },
-  { value: 'pm_schedule', label: 'PM Schedule' },
-];

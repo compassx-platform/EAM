@@ -7,7 +7,7 @@ from sqlalchemy import func, inspect, text
 
 from backend.database import get_db
 from backend.models.entity_type import EntityTypeDefinition
-from backend.models.entities import get_entity_models, ENTITY_REGISTRY, DynamicEntity, DynamicEntityEvent
+from backend.models.entities import get_entity_models, DynamicEntity, DynamicEntityEvent
 from backend.models.field_registry import (
     EntityField,
     FIELD_TYPES,
@@ -182,11 +182,7 @@ def list_entity_types(db: Session = Depends(get_db)):
 
         # Live record count
         try:
-            EntityModel, _ = get_entity_models(key)
-            if EntityModel == DynamicEntity:
-                item["record_count"] = db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).count()
-            else:
-                item["record_count"] = db.query(EntityModel).count()
+            item["record_count"] = db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).count()
         except Exception:
             item["record_count"] = 0
 
@@ -211,11 +207,7 @@ def get_entity_type(name: str, db: Session = Depends(get_db)):
     item["form_count"] = len(form.layout) if (form and form.layout) else 0
 
     try:
-        EntityModel, _ = get_entity_models(key)
-        if EntityModel == DynamicEntity:
-            item["record_count"] = db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).count()
-        else:
-            item["record_count"] = db.query(EntityModel).count()
+        item["record_count"] = db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).count()
     except Exception:
         item["record_count"] = 0
 
@@ -287,6 +279,21 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
             sections=[],
         ))
 
+    from backend.models.entity_type import EntityTypeVersion
+    from backend.models.base import generate_uuid, utc_now
+
+    db.add(EntityTypeVersion(
+        id=generate_uuid(),
+        name=key,
+        version_number=1,
+        version_label="v1",
+        display_name=new_et.display_name,
+        description=new_et.description,
+        icon=new_et.icon,
+        fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
+        created_at=utc_now(),
+    ))
+
     db.commit()
     db.refresh(new_et)
     return new_et.to_dict()
@@ -298,6 +305,10 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     if not et:
         raise HTTPException(status_code=404, detail=f"Entity type '{name}' not found")
 
+    new_v = (et.version_number or 1) + 1
+    et.version_number = new_v
+    et.version_label = f"v{new_v}"
+
     if req.display_name is not None and req.display_name.strip():
         et.display_name = req.display_name.strip()
     if req.description is not None:
@@ -305,9 +316,35 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     if req.icon is not None:
         et.icon = req.icon.strip()
 
+    from backend.models.entity_type import EntityTypeVersion
+    from backend.models.base import generate_uuid, utc_now
+    db.add(EntityTypeVersion(
+        id=generate_uuid(),
+        name=key,
+        version_number=new_v,
+        version_label=f"v{new_v}",
+        display_name=et.display_name,
+        description=et.description,
+        icon=et.icon,
+        fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
+        created_at=utc_now(),
+    ))
+
     db.commit()
     db.refresh(et)
     return et.to_dict()
+
+@router.get("/{name}/history")
+def get_entity_type_history(name: str, db: Session = Depends(get_db)):
+    key = name.strip().lower()
+    from backend.models.entity_type import EntityTypeVersion
+    versions = (
+        db.query(EntityTypeVersion)
+        .filter(EntityTypeVersion.name == key)
+        .order_by(EntityTypeVersion.version_number.desc(), EntityTypeVersion.created_at.desc())
+        .all()
+    )
+    return [v.to_dict() for v in versions]
 
 @router.delete("/{name}")
 def delete_entity_type(name: str, db: Session = Depends(get_db)):
@@ -316,16 +353,11 @@ def delete_entity_type(name: str, db: Session = Depends(get_db)):
     if not et:
         raise HTTPException(status_code=404, detail=f"Entity type '{name}' not found")
 
-    # 1. Cleanup associated dynamic or concrete records and events
-    EntityModel, EventModel = get_entity_models(key)
-    if EntityModel == DynamicEntity:
-        entity_ids = [r[0] for r in db.query(DynamicEntity.id).filter(DynamicEntity.entity_type == key).all()]
-        if entity_ids:
-            db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id.in_(entity_ids)).delete(synchronize_session=False)
-        db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).delete(synchronize_session=False)
-    else:
-        db.query(EventModel).delete(synchronize_session=False)
-        db.query(EntityModel).delete(synchronize_session=False)
+    # 1. Cleanup associated dynamic records and events
+    entity_ids = [r[0] for r in db.query(DynamicEntity.id).filter(DynamicEntity.entity_type == key).all()]
+    if entity_ids:
+        db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id.in_(entity_ids)).delete(synchronize_session=False)
+    db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).delete(synchronize_session=False)
 
     # 2. Cleanup conditions & condition version history
     cond_ids = [c[0] for c in db.query(ConditionDefinition.id).filter(ConditionDefinition.entity_type == key).all()]

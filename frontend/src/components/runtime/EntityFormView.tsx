@@ -152,7 +152,7 @@ export function EntityFormView({
   const [transitionError, setTransitionError] = useState<string | null>(null);
 
   const activeId = initialRecordId || initialEntity?.id || '';
-  const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || 'permit';
+  const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || '';
 
   const { width, mounted, containerRef } = useContainerSize(loaded);
 

@@ -4,14 +4,12 @@ from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
 from backend.models.lists import ListDefinition
+from backend.models.entity_type import EntityTypeDefinition
 from backend.models.entities import (
-    WorkOrder,
-    WorkOrderEvent,
-    Permit,
-    PermitEvent,
-    PMSchedule,
-    PMScheduleEvent,
-    ENTITY_REGISTRY,
+    DynamicEntity,
+    DynamicEntityEvent,
+    EntityInstance,
+    EntityEvent,
     get_entity_models,
 )
 from backend.models.person import (
@@ -33,15 +31,13 @@ __all__ = [
     "EntityField",
     "WorkflowDefinition",
     "GateInstance",
-    "WorkOrder",
-    "WorkOrderEvent",
-    "Permit",
-    "PermitEvent",
-    "PMSchedule",
-    "PMScheduleEvent",
+    "EntityTypeDefinition",
+    "DynamicEntity",
+    "DynamicEntityEvent",
+    "EntityInstance",
+    "EntityEvent",
     "EntityForm",
     "ListDefinition",
-    "ENTITY_REGISTRY",
     "get_entity_models",
     "Person",
     "PersonGroup",

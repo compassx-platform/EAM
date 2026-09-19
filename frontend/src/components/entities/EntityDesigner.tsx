@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Columns3,
   FileText,
+  History,
+  Calendar,
   Layers,
   Loader2,
   Lock,
@@ -23,7 +25,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
-import type { EntityTypeDefinition, EntityField, EntityFieldInput } from '../../types';
+import type { EntityTypeDefinition, EntityTypeVersion, EntityField, EntityFieldInput } from '../../types';
 
 const ICONS: Array<{ key: string; label: string; Icon: typeof Layers }> = [
   { key: 'ClipboardList', label: 'Work / Task', Icon: ClipboardList },
@@ -187,6 +189,10 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   // ---- fields ----
   const [rows, setRows] = useState<DesignerRow[]>(baselineRows);
   const [originalFields, setOriginalFields] = useState<EntityField[]>([]);
+  const [versionLabel, setVersionLabel] = useState('v1');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<EntityTypeVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   const [knownTypes, setKnownTypes] = useState<EntityTypeDefinition[]>([]);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
@@ -195,6 +201,41 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
     setNotice({ kind, text });
     setTimeout(() => setNotice(null), 3500);
   }, []);
+
+  const handleOpenHistory = async () => {
+    if (!entityName) return;
+    setHistoryOpen(true);
+    setLoadingVersions(true);
+    try {
+      const list = await api.getEntityTypeHistory(entityName);
+      setVersions(list);
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const handleRestoreSchemaSnapshot = (snap: EntityTypeVersion) => {
+    if (snap.display_name) setDisplayName(snap.display_name);
+    if (snap.description) setDescription(snap.description);
+    if (snap.icon) setIcon(snap.icon);
+    if (snap.fields && snap.fields.length > 0) {
+      setRows(
+        snap.fields.map((f) => ({
+          localId: f.field_name,
+          field_name: f.field_name,
+          label: f.label || humanize(f.field_name),
+          field_type: f.field_type,
+          required: Boolean(f.required),
+          pinned: f.field_name === 'title' || f.field_name === 'description',
+          blockers: [],
+        }))
+      );
+    }
+    setHistoryOpen(false);
+    flash('ok', `Restored schema snapshot from ${snap.version_label}`);
+  };
 
   useEffect(() => {
     if (!autoSlug && isEdit) return;
@@ -219,6 +260,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           setName(et.name);
           setDescription(et.description || '');
           setIcon(et.icon || 'Layers');
+          setVersionLabel(et.version_label || (et.version_number ? `v${et.version_number}` : 'v1'));
           setOriginalFields(fields);
           setRows(fields.length > 0 ? fields.map(fieldFromRegistry) : baselineRows());
         }
@@ -357,7 +399,10 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             await api.deleteField(entityName, f.field_name);
           }
         }
-        setCreated(await api.getEntityType(entityName));
+        const updated = await api.getEntityType(entityName);
+        setCreated(updated);
+        if (updated.version_label) setVersionLabel(updated.version_label);
+        else if (updated.version_number) setVersionLabel(`v${updated.version_number}`);
         flash('ok', `Entity "${displayName}" updated.`);
       } else {
         const createdEntity = await api.createEntityType({
@@ -368,6 +413,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           fields: fieldInputs,
         });
         setCreated(createdEntity);
+        if (createdEntity.version_label) setVersionLabel(createdEntity.version_label);
+        else if (createdEntity.version_number) setVersionLabel(`v${createdEntity.version_number}`);
         flash('ok', `Entity "${createdEntity.display_name}" created.`);
       }
     } catch (e: any) {
@@ -418,6 +465,23 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 font-mono text-[10px] font-bold text-gray-600">
             {effectiveName || 'unnamed'}
           </span>
+          <span
+            title="Auto-assigned entity schema version"
+            className="rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-semibold text-gray-700 border border-gray-200"
+          >
+            {versionLabel}
+          </span>
+          {isEdit && (
+            <button
+              type="button"
+              onClick={handleOpenHistory}
+              title="View entity schema version history"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            >
+              <History className="h-3.5 w-3.5 text-gray-400" />
+              <span>History</span>
+            </button>
+          )}
           {notice && (
             <span
               className={`flex items-center gap-1 text-xs font-medium ${notice.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}
@@ -542,6 +606,107 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Entity Version History Modal */}
+      {historyOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          onMouseDown={() => setHistoryOpen(false)}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-gray-500" />
+                <h3 className="text-sm font-bold text-gray-900">
+                  Schema History · <span className="font-mono text-gray-600">{entityName}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {loadingVersions ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="ml-2 text-xs">Loading schema history…</span>
+                </div>
+              ) : versions.length === 0 ? (
+                <p className="py-8 text-center text-xs text-gray-400">No previous schema versions found.</p>
+              ) : (
+                <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                  {versions.map((snap) => {
+                    const isCurrent = snap.version_label === versionLabel;
+                    const fieldCount = snap.fields?.length ?? 0;
+
+                    return (
+                      <div
+                        key={snap.id}
+                        className={`flex items-center justify-between p-3.5 transition-colors ${
+                          isCurrent ? 'bg-blue-50/40' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-gray-900">{snap.version_label}</span>
+                            <span className="text-xs font-medium text-gray-700">{snap.display_name}</span>
+                            {isCurrent && (
+                              <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                                Current
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                            <span>{fieldCount} field{fieldCount === 1 ? '' : 's'}</span>
+                            {snap.description && <span>· {snap.description}</span>}
+                            {snap.created_at && (
+                              <>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-gray-400" />
+                                  Saved {new Date(snap.created_at).toLocaleDateString()}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreSchemaSnapshot(snap)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 shadow-2xs hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                          >
+                            <span>Restore</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end border-t border-gray-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
