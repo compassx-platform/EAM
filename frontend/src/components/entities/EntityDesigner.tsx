@@ -12,6 +12,7 @@ import {
   Lock,
   MinusCircle,
   PenTool,
+  PlayCircle,
   Plus,
   Rocket,
   Save,
@@ -174,7 +175,6 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<EntityTypeDefinition | null>(null);
-  const [systemFlag, setSystemFlag] = useState<boolean | undefined>(undefined);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   // ---- metadata ----
@@ -220,7 +220,6 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           setDescription(et.description || '');
           setIcon(et.icon || 'Layers');
           setOriginalFields(fields);
-          setSystemFlag(et.is_system);
           setRows(fields.length > 0 ? fields.map(fieldFromRegistry) : baselineRows());
         }
       } catch (e: any) {
@@ -389,7 +388,6 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
     );
   }
 
-  const isSystem = isEdit && (systemFlag ?? created?.is_system === true);
   const effectiveName = isEdit ? name : (autoSlug ? slugify(displayName) : cleanFieldSlug(name));
 
   return (
@@ -417,15 +415,6 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {isEdit && (
-            <span
-              className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                isSystem ? 'border-gray-200 bg-gray-50 text-gray-600' : 'border-blue-100 bg-blue-50 text-blue-700'
-              }`}
-            >
-              {isSystem ? 'System' : 'Custom'}
-            </span>
-          )}
           <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 font-mono text-[10px] font-bold text-gray-600">
             {effectiveName || 'unnamed'}
           </span>
@@ -918,6 +907,20 @@ function Step3(p: {
 }
 
 function SuccessPanel({ entity, isEdit }: { entity: EntityTypeDefinition; isEdit: boolean }) {
+  const handleBuildWorkflow = async () => {
+    try {
+      const wfs = await api.listWorkflows(entity.name);
+      if (wfs && wfs.length > 0) {
+        const target = wfs.find((w) => w.status === 'published') || wfs[0];
+        navigate(`/workflows/${target.id}`);
+      } else {
+        navigate('/workflows/new', { type: entity.name });
+      }
+    } catch {
+      navigate('/workflows/new', { type: entity.name });
+    }
+  };
+
   return (
     <div className="mx-auto max-w-md py-10 text-center">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
@@ -932,25 +935,33 @@ function SuccessPanel({ entity, isEdit }: { entity: EntityTypeDefinition; isEdit
         <button
           type="button"
           onClick={() => navigate('/entities')}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
         >
           Back to Entities
         </button>
         <button
           type="button"
           onClick={() => navigate(`/forms/${encodeURIComponent(entity.name)}`)}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-2 text-xs font-semibold text-blue-800 hover:bg-blue-100/80 transition-colors shadow-2xs"
         >
           <PenTool className="h-3.5 w-3.5 text-blue-700" />
-          Form Studio — lay out the form
+          Form Studio — open {entity.display_name || entity.name} form builder
         </button>
         <button
           type="button"
-          onClick={() => navigate('/workflows')}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+          onClick={handleBuildWorkflow}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50/70 px-4 py-2 text-xs font-semibold text-purple-800 hover:bg-purple-100/80 transition-colors shadow-2xs"
         >
           <Rocket className="h-3.5 w-3.5 text-purple-700" />
-          Build Workflow — define the lifecycle
+          Build Workflow — open {entity.display_name || entity.name} workflow builder
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/records', { type: entity.name })}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100/80 transition-colors shadow-2xs"
+        >
+          <PlayCircle className="h-3.5 w-3.5 text-emerald-700" />
+          Open Records — view {entity.display_name || entity.name} runtime records
         </button>
       </div>
     </div>

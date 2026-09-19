@@ -87,4 +87,16 @@ def trigger_expiry_check(db: Session = Depends(get_db)):
         "expired_permits": expired,
     }
 
+@router.post("/seed")
+def reseed_database(db: Session = Depends(get_db)):
+    """
+    Reseeds default workflows, conditions, fields, users, and sample data.
+    """
+    from backend.seed_data import load_test_fixtures
+    res = load_test_fixtures(db, include_sample_entities=True)
+    return {
+        "message": "Database successfully seeded with default workflows, conditions, users, and sample entities.",
+        "details": res,
+    }
+
 

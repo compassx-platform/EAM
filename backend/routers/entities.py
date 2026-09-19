@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models.entities import get_entity_models, ENTITY_REGISTRY
+from backend.models.entities import get_entity_models, ENTITY_REGISTRY, DynamicEntity, DynamicEntityEvent
+from backend.models.entity_type import EntityTypeDefinition
 from backend.models.workflow import WorkflowDefinition
 from backend.services.command_handler import (
     create_entity,
@@ -46,6 +47,17 @@ class SimulateRequest(BaseModel):
     current_status_override: Optional[str] = None
     workflow_version_override: Optional[str] = None
 
+def _verify_entity_type(db: Session, entity_type: str) -> str:
+    key = (entity_type or "").strip().lower()
+    if not key:
+        raise HTTPException(status_code=404, detail="Entity type cannot be empty")
+    if key in ENTITY_REGISTRY:
+        return key
+    exists = db.query(EntityTypeDefinition).filter(EntityTypeDefinition.name == key).first()
+    if not exists:
+        raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")
+    return key
+
 def resolve_actor(
     explicit_actor_id: Optional[str],
     explicit_roles: Optional[List[str]],
@@ -71,11 +83,12 @@ def create_entity_endpoint(
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
     db: Session = Depends(get_db)
 ):
+    key = _verify_entity_type(db, entity_type)
     try:
         actor_id, roles = resolve_actor(None, None, x_actor_id, x_actor_role, db)
         result = create_entity(
             db=db,
-            entity_type=entity_type,
+            entity_type=key,
             actor_id=actor_id,
             actor_type="human",
             actor_roles=roles,
@@ -100,11 +113,12 @@ def propose_transition_endpoint(
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
     db: Session = Depends(get_db)
 ):
+    key = _verify_entity_type(db, entity_type)
     try:
         actor_id, roles = resolve_actor(req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db)
         result = propose_transition(
             db=db,
-            entity_type=entity_type,
+            entity_type=key,
             entity_id=req.entity_id,
             event_type=req.event_type,
             actor_id=actor_id,
@@ -137,10 +151,11 @@ def simulate_transition_endpoint(
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
     db: Session = Depends(get_db)
 ):
+    key = _verify_entity_type(db, entity_type)
     actor_id, roles = resolve_actor(req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db)
     result = simulate_transition(
         db=db,
-        entity_type=entity_type,
+        entity_type=key,
         entity_id=req.entity_id,
         event_type=req.event_type,
         actor_id=actor_id,
@@ -167,10 +182,12 @@ def list_entities(
     """
     List view against materialized current-state table (Section 8).
     """
-    if entity_type.lower() not in ENTITY_REGISTRY:
-        raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")
-    EntityModel, _ = get_entity_models(entity_type)
+    key = _verify_entity_type(db, entity_type)
+    EntityModel, _ = get_entity_models(key)
     query = db.query(EntityModel)
+
+    if EntityModel == DynamicEntity:
+        query = query.filter(DynamicEntity.entity_type == key)
 
     if status:
         query = query.filter(EntityModel.status == status)
@@ -179,7 +196,7 @@ def list_entities(
     entities = query.order_by(EntityModel.updated_at.desc()).offset(offset).limit(limit).all()
 
     return {
-        "entity_type": entity_type,
+        "entity_type": key,
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -192,13 +209,15 @@ def get_entity_detail(entity_type: str, id: str, db: Session = Depends(get_db)):
     """
     Returns current-state row + full event history / audit timeline (Section 8).
     """
-    if entity_type.lower() not in ENTITY_REGISTRY:
-        raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")
-    EntityModel, EventModel = get_entity_models(entity_type)
+    key = _verify_entity_type(db, entity_type)
+    EntityModel, EventModel = get_entity_models(key)
     
-    entity = db.query(EntityModel).filter(EntityModel.id == id).first()
+    query = db.query(EntityModel).filter(EntityModel.id == id)
+    if EntityModel == DynamicEntity:
+        query = query.filter(DynamicEntity.entity_type == key)
+    entity = query.first()
     if not entity:
-        raise HTTPException(status_code=404, detail=f"{entity_type} '{id}' not found")
+        raise HTTPException(status_code=404, detail=f"{key} '{id}' not found")
 
     events = (
         db.query(EventModel)
@@ -219,15 +238,17 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
     Given current status and bound workflow_version, returns the list of event_types
     legally callable next to drive action buttons in the UI (Section 8).
     """
-    if entity_type.lower() not in ENTITY_REGISTRY:
-        raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")
-    EntityModel, _ = get_entity_models(entity_type)
-    entity = db.query(EntityModel).filter(EntityModel.id == id).first()
+    key = _verify_entity_type(db, entity_type)
+    EntityModel, _ = get_entity_models(key)
+    query = db.query(EntityModel).filter(EntityModel.id == id)
+    if EntityModel == DynamicEntity:
+        query = query.filter(DynamicEntity.entity_type == key)
+    entity = query.first()
     if not entity:
-        raise HTTPException(status_code=404, detail=f"{entity_type} '{id}' not found")
+        raise HTTPException(status_code=404, detail=f"{key} '{id}' not found")
 
     wf = db.query(WorkflowDefinition).filter(
-        WorkflowDefinition.entity_type == entity_type.lower(),
+        WorkflowDefinition.entity_type == key,
         WorkflowDefinition.version_label == entity.workflow_version
     ).first()
 
@@ -257,7 +278,7 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
 
     return {
         "entity_id": id,
-        "entity_type": entity_type,
+        "entity_type": key,
         "current_status": entity.status,
         "workflow_version": entity.workflow_version,
         "valid_transitions": valid_transitions,
@@ -270,10 +291,9 @@ def rebuild_entity_cache(entity_type: str, id: str, db: Session = Depends(get_db
     """
     Rebuilds current-state materialized row by replaying its event log (Event Sourcing Principle 1).
     """
-    if entity_type.lower() not in ENTITY_REGISTRY:
-        raise HTTPException(status_code=404, detail=f"Unknown entity type '{entity_type}'")
+    key = _verify_entity_type(db, entity_type)
     try:
-        rebuilt = rebuild_entity_from_events(db, entity_type, id)
+        rebuilt = rebuild_entity_from_events(db, key, id)
         return {"rebuilt": True, "entity": rebuilt}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))

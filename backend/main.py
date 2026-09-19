@@ -41,7 +41,7 @@ async def periodic_expiry_checker():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Ensure database schema exists without seeding any data or dropping existing records
+    # Startup: Ensure database schema tables exist non-destructively without altering or deleting existing data
     try:
         Base.metadata.create_all(bind=engine)
         db = SessionLocal()

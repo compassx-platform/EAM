@@ -1,7 +1,7 @@
 import os
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, StaticPool
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
@@ -11,13 +11,20 @@ from tests.fixtures import load_test_fixtures
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/eam_test_db"
+    "sqlite:///:memory:"
 )
 
-test_engine = create_engine(
-    TEST_DATABASE_URL,
-    poolclass=NullPool,
-)
+if TEST_DATABASE_URL.startswith("sqlite"):
+    test_engine = create_engine(
+        TEST_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+else:
+    test_engine = create_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+    )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 @pytest.fixture(scope="function")

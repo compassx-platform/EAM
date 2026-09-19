@@ -28,9 +28,9 @@ def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dic
 
     # 0. Seed Default Entity Types
     default_entity_types = [
-        ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", True),
-        ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", True),
-        ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", True),
+        ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", False),
+        ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", False),
+        ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", False),
     ]
     for name, display_name, desc, icon, is_sys in default_entity_types:
         et = db.query(EntityTypeDefinition).filter(EntityTypeDefinition.name == name).first()
@@ -40,7 +40,7 @@ def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dic
                 display_name=display_name,
                 description=desc,
                 icon=icon,
-                is_system=is_sys
+                is_system=False
             )
             db.add(et)
     db.commit()

@@ -3,18 +3,27 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from backend.config import settings
 
-# Production PostgreSQL Engine Configuration
+# Database Engine Configuration (PostgreSQL / SQLite)
 db_url = settings.sync_database_url
 
-engine = create_engine(
-    db_url,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=1800,
-    echo=False,
-    future=True,
-)
+if db_url.startswith("sqlite"):
+    engine = create_engine(
+        db_url,
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
+        echo=False,
+        future=True,
+    )
+else:
+    engine = create_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_recycle=1800,
+        echo=False,
+        future=True,
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -28,15 +37,23 @@ def get_db():
         db.close()
 
 def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
-    """Idempotently adds a nullable column to an existing table in PostgreSQL if missing (never drops or modifies data)."""
+    """Idempotently adds a nullable column to an existing table in PostgreSQL/SQLite if missing (never drops or modifies data)."""
     try:
-        res = db.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{table}' AND column_name = '{column}'"
-        )).fetchall()
-        if not res:
-            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
-            db.commit()
+        bind = db.get_bind()
+        if bind.dialect.name == "sqlite":
+            res = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            col_names = [r[1] for r in res]
+            if column not in col_names:
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+                db.commit()
+        else:
+            res = db.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                f"WHERE table_name = '{table}' AND column_name = '{column}'"
+            )).fetchall()
+            if not res:
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+                db.commit()
     except Exception:
         db.rollback()
 

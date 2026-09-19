@@ -271,3 +271,74 @@ def test_list_fields_returns_blockers_for_referenced_fields(test_db):
     fields_after = {f["field_name"]: f for f in list_fields("blocker_test", test_db)}
     assert fields_after["custom_note"].get("blockers") == []
     assert any("Form layout item" in b for b in fields_after["checklist1"].get("blockers", []))
+
+
+def test_dynamic_entity_records_crud(client, test_db):
+    from backend.models.workflow import WorkflowDefinition
+    from backend.models.base import generate_uuid
+
+    # 1. Create dynamic entity type
+    res_type = client.post("/api/entity-types", json={
+        "name": "pttt",
+        "display_name": "PTTT Custom",
+        "description": "Custom entity type test",
+    })
+    assert res_type.status_code == 200
+
+    # 2. Add published workflow for pttt
+    test_db.add(WorkflowDefinition(
+        id=generate_uuid(),
+        entity_type="pttt",
+        version_label="v1",
+        status="published",
+        definition={
+            "states": ["Draft", "Active", "Closed"],
+            "terminal_states": ["Closed"],
+            "transitions": [
+                {"from": "Draft", "event": "ACTIVATE", "to": "Active", "conditions": []},
+                {"from": "Active", "event": "CLOSE", "to": "Closed", "conditions": []},
+            ],
+            "auto_transitions": [],
+        },
+    ))
+    test_db.commit()
+
+    # 3. List records before creating any
+    res_list_empty = client.get("/api/pttt")
+    assert res_list_empty.status_code == 200
+    assert res_list_empty.json()["total"] == 0
+    assert res_list_empty.json()["items"] == []
+
+    # 4. Create record
+    res_create = client.post("/api/pttt/create", json={
+        "custom_fields": {"title": "PTTT Sample Record", "description": "Testing CRUD"},
+    })
+    assert res_create.status_code == 200
+    rec_id = res_create.json()["entity_id"]
+    assert res_create.json()["status"] == "Draft"
+
+    # 5. List records after creation
+    res_list = client.get("/api/pttt")
+    assert res_list.status_code == 200
+    assert res_list.json()["total"] == 1
+    assert res_list.json()["items"][0]["id"] == rec_id
+
+    # 6. Get detail
+    res_detail = client.get(f"/api/pttt/{rec_id}")
+    assert res_detail.status_code == 200
+    assert res_detail.json()["entity"]["id"] == rec_id
+    assert len(res_detail.json()["events"]) >= 1
+
+    # 7. Valid transitions
+    res_trans = client.get(f"/api/pttt/{rec_id}/valid-transitions")
+    assert res_trans.status_code == 200
+    assert len(res_trans.json()["valid_transitions"]) == 1
+    assert res_trans.json()["valid_transitions"][0]["event_type"] == "ACTIVATE"
+
+    # 8. Transition
+    res_act = client.post("/api/pttt/transition", json={
+        "entity_id": rec_id,
+        "event_type": "ACTIVATE",
+    })
+    assert res_act.status_code == 200
+    assert res_act.json()["new_status"] == "Active"

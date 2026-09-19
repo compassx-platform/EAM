@@ -82,10 +82,6 @@ export function EntitiesView() {
   }, [entityTypes, search]);
 
   const handleDelete = async (et: EntityTypeDefinition) => {
-    if (et.is_system) {
-      alert('System entity types (Work Order, Permit, PM Schedule) cannot be deleted.');
-      return;
-    }
     if (!window.confirm(`Are you sure you want to delete entity type "${et.display_name}" (${et.name})? All associated fields, form layouts, workflows, and records will be deleted.`)) {
       return;
     }
@@ -208,16 +204,6 @@ export function EntitiesView() {
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        {et.is_system ? (
-                          <span className="rounded-full bg-gray-100 border border-gray-200 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-gray-600">
-                            System
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-700">
-                            Custom
-                          </span>
-                        )}
-
                         <button
                           type="button"
                           onClick={() => navigate(`/entities/design/${encodeURIComponent(et.name)}`)}
@@ -227,17 +213,15 @@ export function EntitiesView() {
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
 
-                        {!et.is_system && (
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(et)}
-                            disabled={deleting === et.name}
-                            title="Delete custom entity type"
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(et)}
+                          disabled={deleting === et.name}
+                          title="Delete entity type"
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
 

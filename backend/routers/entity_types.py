@@ -156,16 +156,15 @@ def list_entity_types(db: Session = Depends(get_db)):
     (fields count, workflow count, forms, and live records count).
     """
     entity_types = db.query(EntityTypeDefinition).order_by(
-        EntityTypeDefinition.is_system.desc(),
         EntityTypeDefinition.display_name.asc()
     ).all()
 
-    # If table is empty on first call, ensure system defaults exist
+    # If table is empty on first call, ensure default templates exist
     if not entity_types:
         defaults = [
-            ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", True),
-            ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", True),
-            ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", True),
+            ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", False),
+            ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", False),
+            ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", False),
         ]
         for name, display_name, desc, icon, is_sys in defaults:
             et = EntityTypeDefinition(
@@ -173,12 +172,11 @@ def list_entity_types(db: Session = Depends(get_db)):
                 display_name=display_name,
                 description=desc,
                 icon=icon,
-                is_system=is_sys
+                is_system=False
             )
             db.add(et)
         db.commit()
         entity_types = db.query(EntityTypeDefinition).order_by(
-            EntityTypeDefinition.is_system.desc(),
             EntityTypeDefinition.display_name.asc()
         ).all()
 
@@ -339,15 +337,20 @@ def delete_entity_type(name: str, db: Session = Depends(get_db)):
     if not et:
         raise HTTPException(status_code=404, detail=f"Entity type '{name}' not found")
 
-    if et.is_system:
-        raise HTTPException(status_code=400, detail="System entity types (Work Order, Permit, PM Schedule) cannot be deleted.")
-
     # Cleanup associated dynamic records, events, fields, forms, and workflows
-    db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).delete()
-    db.query(EntityField).filter(EntityField.entity_type == key).delete()
-    db.query(EntityForm).filter(EntityForm.entity_type == key).delete()
-    db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == key).delete()
-    db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == key).delete()
+    EntityModel, EventModel = get_entity_models(key)
+    if EntityModel == DynamicEntity:
+        sub_query = db.query(DynamicEntity.id).filter(DynamicEntity.entity_type == key)
+        db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id.in_(sub_query)).delete(synchronize_session=False)
+        db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).delete(synchronize_session=False)
+    else:
+        db.query(EventModel).delete(synchronize_session=False)
+        db.query(EntityModel).delete(synchronize_session=False)
+
+    db.query(EntityField).filter(EntityField.entity_type == key).delete(synchronize_session=False)
+    db.query(EntityForm).filter(EntityForm.entity_type == key).delete(synchronize_session=False)
+    db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == key).delete(synchronize_session=False)
+    db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == key).delete(synchronize_session=False)
 
     db.delete(et)
     db.commit()
