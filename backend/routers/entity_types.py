@@ -43,8 +43,8 @@ class CreateEntityTypeRequest(BaseModel):
     description: Optional[str] = ""
     icon: Optional[str] = "Layers"
     fields: Optional[List[EntityFieldIn]] = None
-    """Optional field schemas defined at creation time. When omitted, the baseline
-    title + description fields (and matching form) are seeded automatically."""
+    """Optional field schemas defined at creation time. When omitted, baseline
+    title and description fields (and matching form) are initialized."""
 
 class UpdateEntityTypeRequest(BaseModel):
     display_name: Optional[str] = None
