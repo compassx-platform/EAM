@@ -405,3 +405,17 @@ def test_delete_dynamic_entity_type_cascade(client, test_db):
     # 5. Confirm 404 on get
     res_get = client.get("/api/entity-types/pttt_del")
     assert res_get.status_code == 404
+
+
+def test_delete_all_entity_types_remains_empty(client, test_db):
+    # Fetch all existing entity types and delete every one
+    res_list = client.get("/api/entity-types")
+    assert res_list.status_code == 200
+    for et in res_list.json():
+        res_del = client.delete(f"/api/entity-types/{et['name']}")
+        assert res_del.status_code == 200
+
+    # Query list again - it should be completely empty and NOT recreate defaults
+    res_after = client.get("/api/entity-types")
+    assert res_after.status_code == 200
+    assert res_after.json() == []

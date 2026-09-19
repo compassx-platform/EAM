@@ -159,27 +159,6 @@ def list_entity_types(db: Session = Depends(get_db)):
         EntityTypeDefinition.display_name.asc()
     ).all()
 
-    # If table is empty on first call, ensure default templates exist
-    if not entity_types:
-        defaults = [
-            ("workorder", "Work Order", "Maintenance work orders, repair jobs, and equipment tasks", "ClipboardList", False),
-            ("permit", "Permit to Work", "Safety permits, hot work, and hazardous work authorisations", "ShieldCheck", False),
-            ("pm_schedule", "PM Schedule", "Preventative maintenance schedules and recurring tasks", "Calendar", False),
-        ]
-        for name, display_name, desc, icon, is_sys in defaults:
-            et = EntityTypeDefinition(
-                name=name,
-                display_name=display_name,
-                description=desc,
-                icon=icon,
-                is_system=False
-            )
-            db.add(et)
-        db.commit()
-        entity_types = db.query(EntityTypeDefinition).order_by(
-            EntityTypeDefinition.display_name.asc()
-        ).all()
-
     results = []
     for et in entity_types:
         item = et.to_dict()
