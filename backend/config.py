@@ -1,4 +1,4 @@
-import os
+from urllib.parse import quote_plus
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
     
+    # Environment mode (e.g. development, production, test)
+    ENVIRONMENT: str = "development"
+
     # PostgreSQL Connection Parameters (Production Grade)
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
@@ -20,7 +23,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "eam_db"
     
     # Database: Optional direct override or assembled PostgreSQL DSN
-    DATABASE_URL: str | None = os.getenv("DATABASE_URL", "sqlite:////tmp/app.db")
+    DATABASE_URL: str | None = None
     
     # Secret Key & Auth
     SECRET_KEY: str = "compassx-workflow-secret-key-2026"
@@ -34,16 +37,30 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list[str] = ["*"]
 
     @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.strip().lower() in ("production", "prod")
+
+    @property
     def sync_database_url(self) -> str:
         if self.DATABASE_URL:
             url = self.DATABASE_URL
+            if self.is_production and url.startswith("sqlite"):
+                raise ValueError(
+                    "SQLite database is not permitted in production environment (ENVIRONMENT=production). "
+                    "A PostgreSQL database connection is strictly required."
+                )
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql+psycopg2://", 1)
             elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
                 url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
             return url
-        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        
+        # Build PostgreSQL URI directly from POSTGRES_* environment variables
+        pw = quote_plus(self.POSTGRES_PASSWORD) if self.POSTGRES_PASSWORD else ""
+        user = quote_plus(self.POSTGRES_USER) if self.POSTGRES_USER else ""
+        return f"postgresql+psycopg2://{user}:{pw}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 settings = Settings()
+
 
 
