@@ -342,3 +342,66 @@ def test_dynamic_entity_records_crud(client, test_db):
     })
     assert res_act.status_code == 200
     assert res_act.json()["new_status"] == "Active"
+
+
+def test_delete_dynamic_entity_type_cascade(client, test_db):
+    from backend.models.workflow import WorkflowDefinition, GateInstance
+    from backend.models.conditions import ConditionDefinition, ConditionVersion
+    from backend.models.base import generate_uuid
+
+    # 1. Create dynamic entity type
+    client.post("/api/entity-types", json={
+        "name": "pttt_del",
+        "display_name": "PTTT Delete Test",
+        "description": "Custom entity type to delete",
+    })
+
+    # 2. Add workflow, condition with version, and gate
+    test_db.add(WorkflowDefinition(
+        id=generate_uuid(),
+        entity_type="pttt_del",
+        version_label="v1",
+        status="published",
+        definition={"states": ["Draft", "Active"], "transitions": []},
+    ))
+    c = ConditionDefinition(
+        id="cond_pttt_test",
+        entity_type="pttt_del",
+        label="Test Condition",
+        type="simple",
+        definition={"logic": "AND", "rules": []},
+    )
+    test_db.add(c)
+    test_db.commit()
+
+    test_db.add(ConditionVersion(
+        id=generate_uuid(),
+        condition_id="cond_pttt_test",
+        version=1,
+        label="Test Condition v1",
+        definition={"logic": "AND", "rules": []},
+    ))
+    test_db.add(GateInstance(
+        id="gate_pttt_test",
+        entity_type="pttt_del",
+        gate_type="role_check",
+        label="Gate Test",
+        params={},
+    ))
+    test_db.commit()
+
+    # 3. Create a record and trigger an event
+    res_create = client.post("/api/pttt_del/create", json={
+        "custom_fields": {"title": "Delete Record", "description": "Temp"},
+    })
+    assert res_create.status_code == 200
+
+    # 4. Call DELETE /api/entity-types/pttt_del
+    res_del = client.delete("/api/entity-types/pttt_del")
+    assert res_del.status_code == 200
+    assert res_del.json()["deleted"] is True
+    assert res_del.json()["name"] == "pttt_del"
+
+    # 5. Confirm 404 on get
+    res_get = client.get("/api/entity-types/pttt_del")
+    assert res_get.status_code == 404

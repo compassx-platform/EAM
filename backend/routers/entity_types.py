@@ -7,14 +7,14 @@ from sqlalchemy import func, inspect, text
 
 from backend.database import get_db
 from backend.models.entity_type import EntityTypeDefinition
-from backend.models.entities import get_entity_models, ENTITY_REGISTRY, DynamicEntity
+from backend.models.entities import get_entity_models, ENTITY_REGISTRY, DynamicEntity, DynamicEntityEvent
 from backend.models.field_registry import (
     EntityField,
     FIELD_TYPES,
 )
-from backend.models.workflow import WorkflowDefinition
+from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
-from backend.models.conditions import ConditionDefinition
+from backend.models.conditions import ConditionDefinition, ConditionVersion
 
 router = APIRouter(prefix="/entity-types", tags=["Entity Types Management"])
 
@@ -337,21 +337,30 @@ def delete_entity_type(name: str, db: Session = Depends(get_db)):
     if not et:
         raise HTTPException(status_code=404, detail=f"Entity type '{name}' not found")
 
-    # Cleanup associated dynamic records, events, fields, forms, and workflows
+    # 1. Cleanup associated dynamic or concrete records and events
     EntityModel, EventModel = get_entity_models(key)
     if EntityModel == DynamicEntity:
-        sub_query = db.query(DynamicEntity.id).filter(DynamicEntity.entity_type == key)
-        db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id.in_(sub_query)).delete(synchronize_session=False)
+        entity_ids = [r[0] for r in db.query(DynamicEntity.id).filter(DynamicEntity.entity_type == key).all()]
+        if entity_ids:
+            db.query(DynamicEntityEvent).filter(DynamicEntityEvent.entity_id.in_(entity_ids)).delete(synchronize_session=False)
         db.query(DynamicEntity).filter(DynamicEntity.entity_type == key).delete(synchronize_session=False)
     else:
         db.query(EventModel).delete(synchronize_session=False)
         db.query(EntityModel).delete(synchronize_session=False)
 
-    db.query(EntityField).filter(EntityField.entity_type == key).delete(synchronize_session=False)
-    db.query(EntityForm).filter(EntityForm.entity_type == key).delete(synchronize_session=False)
-    db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == key).delete(synchronize_session=False)
+    # 2. Cleanup conditions & condition version history
+    cond_ids = [c[0] for c in db.query(ConditionDefinition.id).filter(ConditionDefinition.entity_type == key).all()]
+    if cond_ids:
+        db.query(ConditionVersion).filter(ConditionVersion.condition_id.in_(cond_ids)).delete(synchronize_session=False)
     db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == key).delete(synchronize_session=False)
 
+    # 3. Cleanup gate instances, workflows, forms, and fields
+    db.query(GateInstance).filter(GateInstance.entity_type == key).delete(synchronize_session=False)
+    db.query(WorkflowDefinition).filter(WorkflowDefinition.entity_type == key).delete(synchronize_session=False)
+    db.query(EntityForm).filter(EntityForm.entity_type == key).delete(synchronize_session=False)
+    db.query(EntityField).filter(EntityField.entity_type == key).delete(synchronize_session=False)
+
+    # 4. Delete the entity type definition
     db.delete(et)
     db.commit()
     return {"deleted": True, "name": key}
