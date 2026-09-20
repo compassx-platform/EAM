@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability, PersonAudit
@@ -164,10 +165,17 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
         raise HTTPException(status_code=400, detail=f"Invalid ISO datetime '{value}'")
 
 
-def _terminal_states(db: Session, entity_type: str, workflow_version: str) -> set:
+def _terminal_states(db: Session, entity_type: str, workflow_version: str = "") -> set:
     wf = (
         db.query(WorkflowDefinition)
-        .filter(WorkflowDefinition.entity_type == entity_type.lower(), WorkflowDefinition.version_label == workflow_version)
+        .filter(
+            WorkflowDefinition.entity_type == entity_type.lower(),
+            WorkflowDefinition.status == "published",
+        )
+        .order_by(
+            WorkflowDefinition.published_at.desc(),
+            WorkflowDefinition.created_at.desc(),
+        )
         .first()
     )
     states = (wf.definition or {}).get("terminal_states") if wf and wf.definition else None

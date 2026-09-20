@@ -531,6 +531,9 @@ function InteractiveControl({
   }
 
   if (type === 'boolean') {
+    const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : (typeof value === 'boolean' ? (value ? 'true' : 'false') : '');
+    const isYes = (value as any) === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
+    const isNo = (value as any) === false || rawLower === 'false' || rawLower === 'no' || rawLower === '0' || (!value && value !== undefined && value !== '');
     return (
       <div className="flex items-center gap-3">
         <button
@@ -538,7 +541,7 @@ function InteractiveControl({
           disabled={readOnly}
           onClick={() => !readOnly && onChange(true)}
           className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
-            Boolean(value)
+            isYes
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
           }`}
@@ -550,7 +553,7 @@ function InteractiveControl({
           disabled={readOnly}
           onClick={() => !readOnly && onChange(false)}
           className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
-            !value && value !== undefined
+            isNo
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
           }`}

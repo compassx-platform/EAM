@@ -182,23 +182,34 @@ def create_or_update_condition(req: ConditionRequest, db: Session = Depends(get_
 
     existing = db.query(ConditionDefinition).filter(ConditionDefinition.id == cond_id).first()
     if existing:
-        # Live-update everywhere + versioned tracking: bump version, snapshot.
-        existing.label = req.label
-        existing.description = req.description
-        existing.definition = definition
-        existing.failure_policy = req.failure_policy
-        existing.updated_at = utc_now()
-        new_version = (existing.current_version or 1) + 1
-        existing.current_version = new_version
-        version = ConditionVersion(
-            condition_id=existing.id,
-            version=new_version,
-            label=req.label,
-            definition=definition,
-            failure_policy=req.failure_policy,
-            created_by=req.created_by,
+        has_changed = (
+            existing.label != req.label
+            or (existing.description or "").strip() != (req.description or "").strip()
+            or existing.definition != definition
+            or existing.failure_policy != req.failure_policy
+            or existing.type != req.type
         )
-        db.add(version)
+        if has_changed:
+            existing.label = req.label
+            existing.description = req.description
+            existing.type = req.type
+            existing.definition = definition
+            existing.failure_policy = req.failure_policy
+            existing.updated_at = utc_now()
+            new_version = (existing.current_version or 1) + 1
+            existing.current_version = new_version
+            version = ConditionVersion(
+                condition_id=existing.id,
+                version=new_version,
+                label=req.label,
+                definition=definition,
+                failure_policy=req.failure_policy,
+                created_by=req.created_by,
+            )
+            db.add(version)
+            db.commit()
+            db.refresh(existing)
+        return existing.to_dict()
     else:
         cond = ConditionDefinition(
             id=cond_id,
@@ -221,10 +232,9 @@ def create_or_update_condition(req: ConditionRequest, db: Session = Depends(get_
             created_by=req.created_by,
         )
         db.add(version)
-
-    db.commit()
-    db.refresh(existing or cond)
-    return (existing or cond).to_dict()
+        db.commit()
+        db.refresh(cond)
+        return cond.to_dict()
 
 
 @router.delete("/{id}")

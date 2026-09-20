@@ -400,4 +400,41 @@ def test_form_aware_entity_field_validation(test_db):
         is_create=True,
     )
     assert cleaned["safety_marshal_signoff"] == "Approved by Officer Alex"
+
+
+def test_form_versioning_and_no_change_save(test_db):
+    from backend.models.forms import FormVersion
+    layout = [
+        {
+            "i": "field:test_f1",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "notes",
+            "fieldType": "text",
+            "required": False,
+            "label": "Notes",
+        }
+    ]
+    res1 = save(test_db, "permit", layout)
+    v_count1 = test_db.query(FormVersion).filter(FormVersion.entity_type == "permit").count()
+    assert v_count1 >= 1
+
+    # Save identical layout
+    res2 = save(test_db, "permit", layout)
+    v_count2 = test_db.query(FormVersion).filter(FormVersion.entity_type == "permit").count()
+    assert v_count2 == v_count1
+
+    # Save modified layout
+    layout_mod = [
+        {
+            "i": "field:test_f1",
+            "x": 0, "y": 0, "w": 12, "h": 2,
+            "fieldName": "notes",
+            "fieldType": "text",
+            "required": True,
+            "label": "Notes Updated",
+        }
+    ]
+    res3 = save(test_db, "permit", layout_mod)
+    v_count3 = test_db.query(FormVersion).filter(FormVersion.entity_type == "permit").count()
+    assert v_count3 == v_count2 + 1
 

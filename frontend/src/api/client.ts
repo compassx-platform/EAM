@@ -324,6 +324,8 @@ export const api = {
     workflow_version: string;
     valid_transitions: ValidTransition[];
     auto_transitions_pending: Array<{ from: string; event: string; when: string[] }>;
+    has_published_workflow?: boolean;
+    message?: string;
   }> {
     return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/valid-transitions`);
   },

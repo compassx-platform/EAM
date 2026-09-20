@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'react';
 import { Loader2, Plus, ShieldPlus, Trash2, GitBranch, X, History, Calendar } from 'lucide-react';
 import { api } from '../../../api/client';
 import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, ConditionVersion, EntityField } from '../../../types';
-import { Field } from './ui';
+import { Field, SectionLabel } from './ui';
 
 const OP_LABEL: Record<string, string> = {
   eq: 'equals',
@@ -38,18 +38,32 @@ interface ConditionModalProps {
 }
 
 const NUMBER_TYPES = ['number', 'integer', 'decimal', 'currency', 'duration'];
-const DATE_TYPES = ['date', 'datetime'];
-const SELECT_TYPES = ['select', 'dropdown', 'list', 'multiselect', 'selection', 'checkbox_group', 'table'];
+const DATE_TYPES = ['date', 'datetime', 'time'];
+const SELECT_TYPES = ['select', 'dropdown', 'list', 'multiselect', 'selection', 'checkbox_group'];
+const BOOLEAN_TYPES = ['boolean', 'bool', 'switch', 'checkbox'];
+const UNSUPPORTED_VALUE_TYPES = ['table', 'checklist', 'file'];
+
+function getFieldOptions(field: EntityField | undefined, listOptionsMap: Record<string, string[]>): string[] {
+  if (!field) return [];
+  if (field.select_options && field.select_options.length > 0) {
+    return field.select_options;
+  }
+  if (field.option_list_key && listOptionsMap[field.option_list_key]) {
+    return listOptionsMap[field.option_list_key];
+  }
+  return [];
+}
 
 function operatorCatalogFor(types: ConditionTypeInfo | null, fieldType?: string): string[] {
   if (!types) return ['eq', 'ne'];
   const op = types.operators;
   if (!fieldType) return op.string ?? ['eq'];
-  if (NUMBER_TYPES.includes(fieldType)) return op.number ?? ['eq', 'ne'];
-  if (fieldType === 'boolean') return op.boolean ?? ['eq', 'ne'];
-  if (DATE_TYPES.includes(fieldType)) return op.date ?? ['eq'];
-  if (SELECT_TYPES.includes(fieldType)) return op.select ?? ['eq', 'ne'];
-  return op.string ?? ['eq', 'ne'];
+  if (UNSUPPORTED_VALUE_TYPES.includes(fieldType)) return ['is_empty', 'is_not_empty'];
+  if (NUMBER_TYPES.includes(fieldType)) return op.number ?? ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'is_empty', 'is_not_empty'];
+  if (BOOLEAN_TYPES.includes(fieldType)) return op.boolean ?? ['eq', 'ne', 'is_empty', 'is_not_empty'];
+  if (DATE_TYPES.includes(fieldType)) return op.date ?? ['lt', 'le', 'gt', 'ge', 'eq', 'ne', 'is_empty', 'is_not_empty'];
+  if (SELECT_TYPES.includes(fieldType)) return op.select ?? ['eq', 'ne', 'in', 'not_in', 'is_empty', 'is_not_empty'];
+  return op.string ?? ['eq', 'ne', 'in', 'not_in', 'contains', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty'];
 }
 
 // ---- Draft model -----------------------------------------------------------
@@ -329,10 +343,52 @@ export function ConditionModal({
   const removeNode = (path: number[]) => setRoot((cur) => removeAt(cur, path));
   const addAtPath = (path: number[], node: DraftNode) => setRoot((cur) => addAt(cur, path, node));
 
+  const [extraFields, setExtraFields] = useState<EntityField[]>([]);
+
+  useEffect(() => {
+    if (entityType) {
+      api.listFields(entityType).then((fetched) => {
+        if (fetched && fetched.length > 0) {
+          setExtraFields(fetched);
+        }
+      }).catch(() => {});
+    }
+  }, [entityType]);
+
+  const allFields = useMemo(() => {
+    const map = new Map<string, EntityField>();
+    (fields || []).forEach((f) => map.set(`${f.entity_type}:${f.field_name}`, f));
+    extraFields.forEach((f) => map.set(`${f.entity_type}:${f.field_name}`, f));
+    return Array.from(map.values());
+  }, [fields, extraFields]);
+
   const scopedFields = useMemo(
-    () => fields.filter((f) => !entityType || f.entity_type === entityType).sort((a, b) => a.field_name.localeCompare(b.field_name)),
-    [fields, entityType],
+    () => allFields.filter((f) => !entityType || f.entity_type === entityType).sort((a, b) => a.field_name.localeCompare(b.field_name)),
+    [allFields, entityType],
   );
+
+  const [listOptionsMap, setListOptionsMap] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    api
+      .listLists()
+      .then(async (summaries) => {
+        const optionLists = (summaries || []).filter((s) => s.kind === 'options');
+        const entries = await Promise.all(
+          optionLists.map(async (s) => {
+            try {
+              const def = await api.getList(s.list_key);
+              const items = (def.items || []).filter((it): it is string => typeof it === 'string');
+              return [s.list_key, items] as const;
+            } catch {
+              return [s.list_key, [] as string[]] as const;
+            }
+          })
+        );
+        setListOptionsMap(Object.fromEntries(entries));
+      })
+      .catch(() => {});
+  }, []);
 
   const fieldTypeOf = (name?: unknown) =>
     typeof name === 'string' && name ? scopedFields.find((f) => f.field_name === name)?.field_type : undefined;
@@ -398,7 +454,7 @@ export function ConditionModal({
     return () => document.removeEventListener('mousedown', handleDocClick);
   }, [variant, onClose]);
 
-  const Editor = () => (
+  const renderEditor = () => (
     <div className="flex flex-col gap-3">
       {initial && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-700">
@@ -462,20 +518,24 @@ export function ConditionModal({
         />
       </Field>
 
-      <RuleGroupEditor
-        group={root}
-        path={[]}
-        isRoot
-        atoms={atoms}
-        scopedFields={scopedFields}
-        fieldTypeOf={fieldTypeOf}
-        onPickType={pickType}
-        onPatchAtom={patchAtom}
-        onPatchGroup={patchGroup}
-        onRemove={removeNode}
-        onAdd={addAtPath}
-        operatorNeedsValue={operatorNeedsValue}
-      />
+      <div className="border-t border-gray-200 pt-3 flex flex-col gap-2">
+        <SectionLabel>Condition Rules</SectionLabel>
+        <RuleGroupEditor
+          group={root}
+          path={[]}
+          isRoot
+          atoms={atoms}
+          scopedFields={scopedFields}
+          fieldTypeOf={fieldTypeOf}
+          onPickType={pickType}
+          onPatchAtom={patchAtom}
+          onPatchGroup={patchGroup}
+          onRemove={removeNode}
+          onAdd={addAtPath}
+          operatorNeedsValue={operatorNeedsValue}
+          listOptionsMap={listOptionsMap}
+        />
+      </div>
 
       <p className="text-[11px] text-gray-400">
         {initial ? (
@@ -493,7 +553,7 @@ export function ConditionModal({
     </div>
   );
 
-  const VersionHistory = () => (
+  const renderVersionHistory = () => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between border-b border-gray-100 pb-2">
         <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
@@ -608,11 +668,11 @@ export function ConditionModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {historyOpen ? (
-            <VersionHistory />
+            renderVersionHistory()
           ) : atoms.length === 0 ? (
             <p className="text-xs text-gray-400">No condition rule types available.</p>
           ) : (
-            <Editor />
+            renderEditor()
           )}
         </div>
 
@@ -659,11 +719,11 @@ export function ConditionModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {historyOpen ? (
-            <VersionHistory />
+            renderVersionHistory()
           ) : atoms.length === 0 ? (
             <p className="text-xs text-gray-400">No condition rule types available.</p>
           ) : (
-            <Editor />
+            renderEditor()
           )}
         </div>
 
@@ -707,6 +767,7 @@ function RuleGroupEditor({
   onRemove,
   onAdd,
   operatorNeedsValue,
+  listOptionsMap = {},
 }: {
   group: DraftGroup;
   path: number[];
@@ -720,6 +781,7 @@ function RuleGroupEditor({
   onRemove: (path: number[]) => void;
   onAdd: (path: number[], node: DraftNode) => void;
   operatorNeedsValue: (params: Record<string, unknown>) => boolean;
+  listOptionsMap?: Record<string, string[]>;
 }) {
   return (
     <div className={`flex flex-col gap-2 ${isRoot ? '' : 'rounded-lg border border-gray-200 bg-gray-50/70 p-3'}`}>
@@ -771,6 +833,7 @@ function RuleGroupEditor({
               onRemove={onRemove}
               onAdd={onAdd}
               operatorNeedsValue={operatorNeedsValue}
+              listOptionsMap={listOptionsMap}
             />
           );
         }
@@ -786,6 +849,7 @@ function RuleGroupEditor({
             onPatchAtom={onPatchAtom}
             onRemove={onRemove}
             operatorNeedsValue={operatorNeedsValue}
+            listOptionsMap={listOptionsMap}
           />
         );
       })}
@@ -820,6 +884,7 @@ function AtomEditor({
   onPatchAtom,
   onRemove,
   operatorNeedsValue,
+  listOptionsMap = {},
 }: {
   node: DraftAtom;
   path: number[];
@@ -830,17 +895,132 @@ function AtomEditor({
   onPatchAtom: (path: number[], patch: Record<string, unknown>) => void;
   onRemove: (path: number[]) => void;
   operatorNeedsValue: (params: Record<string, unknown>) => boolean;
+  listOptionsMap?: Record<string, string[]>;
 }) {
   const p = node.params;
-  const fieldType = fieldTypeOf(p['field']);
+  const selectedField = scopedFields.find((f) => f.field_name === p['field']);
+  const fieldType = selectedField?.field_type || (fieldTypeOf(p['field']) as string | undefined);
+
   const opOps = useMemo(() => {
     if (!fieldType) return ['eq', 'ne'];
+    if (UNSUPPORTED_VALUE_TYPES.includes(fieldType)) return ['is_empty', 'is_not_empty'];
     if (NUMBER_TYPES.includes(fieldType)) return ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'is_empty', 'is_not_empty'];
-    if (fieldType === 'boolean') return ['eq', 'ne', 'is_empty', 'is_not_empty'];
-    if (DATE_TYPES.includes(fieldType)) return ['lt', 'le', 'gt', 'ge', 'eq'];
+    if (BOOLEAN_TYPES.includes(fieldType)) return ['eq', 'ne', 'is_empty', 'is_not_empty'];
+    if (DATE_TYPES.includes(fieldType)) return ['lt', 'le', 'gt', 'ge', 'eq', 'ne', 'is_empty', 'is_not_empty'];
     if (SELECT_TYPES.includes(fieldType)) return ['eq', 'ne', 'in', 'not_in', 'is_empty', 'is_not_empty'];
     return ['eq', 'ne', 'in', 'not_in', 'contains', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty'];
   }, [fieldType]);
+
+  const renderAttributeValueInput = () => {
+    if (!operatorNeedsValue(p)) return null;
+
+    if (fieldType && UNSUPPORTED_VALUE_TYPES.includes(fieldType)) {
+      return null;
+    }
+
+    if (fieldType && BOOLEAN_TYPES.includes(fieldType)) {
+      const rawVal = p['value'];
+      const boolVal =
+        rawVal === true || rawVal === 'true' || rawVal === 'yes' || rawVal === '1'
+          ? 'yes'
+          : rawVal === false || rawVal === 'false' || rawVal === 'no' || rawVal === '0'
+          ? 'no'
+          : 'yes';
+      return (
+        <select
+          value={boolVal}
+          onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+          className={`${inputCls} text-xs font-semibold text-blue-900 bg-blue-50/50 border-blue-200`}
+        >
+          <option value="yes">Yes (True)</option>
+          <option value="no">No (False)</option>
+        </select>
+      );
+    }
+
+    const fieldOptions = getFieldOptions(selectedField, listOptionsMap);
+    if (
+      (SELECT_TYPES.includes(fieldType || '') || fieldOptions.length > 0) &&
+      fieldOptions.length > 0 &&
+      (p['operator'] === 'eq' || p['operator'] === 'ne' || !p['operator'])
+    ) {
+      return (
+        <select
+          value={String(p['value'] ?? '')}
+          onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+          className={`${inputCls} text-xs`}
+        >
+          <option value="">— choose option —</option>
+          {fieldOptions.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+          {p['value'] && !fieldOptions.includes(String(p['value'])) && (
+            <option value={String(p['value'])}>{String(p['value'])} (custom)</option>
+          )}
+        </select>
+      );
+    }
+
+    if (NUMBER_TYPES.includes(fieldType || '')) {
+      return (
+        <input
+          type="number"
+          step="any"
+          value={p['value'] !== undefined && p['value'] !== null ? String(p['value']) : ''}
+          onChange={(e) => {
+            const v = e.target.value;
+            onPatchAtom(path, { ...p, value: v === '' ? '' : isNaN(Number(v)) ? v : Number(v) });
+          }}
+          placeholder="0"
+          className={`${inputCls} text-xs font-mono`}
+        />
+      );
+    }
+
+    if (fieldType === 'date') {
+      return (
+        <input
+          type="date"
+          value={String(p['value'] ?? '')}
+          onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+          className={`${inputCls} text-xs`}
+        />
+      );
+    }
+
+    if (fieldType === 'datetime') {
+      return (
+        <input
+          type="datetime-local"
+          value={String(p['value'] ?? '')}
+          onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+          className={`${inputCls} text-xs`}
+        />
+      );
+    }
+
+    if (fieldType === 'time') {
+      return (
+        <input
+          type="time"
+          value={String(p['value'] ?? '')}
+          onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+          className={`${inputCls} text-xs`}
+        />
+      );
+    }
+
+    return (
+      <input
+        value={String(p['value'] ?? '')}
+        onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+        placeholder={fieldType ? `value (${fieldType})` : 'value'}
+        className={`${inputCls} text-xs`}
+      />
+    );
+  };
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-2.5">
@@ -869,25 +1049,48 @@ function AtomEditor({
       <div className="mt-2 flex flex-col gap-2">
         {node.type === 'attribute' && (
           <>
-            <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5">
+            <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5 items-center">
               <select
                 value={String(p['field'] ?? '')}
-                onChange={(e) =>
-                  onPatchAtom(path, { ...p, field: e.target.value, ...(p['operator'] ? {} : { operator: 'eq' }) })
-                }
-                className={`${inputCls} text-xs`}
+                onChange={(e) => {
+                  const fName = e.target.value;
+                  const f = scopedFields.find((item) => item.field_name === fName);
+                  const fType = f?.field_type;
+                  let nextOp = p['operator'] || 'eq';
+                  let nextVal = p['value'];
+                  if (fType && BOOLEAN_TYPES.includes(fType)) {
+                    nextOp = ['eq', 'ne', 'is_empty', 'is_not_empty'].includes(String(nextOp)) ? nextOp : 'eq';
+                    nextVal = nextVal === undefined || nextVal === '' || nextVal === null ? 'yes' : nextVal;
+                  } else if (fType && UNSUPPORTED_VALUE_TYPES.includes(fType)) {
+                    nextOp = 'is_empty';
+                    nextVal = '';
+                  } else if (fType && NUMBER_TYPES.includes(fType)) {
+                    nextOp = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'is_empty', 'is_not_empty'].includes(String(nextOp)) ? nextOp : 'eq';
+                  } else if (fType && DATE_TYPES.includes(fType)) {
+                    nextOp = ['lt', 'le', 'gt', 'ge', 'eq', 'is_empty', 'is_not_empty'].includes(String(nextOp)) ? nextOp : 'ge';
+                    nextVal = nextVal || 'now';
+                  } else if (fType && SELECT_TYPES.includes(fType)) {
+                    const opts = getFieldOptions(f, listOptionsMap);
+                    if (opts.length > 0 && (nextVal === undefined || nextVal === '' || nextVal === null)) {
+                      nextVal = opts[0];
+                    }
+                  }
+                  onPatchAtom(path, { ...p, field: fName, operator: nextOp, value: nextVal });
+                }}
+                className={`${inputCls} text-xs font-medium`}
               >
-                <option value="">— field —</option>
+                <option value="">— choose field —</option>
                 {scopedFields.map((f) => (
                   <option key={f.field_name} value={f.field_name}>
-                    {f.field_name}
+                    {f.label ? `${f.label} (${f.field_name}) · ${f.field_type}` : `${f.field_name} · ${f.field_type}`}
                   </option>
                 ))}
               </select>
+
               <select
                 value={String(p['operator'] ?? 'eq')}
                 onChange={(e) => onPatchAtom(path, { ...p, operator: e.target.value })}
-                className={`${inputCls} max-w-[150px] text-xs`}
+                className={`${inputCls} max-w-[150px] text-xs font-medium`}
               >
                 {opOps.map((op) => (
                   <option key={op} value={op}>
@@ -895,24 +1098,30 @@ function AtomEditor({
                   </option>
                 ))}
               </select>
-              <input
-                value={String(p['value'] ?? '')}
-                onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
-                placeholder={fieldType ? String(fieldType) : 'value'}
-                className={`${inputCls} text-xs ${operatorNeedsValue(p) ? '' : 'hidden'}`}
-              />
+
+              {renderAttributeValueInput()}
             </div>
-            {!['is_empty', 'is_not_empty'].includes(String(p['operator'] ?? '')) && (
-              <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                <input
-                  type="checkbox"
-                  checked={p['case_sensitive'] === true}
-                  onChange={(e) => onPatchAtom(path, { ...p, case_sensitive: e.target.checked })}
-                  className="h-3.5 w-3.5 accent-blue-700"
-                />
-                Case-sensitive comparison
-              </label>
+
+            {fieldType && UNSUPPORTED_VALUE_TYPES.includes(fieldType) && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                Notice: Field type <strong>{fieldType}</strong> only supports empty / not empty checks.
+              </p>
             )}
+
+            {!['is_empty', 'is_not_empty'].includes(String(p['operator'] ?? '')) &&
+              fieldType &&
+              !BOOLEAN_TYPES.includes(fieldType) &&
+              !UNSUPPORTED_VALUE_TYPES.includes(fieldType) && (
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                  <input
+                    type="checkbox"
+                    checked={p['case_sensitive'] === true}
+                    onChange={(e) => onPatchAtom(path, { ...p, case_sensitive: e.target.checked })}
+                    className="h-3.5 w-3.5 accent-blue-700"
+                  />
+                  Case-sensitive comparison
+                </label>
+              )}
           </>
         )}
 

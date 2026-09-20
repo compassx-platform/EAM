@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional, List
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 from backend.models.entities import get_entity_models
 from backend.models.workflow import WorkflowDefinition
@@ -45,31 +46,23 @@ def simulate_transition(
             merged_fields.update(custom_fields)
             custom_fields = merged_fields
 
-    if not workflow_version:
-        published_wf = db.query(WorkflowDefinition).filter(
+    published_wf = (
+        db.query(WorkflowDefinition)
+        .filter(
             WorkflowDefinition.entity_type == entity_type.lower(),
-            WorkflowDefinition.status == "published"
-        ).order_by(WorkflowDefinition.created_at.desc()).first()
-        if not published_wf:
-            return {
-                "accepted": False,
-                "error": f"No published workflow found for entity type '{entity_type}'",
-                "condition_trace": [],
-            }
-        workflow_version = published_wf.version_label
-        wf_def = published_wf.definition
-    else:
-        wf = db.query(WorkflowDefinition).filter(
-            WorkflowDefinition.entity_type == entity_type.lower(),
-            WorkflowDefinition.version_label == workflow_version
-        ).first()
-        if not wf:
-            return {
-                "accepted": False,
-                "error": f"Workflow version '{workflow_version}' not found for '{entity_type}'",
-                "condition_trace": [],
-            }
-        wf_def = wf.definition
+            WorkflowDefinition.status == "published",
+        )
+        .order_by(WorkflowDefinition.published_at.desc(), WorkflowDefinition.created_at.desc())
+        .first()
+    )
+    if not published_wf:
+        return {
+            "accepted": False,
+            "error": f"No published workflow is currently available for '{entity_type}'. Please publish a workflow in Workflow Studio.",
+            "condition_trace": [],
+        }
+    workflow_version = published_wf.version_label
+    wf_def = published_wf.definition
 
     transitions = wf_def.get("transitions", [])
     matching_transition = None

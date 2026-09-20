@@ -3,9 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models.forms import EntityForm
+from backend.models.forms import EntityForm, FormVersion
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition
+from backend.models.base import generate_uuid, utc_now
 from backend.services import list_service
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
@@ -340,12 +341,34 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
 
     form = db.query(EntityForm).filter(EntityForm.entity_type == et).first()
     if form:
-        new_version = (form.version_number or 1) + 1
-        form.version_number = new_version
-        form.version_label = f"v{new_version}"
-        form.layout = cleaned
-        form.cols = req.cols
-        form.row_height = req.row_height
+        has_changed = (
+            form.layout != cleaned
+            or form.cols != req.cols
+            or form.row_height != req.row_height
+        )
+        if has_changed:
+            new_version = (form.version_number or 1) + 1
+            form.version_number = new_version
+            form.version_label = f"v{new_version}"
+            form.layout = cleaned
+            form.cols = req.cols
+            form.row_height = req.row_height
+            form.updated_at = utc_now()
+
+            fv = FormVersion(
+                id=generate_uuid(),
+                entity_type=et,
+                version_number=form.version_number,
+                version_label=form.version_label,
+                layout=cleaned,
+                sections=[],
+                cols=req.cols,
+                row_height=req.row_height,
+                created_at=utc_now(),
+            )
+            db.add(fv)
+            db.commit()
+            db.refresh(form)
     else:
         form = EntityForm(
             entity_type=et,
@@ -357,23 +380,20 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
         )
         db.add(form)
 
-    from backend.models.forms import FormVersion
-    from backend.models.base import generate_uuid, utc_now
-    fv = FormVersion(
-        id=generate_uuid(),
-        entity_type=et,
-        version_number=form.version_number,
-        version_label=form.version_label,
-        layout=cleaned,
-        sections=[],
-        cols=req.cols,
-        row_height=req.row_height,
-        created_at=utc_now(),
-    )
-    db.add(fv)
-
-    db.commit()
-    db.refresh(form)
+        fv = FormVersion(
+            id=generate_uuid(),
+            entity_type=et,
+            version_number=form.version_number,
+            version_label=form.version_label,
+            layout=cleaned,
+            sections=[],
+            cols=req.cols,
+            row_height=req.row_height,
+            created_at=utc_now(),
+        )
+        db.add(fv)
+        db.commit()
+        db.refresh(form)
     result = form.to_dict()
     fields = (
         db.query(EntityField).filter(EntityField.entity_type == et).order_by(EntityField.field_name).all()

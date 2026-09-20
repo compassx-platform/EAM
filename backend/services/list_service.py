@@ -194,6 +194,16 @@ def save_draft(db: Session, list_key: str, kind: str, items: List[Any], descript
 
 def publish_draft(db: Session, draft: ListDefinition) -> ListDefinition:
     """Publish a draft as a new immutable version, deprecating prior published."""
+    latest_pub = get_latest_published(db, draft.list_key)
+    if latest_pub and latest_pub.id != draft.id:
+        if (
+            latest_pub.kind == draft.kind
+            and (latest_pub.description or "").strip() == (draft.description or "").strip()
+            and latest_pub.items == draft.items
+        ):
+            db.delete(draft)
+            return latest_pub
+
     prior = (
         db.query(ListDefinition)
         .filter(

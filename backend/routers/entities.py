@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.entities import get_entity_models, DynamicEntity, DynamicEntityEvent
@@ -245,13 +246,30 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
     if not entity:
         raise HTTPException(status_code=404, detail=f"{key} '{id}' not found")
 
-    wf = db.query(WorkflowDefinition).filter(
-        WorkflowDefinition.entity_type == key,
-        WorkflowDefinition.version_label == entity.workflow_version
-    ).first()
+    wf = (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.entity_type == key,
+            WorkflowDefinition.status == "published",
+        )
+        .order_by(
+            WorkflowDefinition.published_at.desc(),
+            WorkflowDefinition.created_at.desc(),
+        )
+        .first()
+    )
 
     if not wf:
-        return {"current_status": entity.status, "valid_transitions": []}
+        return {
+            "entity_id": id,
+            "entity_type": key,
+            "current_status": entity.status,
+            "workflow_version": None,
+            "valid_transitions": [],
+            "auto_transitions_pending": [],
+            "has_published_workflow": False,
+            "message": f"No published workflow is available for '{key}'. Please publish a workflow in Workflow Studio.",
+        }
 
     transitions = (wf.definition or {}).get("transitions", [])
     valid_transitions = []
@@ -278,9 +296,10 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
         "entity_id": id,
         "entity_type": key,
         "current_status": entity.status,
-        "workflow_version": entity.workflow_version,
+        "workflow_version": wf.version_label,
         "valid_transitions": valid_transitions,
         "auto_transitions_pending": auto_pending,
+        "has_published_workflow": True,
     }
 
 

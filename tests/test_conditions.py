@@ -137,9 +137,18 @@ def test_versioned_registry_live_update(test_db):
     # Live definition now includes the role rule
     live = test_db.query(ConditionDefinition).filter(ConditionDefinition.id == cid).first()
     assert len(live.definition["rules"]) == 2
-    versions = test_db.query(ConditionVersion).filter(ConditionVersion.condition_id == cid).order_by(ConditionVersion.version).all()
-    assert [v.version for v in versions] == [1, 2]
-    assert live.definition["rules"] == versions[-1].definition["rules"]
+    # Save again with identical content - version should NOT bump
+    unchanged = create_or_update_condition(ConditionRequest(
+        id=cid, entity_type="permit", label="Hot Work Approval (updated)",
+        definition={"logic": "AND", "rules": [
+            {"type": "attribute", "field": "permit_type", "operator": "eq", "value": "Hot Work"},
+            {"type": "role", "role": "Supervisor"},
+        ]},
+    ), test_db)
+    assert unchanged["current_version"] == 2
+    versions_after = test_db.query(ConditionVersion).filter(ConditionVersion.condition_id == cid).all()
+    assert len(versions_after) == 2
+
 
 
 def test_live_update_propagates_everywhere(test_db):

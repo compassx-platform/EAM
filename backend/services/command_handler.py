@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import update
+from sqlalchemy import update, case
 from backend.models.base import generate_uuid, utc_now
 from backend.models.entities import get_entity_models
 from backend.models.workflow import WorkflowDefinition
@@ -55,14 +55,43 @@ class ConditionFailedError(CommandError):
         )
 
 
-def _load_workflow(db: Session, entity_type: str, workflow_version: str) -> WorkflowDefinition:
-    wf = db.query(WorkflowDefinition).filter(
+def _load_published_workflow(db: Session, entity_type: str, workflow_version: Optional[str] = None) -> WorkflowDefinition:
+    """
+    Loads the active published workflow definition for the given entity type.
+    All records strictly follow the published workflow (never drafts or historical non-published flows).
+    """
+    query = db.query(WorkflowDefinition).filter(
         WorkflowDefinition.entity_type == entity_type.lower(),
-        WorkflowDefinition.version_label == workflow_version
-    ).first()
-    if not wf:
-        raise CommandError("workflow_not_found", f"Workflow version '{workflow_version}' bound to entity not found")
-    return wf
+        WorkflowDefinition.status == "published",
+    )
+    if workflow_version:
+        wf = (
+            query.filter(WorkflowDefinition.version_label == workflow_version)
+            .order_by(WorkflowDefinition.published_at.desc(), WorkflowDefinition.created_at.desc())
+            .first()
+        )
+        if wf:
+            return wf
+
+    # Latest active published workflow for this entity type
+    wf = (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.entity_type == entity_type.lower(),
+            WorkflowDefinition.status == "published",
+        )
+        .order_by(WorkflowDefinition.published_at.desc(), WorkflowDefinition.created_at.desc())
+        .first()
+    )
+    if wf:
+        return wf
+
+    raise CommandError(
+        "no_published_workflow",
+        f"No published workflow is currently available for '{entity_type}'. Please publish a workflow in Workflow Studio."
+    )
+
+_load_workflow = _load_published_workflow
 
 
 def _resolve_transition_target(

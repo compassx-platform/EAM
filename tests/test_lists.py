@@ -93,6 +93,14 @@ def test_publish_numbering_and_deprecation(test_db):
     assert versions[1]["status"] == "deprecated"
     assert versions[2]["status"] == "deprecated"
 
+    # Save identical items and publish -> should not create v4
+    save(test_db, items=("A", "B", "C"))
+    res_noop = publish_list("priority", test_db)
+    assert res_noop["list"]["version_label"] == "v3"
+    versions_noop = list_versions("priority", test_db)
+    assert len(versions_noop) == 3
+
+
 
 def test_resolve_returns_published_only(test_db):
     save(test_db)

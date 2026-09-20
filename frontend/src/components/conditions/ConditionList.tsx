@@ -28,6 +28,7 @@ export function ConditionList() {
       .listConditions()
       .then(setConditions)
       .finally(() => setLoading(false));
+    api.listFields().then(setFields).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function ConditionList() {
     ]).then(([ets, fs]) => {
       const names = [...new Set([...(ets as any[]).map((e) => e.name), ...(fs as any[]).map((f) => f.entity_type)])].sort();
       setKnownTypes(names);
+      setFields(fs as EntityField[]);
     });
     refresh();
   }, [refresh]);

@@ -565,14 +565,16 @@ function ControlPreviewWidget({
 
   // 8. Boolean / Yes-No
   if (type === 'boolean') {
-    const currentVal = typeof value === 'string' ? value : '';
+    const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : (typeof value === 'boolean' ? (value ? 'true' : 'false') : '');
+    const isYes = (value as any) === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
+    const isNo = (value as any) === false || rawLower === 'false' || rawLower === 'no' || rawLower === '0';
     return (
       <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
           onClick={() => onChange && onChange('yes')}
           className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
-            currentVal === 'yes'
+            isYes
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600 shadow-2xs'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs'
           }`}
@@ -583,7 +585,7 @@ function ControlPreviewWidget({
           type="button"
           onClick={() => onChange && onChange('no')}
           className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all cursor-pointer ${
-            currentVal === 'no'
+            isNo
               ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600 shadow-2xs'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-2xs'
           }`}

@@ -150,6 +150,8 @@ export function EntityFormView({
   const [auditLogOpen, setAuditLogOpen] = useState(false);
   const [firingEvent, setFiringEvent] = useState<string | null>(null);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  const [hasPublishedWorkflow, setHasPublishedWorkflow] = useState<boolean>(true);
+  const [noWorkflowMessage, setNoWorkflowMessage] = useState<string | null>(null);
 
   const activeId = initialRecordId || initialEntity?.id || '';
   const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || '';
@@ -223,15 +225,21 @@ export function EntityFormView({
       if (activeId) {
         const [entityDetail, validRes] = await Promise.all([
           api.getEntity(entityType, activeId),
-          api.listValidTransitions(entityType, activeId).catch(() => ({ valid_transitions: [] })),
+          api.listValidTransitions(entityType, activeId).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
         ]);
         setEntityRecord(entityDetail.entity);
         setEvents(entityDetail.events || []);
         setValidTransitions(validRes.valid_transitions || []);
+        const hasPub = (validRes as any).has_published_workflow !== false;
+        setHasPublishedWorkflow(hasPub);
+        setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       } else if (initialEntity) {
         setEntityRecord(initialEntity);
-        const validRes = await api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [] }));
+        const validRes = await api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [], has_published_workflow: false }));
         setValidTransitions(validRes.valid_transitions || []);
+        const hasPub = (validRes as any).has_published_workflow !== false;
+        setHasPublishedWorkflow(hasPub);
+        setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       }
     } catch (e: any) {
       setErr(e.message || 'Failed to load record');
@@ -462,9 +470,18 @@ export function EntityFormView({
               {/* Action Buttons: Directly fire the event on 1 click */}
               <div className="flex flex-wrap items-center gap-2">
                 {validTransitions.length === 0 ? (
-                  <span className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200/60">
-                    No actions available from this state
-                  </span>
+                  <div className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                    !hasPublishedWorkflow
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : 'bg-gray-100 text-gray-500 border-gray-200/60'
+                  }`}>
+                    {!hasPublishedWorkflow && <Info className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
+                    <span>
+                      {!hasPublishedWorkflow
+                        ? (noWorkflowMessage || `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.`)
+                        : 'No actions available from this state'}
+                    </span>
+                  </div>
                 ) : (
                   validTransitions.map((t) => {
                     const isFiring = firingEvent === t.event_type;
@@ -1021,7 +1038,8 @@ function ReadOnlyWidget({
 
   // 6. Boolean Toggle Badges
   if (def.type === 'boolean') {
-    const isYes = value === true || value === 'yes' || value === 'true';
+    const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : (typeof value === 'boolean' ? (value ? 'true' : 'false') : '');
+    const isYes = value === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
     return (
       <div className="flex items-center gap-3">
         <div

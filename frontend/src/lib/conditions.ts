@@ -99,12 +99,24 @@ export function evaluateConditionAtom(
 
       switch (op) {
         case 'eq':
-        case 'equals':
+        case 'equals': {
+          const bLeft = left === 'true' || left === 'yes' || left === '1' ? true : (left === 'false' || left === 'no' || left === '0' ? false : null);
+          const bRight = right === 'true' || right === 'yes' || right === '1' ? true : (right === 'false' || right === 'no' || right === '0' ? false : null);
+          if (bLeft !== null && bRight !== null) {
+            return bLeft === bRight;
+          }
           return left === right;
+        }
 
         case 'ne':
-        case 'not_equals':
+        case 'not_equals': {
+          const bLeft = left === 'true' || left === 'yes' || left === '1' ? true : (left === 'false' || left === 'no' || left === '0' ? false : null);
+          const bRight = right === 'true' || right === 'yes' || right === '1' ? true : (right === 'false' || right === 'no' || right === '0' ? false : null);
+          if (bLeft !== null && bRight !== null) {
+            return bLeft !== bRight;
+          }
           return left !== right;
+        }
 
         case 'contains':
           if (!right) return true;
@@ -296,11 +308,27 @@ export function evaluateSingleRule(
   const operator = rule.operator || 'equals';
 
   switch (operator) {
-    case 'equals':
-      return strVal.toLowerCase() === condVal.toLowerCase();
+    case 'equals': {
+      const lowStr = strVal.toLowerCase();
+      const lowCond = condVal.toLowerCase();
+      const bLeft = lowStr === 'true' || lowStr === 'yes' || lowStr === '1' ? true : (lowStr === 'false' || lowStr === 'no' || lowStr === '0' ? false : null);
+      const bRight = lowCond === 'true' || lowCond === 'yes' || lowCond === '1' ? true : (lowCond === 'false' || lowCond === 'no' || lowCond === '0' ? false : null);
+      if (bLeft !== null && bRight !== null) {
+        return bLeft === bRight;
+      }
+      return lowStr === lowCond;
+    }
 
-    case 'not_equals':
-      return strVal.toLowerCase() !== condVal.toLowerCase();
+    case 'not_equals': {
+      const lowStr = strVal.toLowerCase();
+      const lowCond = condVal.toLowerCase();
+      const bLeft = lowStr === 'true' || lowStr === 'yes' || lowStr === '1' ? true : (lowStr === 'false' || lowStr === 'no' || lowStr === '0' ? false : null);
+      const bRight = lowCond === 'true' || lowCond === 'yes' || lowCond === '1' ? true : (lowCond === 'false' || lowCond === 'no' || lowCond === '0' ? false : null);
+      if (bLeft !== null && bRight !== null) {
+        return bLeft !== bRight;
+      }
+      return lowStr !== lowCond;
+    }
 
     case 'contains': {
       if (!condVal) return true;

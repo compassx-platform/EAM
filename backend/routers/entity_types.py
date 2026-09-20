@@ -305,33 +305,39 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     if not et:
         raise HTTPException(status_code=404, detail=f"Entity type '{name}' not found")
 
-    new_v = (et.version_number or 1) + 1
-    et.version_number = new_v
-    et.version_label = f"v{new_v}"
+    new_display = req.display_name.strip() if req.display_name is not None and req.display_name.strip() else et.display_name
+    new_desc = req.description.strip() if req.description is not None else et.description
+    new_icon = req.icon.strip() if req.icon is not None else et.icon
 
-    if req.display_name is not None and req.display_name.strip():
-        et.display_name = req.display_name.strip()
-    if req.description is not None:
-        et.description = req.description.strip()
-    if req.icon is not None:
-        et.icon = req.icon.strip()
+    has_changed = (
+        et.display_name != new_display
+        or (et.description or "").strip() != (new_desc or "").strip()
+        or (et.icon or "").strip() != (new_icon or "").strip()
+    )
 
-    from backend.models.entity_type import EntityTypeVersion
-    from backend.models.base import generate_uuid, utc_now
-    db.add(EntityTypeVersion(
-        id=generate_uuid(),
-        name=key,
-        version_number=new_v,
-        version_label=f"v{new_v}",
-        display_name=et.display_name,
-        description=et.description,
-        icon=et.icon,
-        fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
-        created_at=utc_now(),
-    ))
+    if has_changed:
+        new_v = (et.version_number or 1) + 1
+        et.version_number = new_v
+        et.version_label = f"v{new_v}"
+        et.display_name = new_display
+        et.description = new_desc
+        et.icon = new_icon
 
-    db.commit()
-    db.refresh(et)
+        from backend.models.entity_type import EntityTypeVersion
+        from backend.models.base import generate_uuid, utc_now
+        db.add(EntityTypeVersion(
+            id=generate_uuid(),
+            name=key,
+            version_number=new_v,
+            version_label=f"v{new_v}",
+            display_name=et.display_name,
+            description=et.description,
+            icon=et.icon,
+            fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
+            created_at=utc_now(),
+        ))
+        db.commit()
+        db.refresh(et)
     return et.to_dict()
 
 @router.get("/{name}/history")
