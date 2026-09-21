@@ -90,6 +90,14 @@ export const PeopleView: React.FC<PeopleViewProps> = ({ onSelectPerson }) => {
               <Layers className="h-3.5 w-3.5 text-gray-500" />
               <span>Person Groups</span>
             </button>
+            <button
+              type="button"
+              onClick={() => navigate('/people/roles')}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              <UserCheck className="h-3.5 w-3.5 text-gray-500" />
+              <span>Roles</span>
+            </button>
           </div>
 
           <button

@@ -38,6 +38,9 @@ export interface WorkflowNodeMeta {
   condition_id?: string | null;
   conditions?: string[];
   description?: string;
+  role_id?: string | null;
+  task_instructions?: string | null;
+  time_limit_hours?: number | null;
 }
 
 export interface WorkflowDefinition {
@@ -520,4 +523,72 @@ export interface PersonRelated {
   permits: Array<{ id: string; status: string; title: string; open: boolean }>;
   supervises: string[];
   groups: string[];
+}
+
+// ---- Workflow Roles & Task Assignments (IBM Maximo MAXROLE & WFTASK) --------
+
+export type RoleType = 'PERSON' | 'PERSON_GROUP' | 'DATASET_ATTRIBUTE' | 'EMAIL_ADDRESS';
+
+export type RoleResolutionStrategy = 'broadcast' | 'sequence_first_available' | 'default_member';
+
+export interface WorkflowRole {
+  id: string;
+  name: string;
+  description?: string | null;
+  role_type: RoleType;
+  person_id?: string | null;
+  person_name?: string | null;
+  group_name?: string | null;
+  group_description?: string | null;
+  field_name?: string | null;
+  email_address?: string | null;
+  resolution_strategy: RoleResolutionStrategy;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface RoleResolvedPerson {
+  person_id: string;
+  display_name: string;
+  primary_email?: string | null;
+  phone?: string | null;
+  site?: string | null;
+  status: string;
+  is_delegate: boolean;
+  original_person_id?: string | null;
+}
+
+export interface RoleResolutionResult {
+  role_id: string;
+  role_name: string;
+  role_type: string;
+  resolved_persons: RoleResolvedPerson[];
+  resolved_emails: string[];
+  resolution_strategy?: string;
+  trace: string[];
+  resolution_summary: string;
+}
+
+export interface TaskAssignment {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  workflow_version?: string | null;
+  node_id?: string | null;
+  state_name: string;
+  role_id?: string | null;
+  role_name?: string | null;
+  role_type?: string | null;
+  assigned_person_id?: string | null;
+  assigned_person_name?: string | null;
+  assigned_group_name?: string | null;
+  assigned_email?: string | null;
+  status: 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'DELEGATED' | 'REJECTED';
+  instructions?: string | null;
+  time_limit_hours?: number | null;
+  due_date?: string | null;
+  resolution_trace?: any;
+  completed_by?: string | null;
+  completed_at?: string | null;
+  created_at: string;
 }

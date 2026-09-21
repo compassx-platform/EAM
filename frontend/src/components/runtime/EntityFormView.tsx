@@ -5,16 +5,19 @@ import 'react-resizable/css/styles.css';
 import {
   ArrowRight,
   Check,
+  CheckCircle2,
   Clock,
   Download,
   FileText,
   History,
   Layers,
+  ListTodo,
   Loader2,
   Paperclip,
   RefreshCw,
   ShieldCheck,
   ShieldX,
+  UserCheck,
   Workflow,
   X,
   Zap,
@@ -35,7 +38,9 @@ import type {
   ConditionTraceItem,
   Person,
   PersonGroup,
+  TaskAssignment,
 } from '../../types';
+import { InfoTooltip } from '../people/InfoTooltip';
 import type { AttachedFile } from './EntityCreateForm';
 
 export interface EntityFormViewProps {
@@ -142,6 +147,8 @@ export function EntityFormView({
   const [resolved, setResolved] = useState<Record<string, ResolvedList>>({});
   const [persons, setPersons] = useState<Person[]>([]);
   const [personGroups, setPersonGroups] = useState<PersonGroup[]>([]);
+  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
@@ -221,22 +228,28 @@ export function EntityFormView({
         setResolved(r.resolved || {});
       }
 
-      // Fetch Entity and Valid Transitions
+      // Fetch Entity, Valid Transitions, and Task Assignments
       if (activeId) {
-        const [entityDetail, validRes] = await Promise.all([
+        const [entityDetail, validRes, taskRes] = await Promise.all([
           api.getEntity(entityType, activeId),
           api.listValidTransitions(entityType, activeId).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
+          api.listTaskAssignments({ entity_type: entityType, entity_id: activeId }).catch(() => ({ items: [], total: 0 })),
         ]);
         setEntityRecord(entityDetail.entity);
         setEvents(entityDetail.events || []);
         setValidTransitions(validRes.valid_transitions || []);
+        setTaskAssignments(taskRes.items || []);
         const hasPub = (validRes as any).has_published_workflow !== false;
         setHasPublishedWorkflow(hasPub);
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       } else if (initialEntity) {
         setEntityRecord(initialEntity);
-        const validRes = await api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [], has_published_workflow: false }));
+        const [validRes, taskRes] = await Promise.all([
+          api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
+          api.listTaskAssignments({ entity_type: entityType, entity_id: initialEntity.id }).catch(() => ({ items: [], total: 0 })),
+        ]);
         setValidTransitions(validRes.valid_transitions || []);
+        setTaskAssignments(taskRes.items || []);
         const hasPub = (validRes as any).has_published_workflow !== false;
         setHasPublishedWorkflow(hasPub);
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
@@ -348,6 +361,22 @@ export function EntityFormView({
       setTransitionError(e.message || `Failed to fire transition "${t.event_type}"`);
     } finally {
       setFiringEvent(null);
+    }
+  };
+
+  const handleCompleteTask = async (taskId: string) => {
+    setCompletingTaskId(taskId);
+    try {
+      await api.updateTaskStatus(taskId, {
+        status: 'COMPLETED',
+        completed_by: 'Current User',
+      });
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (err: any) {
+      setTransitionError(err.message || 'Failed to complete task assignment');
+    } finally {
+      setCompletingTaskId(null);
     }
   };
 
@@ -531,6 +560,158 @@ export function EntityFormView({
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
+              </div>
+            )}
+
+            {/* Workflow Task Assignments: Active assignments created by workflow task states */}
+            {taskAssignments.length > 0 && (
+              <div className="rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <ListTodo className="h-4 w-4 text-gray-700" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                      Workflow Task Assignments
+                    </h3>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                      {taskAssignments.filter((t) => t.status === 'ASSIGNED').length} active
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-400">
+                    Maximo-aligned role routing with dynamic delegation & availability
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {taskAssignments.map((task) => {
+                    const isCurrentState = task.state_name === currentEntity?.status;
+                    const isAssigned = task.status === 'ASSIGNED';
+                    const assignedPerson = task.assigned_person_id
+                      ? persons.find((p) => p.person_id === task.assigned_person_id)
+                      : null;
+                    const assigneeLabel = assignedPerson
+                      ? `${assignedPerson.display_name} (${task.assigned_person_id})`
+                      : task.assigned_person_id
+                        ? task.assigned_person_id
+                        : task.assigned_group_name
+                          ? `Group: ${task.assigned_group_name}`
+                          : task.assigned_email
+                            ? `Email: ${task.assigned_email}`
+                            : 'Unassigned';
+
+                    return (
+                      <div
+                        key={task.id}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border p-3 text-xs transition-colors ${
+                          isAssigned
+                            ? isCurrentState
+                              ? 'border-blue-200 bg-blue-50/40 shadow-2xs'
+                              : 'border-gray-200 bg-white'
+                            : 'border-gray-200/60 bg-gray-50/60 text-gray-500'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                isAssigned
+                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              }`}
+                            >
+                              {isAssigned ? (
+                                <>
+                                  <Clock className="h-2.5 w-2.5 text-blue-600" />
+                                  <span>Pending</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-2.5 w-2.5 text-emerald-600" />
+                                  <span>Completed</span>
+                                </>
+                              )}
+                            </span>
+
+                            <span className="font-semibold text-gray-900">
+                              Stage: {task.state_name}
+                            </span>
+
+                            {task.role_id && (
+                              <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+                                <UserCheck className="h-3 w-3 text-gray-500" />
+                                <span>Role: {task.role_id}</span>
+                              </span>
+                            )}
+
+                            {task.resolution_trace && (
+                              <InfoTooltip text={`Role Resolution Trace: ${task.resolution_trace}`} />
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-gray-600 text-[11px]">
+                            <div className="flex items-center gap-1">
+                              <span className="text-gray-400">Assignee:</span>
+                              <span className="font-medium text-gray-800">{assigneeLabel}</span>
+                            </div>
+
+                            {task.due_date && (
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3 text-gray-400" />
+                                <span className="text-gray-400">Due:</span>
+                                <span className="font-medium text-gray-700">
+                                  {new Date(task.due_date).toLocaleString(undefined, {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                            )}
+
+                            {task.time_limit_hours && !task.due_date && (
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3 text-gray-400" />
+                                <span className="text-gray-400">SLA:</span>
+                                <span className="font-medium text-gray-700">{task.time_limit_hours}h limit</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {task.instructions && (
+                            <p className="mt-1 text-gray-600 text-xs italic bg-white/80 rounded px-2 py-1 border border-gray-200/50">
+                              "{task.instructions}"
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Task Action */}
+                        <div className="shrink-0 flex items-center gap-2">
+                          {isAssigned ? (
+                            <button
+                              type="button"
+                              disabled={completingTaskId === task.id}
+                              onClick={() => handleCompleteTask(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-white hover:bg-gray-50 border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:border-gray-300 transition-colors disabled:opacity-50"
+                            >
+                              {completingTaskId === task.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-600" />
+                              ) : (
+                                <Check className="h-3.5 w-3.5 text-emerald-600" />
+                              )}
+                              <span>Mark Task Complete</span>
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">
+                              {task.completed_at
+                                ? `Completed ${new Date(task.completed_at).toLocaleDateString()}`
+                                : 'Completed'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

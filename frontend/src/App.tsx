@@ -14,8 +14,10 @@ import { PeopleView } from './components/people/PeopleView';
 import { PersonEditor } from './components/people/PersonEditor';
 import { GroupsView } from './components/people/GroupsView';
 import { GroupEditor } from './components/people/GroupEditor';
+import { RolesView } from './components/roles/RolesView';
+import { RoleEditor } from './components/roles/RoleEditor';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox, Users } from 'lucide-react';
+import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox, Users, UserCheck } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
 type Tab = 'records' | 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions' | 'people';
@@ -36,7 +38,7 @@ function App() {
           ? 'lists'
           : route.path.startsWith('/conditions')
             ? 'conditions'
-            : route.path.startsWith('/people')
+            : route.path.startsWith('/people') || route.path.startsWith('/roles')
               ? 'people'
               : 'workflows';
 
@@ -56,9 +58,12 @@ function App() {
   const listKey = route.path.startsWith('/lists/') ? route.id : null;
   const designerEntity = route.path === '/entities/design' ? null : route.path.startsWith('/entities/design/') ? route.id : undefined;
 
-  const isPeopleGroups = route.path === '/people/groups';
+  const isPeopleRoles = route.path === '/people/roles' || route.path === '/roles';
+  const roleId = route.path.startsWith('/people/roles/') ? route.id : route.path.startsWith('/roles/') ? route.id : undefined;
+
+  const isPeopleGroups = !isPeopleRoles && !roleId && route.path === '/people/groups';
   const peopleGroupId = route.path.startsWith('/people/groups/') ? route.id : undefined;
-  const personId = !isPeopleGroups && !peopleGroupId && route.path.startsWith('/people/') ? route.id : undefined;
+  const personId = !isPeopleRoles && !roleId && !isPeopleGroups && !peopleGroupId && route.path.startsWith('/people/') ? route.id : undefined;
 
   const createType = route.path === '/create' ? route.query.get('type') : null;
 
@@ -128,17 +133,23 @@ function App() {
           )}
           {tab === 'people' && (
             <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              {peopleGroupId === 'new'
-                ? 'New Group'
-                : peopleGroupId
-                  ? `Group · ${peopleGroupId}`
-                  : isPeopleGroups
-                    ? 'Person Groups'
-                    : personId === 'new'
-                      ? 'New Person'
-                      : personId
-                        ? `Person · ${personId}`
-                        : 'People Directory'}
+              {roleId === 'new'
+                ? 'New Role'
+                : roleId
+                  ? `Role · ${roleId}`
+                  : isPeopleRoles
+                    ? 'Workflow Roles'
+                    : peopleGroupId === 'new'
+                      ? 'New Group'
+                      : peopleGroupId
+                        ? `Group · ${peopleGroupId}`
+                        : isPeopleGroups
+                          ? 'Person Groups'
+                          : personId === 'new'
+                            ? 'New Person'
+                            : personId
+                              ? `Person · ${personId}`
+                              : 'People Directory'}
             </span>
           )}
         </div>
@@ -193,7 +204,15 @@ function App() {
           ) : tab === 'conditions' ? (
             <ConditionList />
           ) : tab === 'people' ? (
-            peopleGroupId !== undefined ? (
+            roleId !== undefined ? (
+              <RoleEditor
+                key={roleId}
+                roleId={roleId}
+                onBack={() => navigate('/people/roles')}
+              />
+            ) : isPeopleRoles ? (
+              <RolesView onSelectRole={(r) => navigate(`/people/roles/${encodeURIComponent(r)}`)} />
+            ) : peopleGroupId !== undefined ? (
               <GroupEditor
                 key={peopleGroupId}
                 groupName={peopleGroupId}

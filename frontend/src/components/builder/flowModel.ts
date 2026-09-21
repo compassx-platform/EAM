@@ -16,6 +16,9 @@ export interface NodeMeta {
   condition_id?: string | null;
   conditions?: string[];
   description?: string;
+  role_id?: string | null;
+  task_instructions?: string | null;
+  time_limit_hours?: number | null;
 }
 
 export type WorkflowFlowNode = Node<
@@ -28,6 +31,10 @@ export type WorkflowFlowNode = Node<
     condition_label?: string | null;
     conditions?: string[];
     description?: string;
+    role_id?: string | null;
+    role_name?: string | null;
+    task_instructions?: string | null;
+    time_limit_hours?: number | null;
     onRename?: (oldLabel: string, newLabel: string) => void;
     onDelete?: (id: string) => void;
     onDuplicate?: (id: string) => void;
@@ -161,6 +168,9 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
         condition_id: condId,
         conditions: conds,
         description: meta?.description,
+        role_id: meta?.role_id || null,
+        task_instructions: meta?.task_instructions || null,
+        time_limit_hours: meta?.time_limit_hours || null,
       },
     };
   });
@@ -208,6 +218,9 @@ export function flowToDefinition(
       condition_id: condId,
       conditions: conds,
       description: n.data.description,
+      role_id: n.data.role_id || null,
+      task_instructions: n.data.task_instructions || null,
+      time_limit_hours: n.data.time_limit_hours || null,
     };
   });
 

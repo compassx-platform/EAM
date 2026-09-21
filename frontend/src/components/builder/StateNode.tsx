@@ -10,6 +10,10 @@ export type StateNodeData = {
   condition_id?: string | null;
   conditions?: string[];
   description?: string;
+  role_id?: string | null;
+  role_name?: string | null;
+  task_instructions?: string | null;
+  time_limit_hours?: number | null;
   onRename?: (oldLabel: string, newLabel: string) => void;
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
@@ -67,7 +71,7 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
 }
 
 function StateNode({ id, data, selected }: NodeProps) {
-  const { label, kind, terminal, condition_id, conditions, description, onRename, onDelete, onDuplicate } = data as StateNodeData;
+  const { label, kind, terminal, condition_id, conditions, description, role_id, role_name, task_instructions, onRename, onDelete, onDuplicate } = data as StateNodeData;
   const [value, setValue] = useState(label);
   const iconColor = KIND_ICON_COLORS[kind] || 'text-gray-600';
   const activeCondition = (conditions && conditions[0]) || condition_id || null;
@@ -83,6 +87,8 @@ function StateNode({ id, data, selected }: NodeProps) {
       ? activeCondition
         ? `Condition: ${activeCondition}`
         : 'Splits by TRUE / FALSE'
+      : kind === 'task' && role_id
+      ? `Role: ${role_name || role_id}`
       : description || KIND_DEFAULT_SUBTITLES[kind] || 'Workflow step';
 
   return (

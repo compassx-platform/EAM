@@ -15,8 +15,7 @@ import {
   type EdgeChange,
 } from '@xyflow/react';
 import { Loader2, MousePointer, History, Calendar, X, GitCommitHorizontal } from 'lucide-react';
-import { api } from '../../api/client';
-import type { Workflow, WorkflowAction, WorkflowAutoTransition, WorkflowChoice, ConditionDefinition, ConditionTypeInfo, EntityField } from '../../types';
+import type { Workflow, WorkflowAction, WorkflowAutoTransition, WorkflowChoice, ConditionDefinition, ConditionTypeInfo, EntityField, WorkflowRole } from '../../types';
 import StateNode from './StateNode';
 import EventEdge from './EventEdge';
 import { autoArrangePositions, definitionToFlow, flowToDefinition, nextStateLabel, NODE_KINDS } from './flowModel';
@@ -28,7 +27,8 @@ import { ActionInspector } from './studio/ActionInspector';
 import { ConditionModal } from './studio/ConditionModal';
 import { SettingsModal } from './studio/SettingsModal';
 import { DashedButton } from './studio/ui';
-import { useHashRoute } from '../../lib/router';
+import { api } from '../../api/client';
+import { useHashRoute, navigate } from '../../lib/router';
 
 const nodeTypes = { state: StateNode };
 const edgeTypes = { event: EventEdge };
@@ -54,6 +54,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const [edges, setEdges] = useState<WorkflowFlowEdge[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
+  const [roles, setRoles] = useState<WorkflowRole[]>([]);
   const [knownTypes, setKnownTypes] = useState<string[]>([]);
   const [terminalStates, setTerminalStates] = useState<string[]>([]);
   const [autoTransitions, setAutoTransitions] = useState<WorkflowAutoTransition[]>([]);
@@ -138,7 +139,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         api
           .listWorkflows()
           .then((wfs) => {
-            const names = [...new Set(wfs.map((w) => w.entity_type))].sort();
+            const names: string[] = Array.from(new Set(wfs.map((w: Workflow) => w.entity_type))).sort();
             setKnownTypes(names);
             if (!initialType && names.length > 0) {
               setEntityType((cur) => cur || names[0]);
@@ -154,6 +155,10 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
       .listActionTypes()
       .then((t) => setActionTypes(t.map((x) => ({ type: x.type, name: x.name, description: x.description }))))
       .catch(() => setActionTypes([]));
+    api
+      .listRoles()
+      .then((r) => setRoles(r.items))
+      .catch(() => setRoles([]));
   }, []);
 
   useEffect(() => {
@@ -502,6 +507,31 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
     setDirty(true);
   }
 
+  function handleSetNodeTaskAssignment(
+    nodeId: string,
+    updates: {
+      role_id?: string | null;
+      role_name?: string | null;
+      task_instructions?: string | null;
+      time_limit_hours?: number | null;
+    }
+  ) {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                ...updates,
+              },
+            }
+          : n
+      )
+    );
+    setDirty(true);
+  }
+
   function handleSetRouterBranch(nodeId: string, branch: 'TRUE' | 'FALSE', targetState: string) {
     setEdges((eds) => {
       const existing = eds.find((e) => e.source === nodeId && e.data?.event === branch);
@@ -764,6 +794,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
                   edges={edges}
                   nodeLabels={nodes.map((n) => n.data.label)}
                   conditions={conditions}
+                  roles={roles}
                   onKind={handleSetNodeKind}
                   onRename={handleRenameState}
                   onDuplicate={handleDuplicateNode}
@@ -771,10 +802,12 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
                   onTarget={handleSetEdgeTarget}
                   onConditions={handleSetEdgeConditions}
                   onNodeConditions={handleSetNodeConditions}
+                  onNodeTaskAssignment={handleSetNodeTaskAssignment}
                   onSetRouterBranch={handleSetRouterBranch}
                   onEvent={handleRenameEvent}
                   onRemoveConnection={handleDeleteEdge}
                   onAddRoute={handleAddRoute}
+                  onOpenRolesModule={() => navigate('/people/roles/new')}
                   onEditCondition={(c) => {
                     setEditingCondition(c);
                     setConditionModalOpen(true);

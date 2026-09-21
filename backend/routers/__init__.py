@@ -9,6 +9,8 @@ from backend.routers.actions import router as actions_router
 from backend.routers.lists import router as lists_router
 from backend.routers.entity_types import router as entity_types_router
 from backend.routers.persons import router as persons_router, groups_router
+from backend.routers.roles import router as roles_router
+from backend.routers.tasks import router as tasks_router
 
 __all__ = [
     "auth_router",
@@ -23,4 +25,6 @@ __all__ = [
     "entity_types_router",
     "persons_router",
     "groups_router",
+    "roles_router",
+    "tasks_router",
 ]

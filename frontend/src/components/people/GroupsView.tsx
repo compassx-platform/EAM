@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Users, Layers, Shield, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Search, Users, Layers, Shield, ArrowRight, Loader2, RefreshCw, UserCheck } from 'lucide-react';
 import { api } from '../../api/client';
 import type { PersonGroup } from '../../types';
 import { navigate } from '../../lib/router';
@@ -82,6 +82,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ onSelectGroup }) => {
             >
               <Layers className="h-3.5 w-3.5 text-gray-700" />
               <span>Person Groups</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/people/roles')}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              <UserCheck className="h-3.5 w-3.5 text-gray-500" />
+              <span>Roles</span>
             </button>
           </div>
 

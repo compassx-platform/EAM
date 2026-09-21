@@ -19,6 +19,8 @@ from backend.models.person import (
     PersonAvailability,
     PersonAudit,
 )
+from backend.models.workflow_role import WorkflowRole
+from backend.models.task_assignment import TaskAssignment
 
 __all__ = [
     "EntityBaseMixin",
@@ -44,4 +46,6 @@ __all__ = [
     "PersonGroupMember",
     "PersonAvailability",
     "PersonAudit",
+    "WorkflowRole",
+    "TaskAssignment",
 ]

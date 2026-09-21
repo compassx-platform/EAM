@@ -29,6 +29,9 @@ import type {
   PersonAvailability,
   PersonAudit,
   PersonRelated,
+  WorkflowRole,
+  RoleResolutionResult,
+  TaskAssignment,
 } from '../types';
 
 const API_BASE = '/api';
@@ -563,5 +566,118 @@ export const api = {
         method: 'DELETE',
       }
     );
+  },
+
+  // ---- Roles & Task Assignment (IBM Maximo MAXROLE & WFTASK) ----------------
+
+  listRoles(search?: string, roleType?: string): Promise<{ items: WorkflowRole[]; total: number }> {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (roleType) params.set('role_type', roleType);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return request<{ items: WorkflowRole[]; total: number }>(`/roles${qs}`);
+  },
+
+  getRole(roleId: string): Promise<WorkflowRole> {
+    return request<WorkflowRole>(`/roles/${encodeURIComponent(roleId)}`);
+  },
+
+  createRole(input: {
+    id?: string;
+    name: string;
+    description?: string;
+    role_type: string;
+    person_id?: string;
+    group_name?: string;
+    field_name?: string;
+    email_address?: string;
+    resolution_strategy?: string;
+  }): Promise<WorkflowRole> {
+    return request<WorkflowRole>('/roles', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateRole(
+    roleId: string,
+    input: {
+      name?: string;
+      description?: string;
+      role_type?: string;
+      person_id?: string;
+      group_name?: string;
+      field_name?: string;
+      email_address?: string;
+      resolution_strategy?: string;
+    }
+  ): Promise<WorkflowRole> {
+    return request<WorkflowRole>(`/roles/${encodeURIComponent(roleId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteRole(roleId: string): Promise<{ deleted: boolean; id: string }> {
+    return request(`/roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' });
+  },
+
+  resolveRole(
+    roleId: string,
+    payload?: { custom_fields?: Record<string, any>; entity_data?: Record<string, any> }
+  ): Promise<RoleResolutionResult> {
+    return request<RoleResolutionResult>(`/roles/${encodeURIComponent(roleId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  previewRoleResolution(
+    role: {
+      id?: string;
+      name: string;
+      description?: string;
+      role_type: string;
+      person_id?: string;
+      group_name?: string;
+      field_name?: string;
+      email_address?: string;
+      resolution_strategy?: string;
+    },
+    payload?: { custom_fields?: Record<string, any>; entity_data?: Record<string, any> }
+  ): Promise<RoleResolutionResult> {
+    return request<RoleResolutionResult>('/roles/resolve-preview', {
+      method: 'POST',
+      body: JSON.stringify({ ...role, ...(payload || {}) }),
+    });
+  },
+
+  listTaskAssignments(params?: {
+    entity_type?: string;
+    entity_id?: string;
+    assigned_person_id?: string;
+    status?: string;
+  }): Promise<{ items: TaskAssignment[]; total: number }> {
+    const sp = new URLSearchParams();
+    if (params?.entity_type) sp.set('entity_type', params.entity_type);
+    if (params?.entity_id) sp.set('entity_id', params.entity_id);
+    if (params?.assigned_person_id) sp.set('assigned_person_id', params.assigned_person_id);
+    if (params?.status) sp.set('status', params.status);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<{ items: TaskAssignment[]; total: number }>(`/tasks/assignments${qs}`);
+  },
+
+  getTaskAssignment(taskId: string): Promise<TaskAssignment> {
+    return request<TaskAssignment>(`/tasks/assignments/${encodeURIComponent(taskId)}`);
+  },
+
+  updateTaskStatus(
+    taskId: string,
+    input: { status: string; completed_by?: string }
+  ): Promise<TaskAssignment> {
+    return request<TaskAssignment>(`/tasks/assignments/${encodeURIComponent(taskId)}/status`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
   },
 };

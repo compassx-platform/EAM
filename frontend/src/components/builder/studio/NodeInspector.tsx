@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  AtSign,
   Check,
   ChevronDown,
   Circle,
   ClipboardList,
+  Clock,
   Copy,
+  Database,
   Flag,
   GitFork,
   Info,
@@ -19,12 +22,16 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
+  User,
+  UserCheck,
+  Users2,
   Workflow,
 } from 'lucide-react';
-import type { ConditionDefinition } from '../../../types';
+import type { ConditionDefinition, WorkflowRole } from '../../../types';
 import { KIND_LABEL, NODE_KINDS, edgeDescription, type NodeKind, type WorkflowFlowEdge, type WorkflowFlowNode } from '../flowModel';
 import { UnderlineTabs } from './ui';
 import { ConditionCard } from './ConditionCard';
+import { navigate } from '../../../lib/router';
 
 const KIND_ICONS: Record<NodeKind, typeof Play> = {
   start: Play,
@@ -45,6 +52,7 @@ interface NodeInspectorProps {
   edges: WorkflowFlowEdge[];
   nodeLabels: string[];
   conditions: ConditionDefinition[];
+  roles?: WorkflowRole[];
   onKind: (id: string, kind: NodeKind) => void;
   onRename: (oldLabel: string, newLabel: string) => void;
   onDuplicate: (id: string) => void;
@@ -52,12 +60,22 @@ interface NodeInspectorProps {
   onTarget: (id: string, to: string) => void;
   onConditions: (id: string, conditions: string[]) => void;
   onNodeConditions?: (nodeId: string, conditions: string[]) => void;
+  onNodeTaskAssignment?: (
+    nodeId: string,
+    updates: {
+      role_id?: string | null;
+      role_name?: string | null;
+      task_instructions?: string | null;
+      time_limit_hours?: number | null;
+    }
+  ) => void;
   onSetRouterBranch?: (nodeId: string, branch: 'TRUE' | 'FALSE', targetState: string) => void;
   onEvent: (id: string, event: string) => void;
   onRemoveConnection: (id: string) => void;
   onAddRoute?: (sourceId: string, targetId: string) => string | void;
   onEditCondition?: (condition: ConditionDefinition) => void;
   onNewCondition: (edgeId?: string, nodeId?: string) => void;
+  onOpenRolesModule?: () => void;
 }
 
 export function NodeInspector({
@@ -66,6 +84,7 @@ export function NodeInspector({
   edges,
   nodeLabels,
   conditions,
+  roles = [],
   onKind,
   onRename,
   onDuplicate,
@@ -73,12 +92,14 @@ export function NodeInspector({
   onTarget,
   onConditions,
   onNodeConditions,
+  onNodeTaskAssignment,
   onSetRouterBranch,
   onEvent,
   onRemoveConnection,
   onAddRoute,
   onEditCondition,
   onNewCondition,
+  onOpenRolesModule,
 }: NodeInspectorProps) {
   const [name, setName] = useState(node.data.label);
   const [editingName, setEditingName] = useState(false);
@@ -211,6 +232,16 @@ export function NodeInspector({
           )}
         </div>
       </div>
+
+      {/* Task-specific Assignment & Role Inspector */}
+      {kind === 'task' && (
+        <TaskAssignmentSection
+          node={node}
+          roles={roles}
+          onNodeTaskAssignment={onNodeTaskAssignment}
+          onOpenRolesModule={onOpenRolesModule}
+        />
+      )}
 
       {/* Router-specific Inspector */}
       {kind === 'router' ? (
@@ -924,6 +955,261 @@ function RouterBranchSection({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function TaskAssignmentSection({
+  node,
+  roles = [],
+  onNodeTaskAssignment,
+  onOpenRolesModule,
+}: {
+  node: WorkflowFlowNode;
+  roles?: WorkflowRole[];
+  onNodeTaskAssignment?: (
+    nodeId: string,
+    updates: {
+      role_id?: string | null;
+      role_name?: string | null;
+      task_instructions?: string | null;
+      time_limit_hours?: number | null;
+    }
+  ) => void;
+  onOpenRolesModule?: () => void;
+}) {
+  const selectedRoleId = node.data.role_id || '';
+  const selectedRole = roles.find((r) => r.id === selectedRoleId) ?? null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [instructions, setInstructions] = useState(node.data.task_instructions || '');
+  const [timeLimit, setTimeLimit] = useState(node.data.time_limit_hours?.toString() || '');
+
+  useEffect(() => {
+    setInstructions(node.data.task_instructions || '');
+  }, [node.data.task_instructions]);
+
+  useEffect(() => {
+    setTimeLimit(node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : '');
+  }, [node.data.time_limit_hours]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [menuOpen]);
+
+  const selectRole = (role: WorkflowRole | null) => {
+    onNodeTaskAssignment?.(node.id, {
+      role_id: role ? role.id : null,
+      role_name: role ? role.name : null,
+    });
+    setMenuOpen(false);
+  };
+
+  const commitInstructions = () => {
+    onNodeTaskAssignment?.(node.id, {
+      task_instructions: instructions.trim() || null,
+    });
+  };
+
+  const commitTimeLimit = () => {
+    const num = timeLimit.trim() ? parseInt(timeLimit.trim(), 10) : null;
+    onNodeTaskAssignment?.(node.id, {
+      time_limit_hours: isNaN(num as number) ? null : num,
+    });
+  };
+
+  const getRoleIcon = (type?: string) => {
+    switch (type) {
+      case 'PERSON_GROUP':
+        return Users2;
+      case 'DATASET_ATTRIBUTE':
+        return Database;
+      case 'EMAIL_ADDRESS':
+        return AtSign;
+      default:
+        return User;
+    }
+  };
+
+  const SelectedRoleIcon = getRoleIcon(selectedRole?.role_type);
+
+  return (
+    <div ref={menuRef} className="relative flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      {/* Header with Title and Info Tooltip */}
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <UserCheck className="h-3.5 w-3.5 text-gray-500" />
+          Task Assignment & Role
+          <span className="group relative inline-flex items-center">
+            <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
+              Link dynamic workflow roles modeled after IBM Maximo MAXROLE to dynamically route this task to a Person, Person Group, or Dataset Attribute with active availability & delegation awareness.
+            </span>
+          </span>
+        </span>
+
+        {!selectedRoleId && (
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            title="Assign Role"
+            className="flex items-center gap-1 rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+          >
+            <Plus className="h-3 w-3" />
+            <span>Assign</span>
+          </button>
+        )}
+      </div>
+
+      {/* Selected Role Pill / Card */}
+      {selectedRoleId ? (
+        <div className="flex items-center justify-between gap-1 rounded-lg border border-gray-200 bg-gray-50/80 p-2 transition-colors hover:border-gray-300">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white border border-gray-200 text-gray-700">
+              <SelectedRoleIcon className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-xs font-semibold text-gray-800">
+                  {selectedRole?.name || selectedRoleId}
+                </span>
+                {selectedRole && (
+                  <span className="rounded px-1 py-0.2 font-mono text-[9px] font-bold uppercase bg-gray-200/70 text-gray-700">
+                    {selectedRole.role_type}
+                  </span>
+                )}
+              </div>
+              <div className="truncate font-mono text-[10px] text-gray-400">
+                {selectedRoleId}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              title="Change role"
+              className={`rounded p-1 text-gray-500 transition-colors hover:bg-gray-200/60 hover:text-gray-800 ${
+                menuOpen ? 'bg-gray-200/60 text-gray-800' : ''
+              }`}
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => selectRole(null)}
+              title="Unassign role"
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/50 p-2.5 text-center">
+          <p className="text-xs font-medium text-gray-500">No role assigned</p>
+          <p className="mt-0.5 text-[10px] text-gray-400">
+            Click '+ Assign' to bind a Maximo dynamic routing role.
+          </p>
+        </div>
+      )}
+
+      {/* Role Picker Dropdown */}
+      {menuOpen && (
+        <div className="absolute top-10 left-0 right-0 z-30 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+          {selectedRoleId && (
+            <button
+              type="button"
+              onClick={() => selectRole(null)}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
+            >
+              <Minus className="h-3.5 w-3.5 text-gray-400" />
+              <span>— None (unassign role) —</span>
+            </button>
+          )}
+
+          {roles.map((r) => {
+            const active = r.id === selectedRoleId;
+            const Icon = getRoleIcon(r.role_type);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => selectRole(r)}
+                className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  active ? 'bg-blue-50 font-bold text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate">{r.name}</span>
+                    <span className="truncate font-mono text-[10px] text-gray-400">
+                      {r.id} · {r.role_type}
+                    </span>
+                  </div>
+                </div>
+                {active && <Check className="h-3.5 w-3.5 shrink-0 text-blue-600" />}
+              </button>
+            );
+          })}
+
+          <div className="border-t border-gray-100 mt-1 pt-1 px-1">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                if (onOpenRolesModule) onOpenRolesModule();
+                else navigate('/people/roles/new');
+              }}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Create new role in Roles module…</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Task Instructions Field */}
+      <div className="flex flex-col gap-1 pt-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          Instructions / Task Guidance
+        </label>
+        <textarea
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          onBlur={commitInstructions}
+          rows={2}
+          placeholder="Guidance shown to assigned person when performing this task…"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none resize-none"
+        />
+      </div>
+
+      {/* SLA / Time Limit */}
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <Clock className="h-3 w-3" />
+          Time Limit (Hours)
+        </label>
+        <input
+          type="number"
+          min="1"
+          value={timeLimit}
+          onChange={(e) => setTimeLimit(e.target.value)}
+          onBlur={commitTimeLimit}
+          placeholder="e.g. 24"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
     </div>
   );
 }

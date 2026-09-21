@@ -9,6 +9,10 @@ from backend.models.workflow import WorkflowDefinition
 from backend.models.users import AppUser
 from backend.services.field_validator import validate_custom_fields, FieldValidationError
 from backend.services.condition_evaluator import evaluate_condition_ids, ConditionEvaluationResult
+from backend.services.task_service import (
+    create_task_assignments_for_state,
+    complete_task_assignments_for_state,
+)
 
 # Actor used for automatic, data-driven routing events.
 SYSTEM_WORKFLOW_ACTOR = "system:workflow-engine"
@@ -237,6 +241,17 @@ def create_entity(
         )
         db.add(creation_event)
 
+        # Create task assignment if initial_state is a task node
+        create_task_assignments_for_state(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            state_name=initial_state,
+            definition=definition,
+            custom_fields=cleaned_fields,
+            workflow_version=workflow_version,
+        )
+
         db.commit()
         db.refresh(new_entity)
 
@@ -398,6 +413,24 @@ def propose_transition(
             payload=event_payload,
         )
         db.add(event_row)
+
+        # Complete previous task assignments and create new ones for destination state if task node
+        complete_task_assignments_for_state(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            from_state=current_status,
+            actor_id=actor_id,
+        )
+        create_task_assignments_for_state(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            state_name=to_state,
+            definition=definition,
+            custom_fields=current_custom_fields,
+            workflow_version=workflow_version,
+        )
 
         db.commit()
 
