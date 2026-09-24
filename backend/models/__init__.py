@@ -21,6 +21,7 @@ from backend.models.person import (
 )
 from backend.models.workflow_role import WorkflowRole
 from backend.models.task_assignment import TaskAssignment
+from backend.models.conditions import ConditionDefinition, ConditionVersion
 
 __all__ = [
     "EntityBaseMixin",
@@ -48,4 +49,6 @@ __all__ = [
     "PersonAudit",
     "WorkflowRole",
     "TaskAssignment",
+    "ConditionDefinition",
+    "ConditionVersion",
 ]

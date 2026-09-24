@@ -60,8 +60,11 @@ def validate_workflow_definition(
             errors.append(f"{context}: 'when' must be a list of condition IDs")
             return
         for condition_id in when:
-            if condition_id not in valid_condition_ids:
-                errors.append(f"{context}: Condition ID '{condition_id}' does not exist for entity type '{entity_type}'")
+            if not condition_id or not str(condition_id).strip():
+                continue
+            cid = str(condition_id).strip()
+            if cid not in valid_condition_ids:
+                errors.append(f"{context}: Condition ID '{cid}' does not exist for entity type '{entity_type}'")
 
     def _check_actions(on_after: Any, context: str) -> None:
         from backend.services.actions import ACTION_TYPE_SET
@@ -87,9 +90,13 @@ def validate_workflow_definition(
     if invalid_transition_amount:
         warnings.append("Workflow has no human transitions (create-only / tracking entity types are valid)")
 
-    # Pre-fetch existing conditions for this entity_type
-    condition_defs = db.query(ConditionDefinition).filter(ConditionDefinition.entity_type == entity_type.lower()).all()
-    valid_condition_ids = {c.id for c in condition_defs}
+    # Pre-fetch existing conditions for this entity_type or global/all scopes
+    et_normalized = (entity_type or "").lower().strip()
+    condition_defs = db.query(ConditionDefinition).all()
+    valid_condition_ids = {
+        c.id for c in condition_defs
+        if (c.entity_type or "").lower().strip() in (et_normalized, "global", "all", "*", "")
+    }
 
     for idx, t in enumerate(transitions):
         ctx = f"Transition #{idx + 1}"
@@ -150,8 +157,11 @@ def validate_workflow_definition(
             errors.append(f"{ctx}: 'conditions' must be a list of condition IDs")
         else:
             for condition_id in condition_ids:
-                if condition_id not in valid_condition_ids:
-                    errors.append(f"{ctx}: Condition ID '{condition_id}' does not exist for entity type '{entity_type}'")
+                if not condition_id or not str(condition_id).strip():
+                    continue
+                cid = str(condition_id).strip()
+                if cid not in valid_condition_ids:
+                    errors.append(f"{ctx}: Condition ID '{cid}' does not exist for entity type '{entity_type}'")
 
     # Auto transitions: data-driven routing after every state change
     if not isinstance(auto_transitions, list):
@@ -179,11 +189,11 @@ def validate_workflow_definition(
         for n in nodes:
             if isinstance(n, dict):
                 cond_id = n.get("condition_id")
-                if cond_id and cond_id not in valid_condition_ids:
-                    errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{cond_id}' does not exist for entity type '{entity_type}'")
+                if cond_id and str(cond_id).strip() and str(cond_id).strip() not in valid_condition_ids:
+                    errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{str(cond_id).strip()}' does not exist for entity type '{entity_type}'")
                 for c_id in (n.get("conditions") or []):
-                    if c_id not in valid_condition_ids:
-                        errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{c_id}' does not exist for entity type '{entity_type}'")
+                    if c_id and str(c_id).strip() and str(c_id).strip() not in valid_condition_ids:
+                        errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{str(c_id).strip()}' does not exist for entity type '{entity_type}'")
 
     # Terminal-state warnings use explicit config; no hardcoded names.
     for s in states:

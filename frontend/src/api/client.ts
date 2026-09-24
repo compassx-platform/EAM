@@ -51,10 +51,24 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
     const detail =
       body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : body;
-    const message =
-      typeof detail === 'string' ? detail : detail && typeof detail === 'object' && 'message' in detail
-        ? String((detail as { message: unknown }).message)
-        : JSON.stringify(detail || res.statusText);
+    let message: string;
+    if (typeof detail === 'string') {
+      message = detail;
+    } else if (
+      detail &&
+      typeof detail === 'object' &&
+      'errors' in detail &&
+      Array.isArray((detail as { errors: unknown }).errors) &&
+      (detail as { errors: unknown[] }).errors.length > 0
+    ) {
+      const errList = (detail as { errors: string[] }).errors.join('; ');
+      const prefix = 'message' in detail ? String((detail as { message: unknown }).message) : 'Validation failed';
+      message = `${prefix}: ${errList}`;
+    } else if (detail && typeof detail === 'object' && 'message' in detail) {
+      message = String((detail as { message: unknown }).message);
+    } else {
+      message = JSON.stringify(detail || res.statusText);
+    }
     const err = new Error(message) as Error & { status?: number; body?: unknown };
     err.status = res.status;
     err.body = detail ?? body;

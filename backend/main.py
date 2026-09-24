@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from backend.config import settings
 from backend.database import SessionLocal, engine, Base, ensure_schema_compatibility
+import backend.models
 from backend.services.expiry_worker import check_and_expire_permits
 from backend.routers import (
     auth_router,
@@ -92,6 +93,14 @@ app.include_router(roles_router, prefix=settings.API_PREFIX)
 app.include_router(tasks_router, prefix=settings.API_PREFIX)
 app.include_router(system_router, prefix=settings.API_PREFIX)
 app.include_router(entities_router)  # Includes /api/{entity_type}/...
+
+# Mount MCP Server (SSE & HTTP transport) directly into FastAPI
+from backend.mcp.server import mcp
+try:
+    mcp.settings.transport_security.enable_dns_rebinding_protection = False
+    app.mount("/mcp", mcp.sse_app())
+except Exception as mcp_err:
+    print(f"[CompassX] MCP SSE mount notice: {mcp_err}")
 
 # Static file serving for React frontend (App Module container support)
 static_dirs = [

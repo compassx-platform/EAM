@@ -14,6 +14,10 @@ export default defineConfig({
     hmr: { clientPort: 443 },
     port: 8080,
     proxy: {
+      '/mcp': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

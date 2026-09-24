@@ -5,11 +5,13 @@ from backend.config import settings
 
 # Database Engine Configuration (PostgreSQL / SQLite)
 db_url = settings.sync_database_url
+if not settings.is_production and not settings.DATABASE_URL:
+    db_url = "sqlite:////tmp/eam.db"
 
 if db_url.startswith("sqlite"):
     engine = create_engine(
         db_url,
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "timeout": 30},
         poolclass=NullPool,
         echo=False,
         future=True,
@@ -41,11 +43,12 @@ def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
     try:
         bind = db.get_bind()
         if bind.dialect.name == "sqlite":
-            res = db.execute(text(f"PRAGMA table_info({table})")).fetchall()
-            col_names = [r[1] for r in res]
-            if column not in col_names:
-                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
-                db.commit()
+            with bind.connect() as conn:
+                res = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                col_names = [r[1] for r in res]
+                if column not in col_names:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+                    conn.commit()
         else:
             res = db.execute(text(
                 "SELECT column_name FROM information_schema.columns "
@@ -55,7 +58,7 @@ def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
                 db.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
                 db.commit()
     except Exception:
-        db.rollback()
+        pass
 
 def ensure_schema_compatibility(db: Session) -> None:
     """Idempotently ensures backward compatibility schema columns exist without altering or dropping any data."""

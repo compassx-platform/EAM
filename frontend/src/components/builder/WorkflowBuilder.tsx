@@ -250,7 +250,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const hydrateEdges = (eds: WorkflowFlowEdge[]): WorkflowFlowEdge[] => eds.map(withEdgeCallbacks);
 
   const handleConnect = useCallback((connection: Connection) => {
-    const sourceNode = nodesRef.current.find((n) => n.id === connection.source);
+    const sourceNode = nodesRef.current.find((n) => n.id === connection.source || n.data?.label === connection.source);
     const isRouter = sourceNode?.data?.kind === 'router';
 
     let defaultEvent = 'EVENT';
@@ -260,7 +260,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
       if (sourceHandle === 'TRUE' || sourceHandle === 'FALSE') {
         defaultEvent = sourceHandle;
       } else {
-        const existingEdges = edgesRef.current.filter((e) => e.source === connection.source);
+        const existingEdges = edgesRef.current.filter((e) => e.source === connection.source || e.source === sourceNode?.id || e.source === sourceNode?.data?.label);
         const hasTrue = existingEdges.some((e) => e.data?.event === 'TRUE');
         const hasFalse = existingEdges.some((e) => e.data?.event === 'FALSE');
         defaultEvent = !hasTrue ? 'TRUE' : !hasFalse ? 'FALSE' : 'TRUE';
@@ -269,7 +269,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
 
       // Router outlets allow strictly ONE connection per branch (TRUE / FALSE)
       const existingBranchEdge = edgesRef.current.find(
-        (e) => e.source === connection.source && e.data?.event === defaultEvent
+        (e) => (e.source === connection.source || e.source === sourceNode?.id || e.source === sourceNode?.data?.label) && e.data?.event === defaultEvent
       );
 
       if (existingBranchEdge) {
@@ -288,6 +288,16 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         setSelection({ kind: 'node', id: connection.source as string });
         setDirty(true);
         return;
+      }
+    } else {
+      const existingOutgoing = edgesRef.current.filter((e) => e.source === connection.source || e.source === sourceNode?.id || e.source === sourceNode?.data?.label);
+      const usedEvents = new Set(existingOutgoing.map((e) => e.data?.event));
+      if (usedEvents.has(defaultEvent)) {
+        let suffix = 2;
+        while (usedEvents.has(`${defaultEvent}_${suffix}`)) {
+          suffix++;
+        }
+        defaultEvent = `${defaultEvent}_${suffix}`;
       }
     }
 
@@ -368,26 +378,34 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
 
   // ---- mutations -------------------------------------------------------------
   async function handleRenameState(oldLabel: string, newLabel: string) {
+    if (!newLabel || !newLabel.trim()) return;
+    const cleanNewLabel = newLabel.trim();
+    if (cleanNewLabel === oldLabel) return;
+
     setNodes((nds) =>
-      nds.map((n) => (n.id === oldLabel ? { ...n, id: newLabel, data: { ...n.data, label: newLabel } } : n))
+      nds.map((n) =>
+        n.id === oldLabel || n.data?.label === oldLabel
+          ? { ...n, id: cleanNewLabel, data: { ...n.data, label: cleanNewLabel } }
+          : n
+      )
     );
-    setTerminalStates((ts) => ts.map((s) => (s === oldLabel ? newLabel : s)));
+    setTerminalStates((ts) => ts.map((s) => (s === oldLabel ? cleanNewLabel : s)));
     setEdges((eds) =>
       eds.map((e) => {
         const remapped = {
           ...e,
-          source: e.source === oldLabel ? newLabel : e.source,
-          target: e.target === oldLabel ? newLabel : e.target,
+          source: e.source === oldLabel ? cleanNewLabel : e.source,
+          target: e.target === oldLabel ? cleanNewLabel : e.target,
         };
         const choices = (remapped.data?.choices ?? []).map((c) =>
-          c.to === oldLabel ? { ...c, to: newLabel } : c
+          c.to === oldLabel ? { ...c, to: cleanNewLabel } : c
         );
         if (!remapped.data?.choices?.length) return remapped;
         const fallback = (choices.find((c) => !c.when || c.when.length === 0)?.to ?? choices[0]?.to) || remapped.target;
         return { ...remapped, target: fallback, data: { ...dataOf(remapped), choices } };
       })
     );
-    setSelection((sel) => (sel?.kind === 'node' && sel.id === oldLabel ? { kind: 'node', id: newLabel } : sel));
+    setSelection((sel) => (sel?.kind === 'node' && (sel.id === oldLabel || sel.id === cleanNewLabel) ? { kind: 'node', id: cleanNewLabel } : sel));
     setDirty(true);
   }
 
@@ -459,14 +477,25 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
 
   const handleAddRoute = useCallback(
     (sourceId: string, targetId: string) => {
-      const id = `${sourceId}|EVENT|${targetId}|${Math.random().toString(36).slice(2, 7)}`;
+      const sourceNode = nodesRef.current.find((n) => n.id === sourceId || n.data?.label === sourceId);
+      const existingEdges = edgesRef.current.filter((e) => e.source === sourceId || e.source === sourceNode?.id || e.source === sourceNode?.data?.label);
+      const usedEvents = new Set(existingEdges.map((e) => e.data?.event));
+      let defaultEvent = 'EVENT';
+      if (usedEvents.has(defaultEvent)) {
+        let suffix = 2;
+        while (usedEvents.has(`${defaultEvent}_${suffix}`)) {
+          suffix++;
+        }
+        defaultEvent = `${defaultEvent}_${suffix}`;
+      }
+      const id = `${sourceId}|${defaultEvent}|${targetId}|${Math.random().toString(36).slice(2, 7)}`;
       const newEdge: WorkflowFlowEdge = withEdgeCallbacks({
         id,
         type: 'event',
         source: sourceId,
         target: targetId,
         data: {
-          event: 'EVENT',
+          event: defaultEvent,
           conditions: [],
         },
       });

@@ -204,15 +204,28 @@ export function flowToDefinition(
   versionLabel: string,
   extras?: WorkflowDefinitionExtras
 ): WorkflowDefinition {
+  // Map both node.id and node.data.label to canonical state name (node.data.label)
+  const idToLabel = new Map<string, string>();
+  for (const n of nodes) {
+    if (n.data?.label) {
+      idToLabel.set(n.id, n.data.label.trim());
+      idToLabel.set(n.data.label, n.data.label.trim());
+    }
+  }
+
   const states = nodes
-    .map((n) => n.data.label)
-    .filter((label, i, arr) => label && arr.indexOf(label) === i);
+    .map((n) => n.data?.label?.trim())
+    .filter((label, i, arr): label is string => Boolean(label) && arr.indexOf(label) === i);
+
+  const stateSet = new Set(states);
 
   const meta: NodeMeta[] = nodes.map((n) => {
-    const condId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
-    const conds = n.data.conditions && n.data.conditions.length > 0 ? n.data.conditions : (condId ? [condId] : []);
+    const rawCondId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
+    const condId = rawCondId && typeof rawCondId === 'string' && rawCondId.trim() ? rawCondId.trim() : null;
+    const rawConds = n.data.conditions && n.data.conditions.length > 0 ? n.data.conditions : (condId ? [condId] : []);
+    const conds = rawConds.filter((c): c is string => Boolean(c && typeof c === 'string' && c.trim())).map((c) => c.trim());
     return {
-      name: n.data.label,
+      name: n.data.label?.trim() || n.id,
       kind: n.data.kind || 'state',
       position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       condition_id: condId,
@@ -224,39 +237,58 @@ export function flowToDefinition(
     };
   });
 
-  const transitions: WorkflowTransition[] = edges.map((e) => {
-    const transition: WorkflowTransition = {
-      from: e.source,
-      event: e.data?.event || 'EVENT',
-      to: e.data?.choices?.length ? null : e.target,
-      conditions: e.data?.conditions ?? [],
-    };
-    if (e.data?.choices?.length) transition.choices = e.data.choices;
-    if (e.data?.on_after?.length) transition.on_after = e.data.on_after;
-    return transition;
-  });
+  const transitions: WorkflowTransition[] = edges
+    .map((e) => {
+      const fromLabel = idToLabel.get(e.source) || e.source;
+      const toLabel = e.target ? (idToLabel.get(e.target) || e.target) : null;
+
+      const rawConditions = e.data?.conditions ?? [];
+      const cleanConditions = Array.isArray(rawConditions)
+        ? rawConditions.filter((c): c is string => Boolean(c && typeof c === 'string' && c.trim())).map((c) => c.trim())
+        : [];
+
+      const transition: WorkflowTransition = {
+        from: fromLabel,
+        event: e.data?.event || 'EVENT',
+        to: e.data?.choices?.length ? null : toLabel,
+        conditions: cleanConditions,
+      };
+      if (e.data?.choices?.length) {
+        transition.choices = e.data.choices.map((c) => ({
+          ...c,
+          to: idToLabel.get(c.to) || c.to,
+          when: (c.when || []).filter((w): w is string => Boolean(w && typeof w === 'string' && w.trim())).map((w) => w.trim()),
+        }));
+      }
+      if (e.data?.on_after?.length) transition.on_after = e.data.on_after;
+      return transition;
+    })
+    .filter((t) => stateSet.has(t.from) && (t.choices?.length || (t.to && stateSet.has(t.to))));
 
   // Preserve non-router auto transitions and generate router auto transitions
   const existingAuto = (extras?.auto_transitions || []).filter(
-    (at) => !nodes.some((n) => n.data.kind === 'router' && n.data.label === at.from)
+    (at) => !nodes.some((n) => n.data.kind === 'router' && (n.data.label === at.from || n.id === at.from))
   );
   const routerAuto: WorkflowAutoTransition[] = [];
   for (const n of nodes) {
     if (n.data.kind === 'router') {
-      const condId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
-      const outgoing = edges.filter((e) => e.source === n.data.label);
+      const nodeLabel = n.data.label?.trim() || n.id;
+      const rawCondId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
+      const condId = rawCondId && typeof rawCondId === 'string' && rawCondId.trim() ? rawCondId.trim() : null;
+
+      const outgoing = edges.filter((e) => e.source === n.data.label || e.source === n.id);
       const trueEdge = outgoing.find((e) => e.data?.event === 'TRUE');
       const falseEdge = outgoing.find((e) => e.data?.event === 'FALSE');
       if (trueEdge) {
         routerAuto.push({
-          from: n.data.label,
+          from: nodeLabel,
           event: 'TRUE',
           when: condId ? [condId] : [],
         });
       }
       if (falseEdge) {
         routerAuto.push({
-          from: n.data.label,
+          from: nodeLabel,
           event: 'FALSE',
           when: [],
         });
