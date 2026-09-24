@@ -6,7 +6,7 @@ on whose behalf the agent performs operations across all modules.
 """
 
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import (
+from backend.mcp_server.context import (
     get_db_session,
     get_current_actor,
     set_current_actor,

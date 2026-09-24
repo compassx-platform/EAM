@@ -8,7 +8,7 @@ relationships, select options, delete-blocker safeguards).
 
 import re
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session
+from backend.mcp_server.context import get_db_session
 from backend.models.entity_type import EntityTypeDefinition, EntityTypeVersion
 from backend.models.entities import DynamicEntity, DynamicEntityEvent
 from backend.models.field_registry import EntityField, FIELD_TYPES

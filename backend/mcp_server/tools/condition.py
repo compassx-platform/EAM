@@ -8,7 +8,7 @@ expressions, and person group membership).
 """
 
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session, resolve_effective_actor
+from backend.mcp_server.context import get_db_session, resolve_effective_actor
 from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.workflow import WorkflowDefinition
 from backend.models.forms import EntityForm

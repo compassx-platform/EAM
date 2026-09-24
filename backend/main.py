@@ -95,7 +95,7 @@ app.include_router(system_router, prefix=settings.API_PREFIX)
 app.include_router(entities_router)  # Includes /api/{entity_type}/...
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI
-from backend.mcp.server import mcp
+from backend.mcp_server.server import mcp
 try:
     mcp.settings.transport_security.enable_dns_rebinding_protection = False
     app.mount("/mcp", mcp.sse_app())

@@ -7,7 +7,7 @@ CQRS pipeline on behalf of users.
 """
 
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session, resolve_effective_actor
+from backend.mcp_server.context import get_db_session, resolve_effective_actor
 from backend.models.entities import get_entity_models, DynamicEntity
 from backend.models.entity_type import EntityTypeDefinition
 from backend.models.workflow import WorkflowDefinition

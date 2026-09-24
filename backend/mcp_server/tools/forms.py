@@ -6,7 +6,7 @@ sections, groups, field controls, shared option lists, and stage-form visibility
 """
 
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session
+from backend.mcp_server.context import get_db_session
 from backend.models.forms import EntityForm, FormVersion
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition

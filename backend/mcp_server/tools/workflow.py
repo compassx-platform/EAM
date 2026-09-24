@@ -7,7 +7,7 @@ state-machine workflow definitions with deterministic business-rule gates.
 
 import re
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session, resolve_effective_actor
+from backend.mcp_server.context import get_db_session, resolve_effective_actor
 from backend.models.workflow import WorkflowDefinition
 from backend.models.base import generate_uuid, utc_now
 from backend.services.workflow_validator import validate_workflow_definition

@@ -103,16 +103,16 @@ The server registers 61 specialized tools across 6 platform modules:
 Ideal for local AI assistants (Claude Desktop, Cursor, Antigravity, etc.):
 
 ```bash
-python -m backend.mcp
+python -m backend.mcp_server
 # or
-python -m backend.mcp --transport stdio
+python -m backend.mcp_server --transport stdio
 ```
 
 ### SSE Transport (HTTP / Streaming)
 For network-accessible agents:
 
 ```bash
-python -m backend.mcp --transport sse --host 0.0.0.0 --port 8001
+python -m backend.mcp_server --transport sse --host 0.0.0.0 --port 8001
 ```
 
 ---
@@ -128,7 +128,7 @@ To configure in Claude Desktop (`claude_desktop_config.json`):
       "command": "python",
       "args": [
         "-m",
-        "backend.mcp"
+        "backend.mcp_server"
       ],
       "cwd": "/path/to/mcp_server",
       "env": {

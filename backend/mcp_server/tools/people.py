@@ -9,7 +9,7 @@ and Person Groups (crew work groups, sequence ordering, default member assignmen
 import re
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
-from backend.mcp.context import get_db_session
+from backend.mcp_server.context import get_db_session
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability, PersonAudit
 from backend.models.users import AppUser
 from backend.models.workflow import WorkflowDefinition

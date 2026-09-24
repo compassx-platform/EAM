@@ -17,7 +17,7 @@ import json
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
-from backend.mcp.context import get_db_session, get_current_actor
+from backend.mcp_server.context import get_db_session, get_current_actor
 from backend.models.entity_type import EntityTypeDefinition
 from backend.models.workflow import WorkflowDefinition
 from backend.models.entities import DynamicEntity
@@ -25,7 +25,7 @@ from backend.models.person import Person
 from backend.models.users import AppUser
 
 # Import tool functions
-from backend.mcp.tools.records import (
+from backend.mcp_server.tools.records import (
     records_list,
     records_get,
     records_create,
@@ -34,7 +34,7 @@ from backend.mcp.tools.records import (
     records_simulate_transition,
     records_rebuild_cache,
 )
-from backend.mcp.tools.workflow import (
+from backend.mcp_server.tools.workflow import (
     workflow_list,
     workflow_get,
     workflow_get_active,
@@ -45,14 +45,14 @@ from backend.mcp.tools.workflow import (
     workflow_deprecate,
     workflow_delete,
 )
-from backend.mcp.tools.forms import (
+from backend.mcp_server.tools.forms import (
     forms_list,
     forms_get,
     forms_save,
     forms_get_history,
     forms_delete,
 )
-from backend.mcp.tools.entity import (
+from backend.mcp_server.tools.entity import (
     entity_type_list,
     entity_type_get,
     entity_type_create,
@@ -63,7 +63,7 @@ from backend.mcp.tools.entity import (
     entity_field_update,
     entity_field_delete,
 )
-from backend.mcp.tools.condition import (
+from backend.mcp_server.tools.condition import (
     condition_types_list,
     condition_list,
     condition_get,
@@ -73,7 +73,7 @@ from backend.mcp.tools.condition import (
     condition_used_by,
     condition_evaluate,
 )
-from backend.mcp.tools.people import (
+from backend.mcp_server.tools.people import (
     people_list,
     people_get,
     people_create,
@@ -94,7 +94,7 @@ from backend.mcp.tools.people import (
     people_group_member_update,
     people_group_member_remove,
 )
-from backend.mcp.tools.context import (
+from backend.mcp_server.tools.context import (
     user_set_active_actor,
     user_get_active_actor,
     user_list_available_actors,

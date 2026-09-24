@@ -15,9 +15,9 @@ Validates:
 """
 
 import pytest
-from backend.mcp.server import mcp, create_mcp_server
-from backend.mcp.context import set_current_actor, get_current_actor
-from backend.mcp.tools.records import (
+from backend.mcp_server.server import mcp, create_mcp_server
+from backend.mcp_server.context import set_current_actor, get_current_actor
+from backend.mcp_server.tools.records import (
     records_list,
     records_get,
     records_create,
@@ -26,7 +26,7 @@ from backend.mcp.tools.records import (
     records_simulate_transition,
     records_rebuild_cache,
 )
-from backend.mcp.tools.workflow import (
+from backend.mcp_server.tools.workflow import (
     workflow_list,
     workflow_get,
     workflow_get_active,
@@ -36,13 +36,13 @@ from backend.mcp.tools.workflow import (
     workflow_publish,
     workflow_deprecate,
 )
-from backend.mcp.tools.forms import (
+from backend.mcp_server.tools.forms import (
     forms_list,
     forms_get,
     forms_save,
     forms_get_history,
 )
-from backend.mcp.tools.entity import (
+from backend.mcp_server.tools.entity import (
     entity_type_list,
     entity_type_get,
     entity_type_create,
@@ -53,7 +53,7 @@ from backend.mcp.tools.entity import (
     entity_field_delete,
     entity_type_delete,
 )
-from backend.mcp.tools.condition import (
+from backend.mcp_server.tools.condition import (
     condition_types_list,
     condition_list,
     condition_get,
@@ -62,7 +62,7 @@ from backend.mcp.tools.condition import (
     condition_used_by,
     condition_versions_list,
 )
-from backend.mcp.tools.people import (
+from backend.mcp_server.tools.people import (
     people_list,
     people_get,
     people_create,
@@ -81,7 +81,7 @@ from backend.mcp.tools.people import (
     people_group_member_remove,
     people_group_delete,
 )
-from backend.mcp.tools.context import (
+from backend.mcp_server.tools.context import (
     user_set_active_actor,
     user_get_active_actor,
     user_list_available_actors,
@@ -92,7 +92,7 @@ from backend.mcp.tools.context import (
 @pytest.fixture(autouse=True)
 def setup_mcp_db(test_db, monkeypatch):
     """Ensures MCP tools use the test database session during tests."""
-    monkeypatch.setattr("backend.mcp.context.SessionLocal", lambda: test_db)
+    monkeypatch.setattr("backend.mcp_server.context.SessionLocal", lambda: test_db)
     monkeypatch.setattr("backend.database.SessionLocal", lambda: test_db)
     set_current_actor("admin@compassx.io")
     yield
