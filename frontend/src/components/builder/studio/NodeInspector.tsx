@@ -243,6 +243,22 @@ export function NodeInspector({
         />
       )}
 
+      {/* Wait-specific Configuration Inspector */}
+      {kind === 'wait' && (
+        <WaitConfigSection
+          node={node}
+          conditions={conditions}
+          edges={edges}
+          nodeLabels={nodeLabels}
+          onNodeConditions={onNodeConditions}
+          onNodeTaskAssignment={onNodeTaskAssignment}
+          onEditCondition={onEditCondition}
+          onNewCondition={onNewCondition}
+          onAddRoute={onAddRoute}
+          onRemoveConnection={onRemoveConnection}
+        />
+      )}
+
       {/* Router-specific Inspector */}
       {kind === 'router' ? (
         <>
@@ -1208,6 +1224,345 @@ function TaskAssignmentSection({
           onBlur={commitTimeLimit}
           placeholder="e.g. 24"
           className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+function WaitConfigSection({
+  node,
+  conditions,
+  edges,
+  nodeLabels,
+  onNodeConditions,
+  onNodeTaskAssignment,
+  onEditCondition,
+  onNewCondition,
+  onAddRoute,
+  onRemoveConnection,
+}: {
+  node: WorkflowFlowNode;
+  conditions: ConditionDefinition[];
+  edges: WorkflowFlowEdge[];
+  nodeLabels: string[];
+  onNodeConditions?: (nodeId: string, conditions: string[]) => void;
+  onNodeTaskAssignment?: (
+    nodeId: string,
+    updates: {
+      role_id?: string | null;
+      role_name?: string | null;
+      task_instructions?: string | null;
+      time_limit_hours?: number | null;
+    }
+  ) => void;
+  onEditCondition?: (condition: ConditionDefinition) => void;
+  onNewCondition: (edgeId?: string, nodeId?: string) => void;
+  onAddRoute?: (sourceId: string, targetId: string) => string | void;
+  onRemoveConnection: (id: string) => void;
+}) {
+  const selectedConditionId = (node.data.conditions && node.data.conditions[0]) || node.data.condition_id || '';
+  const selectedCondition = conditions.find((c) => c.id === selectedConditionId) ?? null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [durationHours, setDurationHours] = useState(
+    node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : ''
+  );
+  const [instructions, setInstructions] = useState(node.data.task_instructions || '');
+
+  useEffect(() => {
+    setDurationHours(
+      node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : ''
+    );
+  }, [node.data.time_limit_hours]);
+
+  useEffect(() => {
+    setInstructions(node.data.task_instructions || '');
+  }, [node.data.task_instructions]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocDown);
+    return () => document.removeEventListener('mousedown', onDocDown);
+  }, [menuOpen]);
+
+  const selectCondition = (id: string) => {
+    onNodeConditions?.(node.id, id ? [id] : []);
+    setMenuOpen(false);
+  };
+
+  const commitDuration = (val?: string) => {
+    const raw = val !== undefined ? val : durationHours;
+    const num = raw.trim() ? parseInt(raw.trim(), 10) : null;
+    onNodeTaskAssignment?.(node.id, {
+      time_limit_hours: isNaN(num as number) ? null : num,
+    });
+  };
+
+  const setPreset = (hours: number | null) => {
+    const str = hours !== null ? hours.toString() : '';
+    setDurationHours(str);
+    commitDuration(str);
+  };
+
+  const commitInstructions = () => {
+    onNodeTaskAssignment?.(node.id, {
+      task_instructions: instructions.trim() || null,
+    });
+  };
+
+  const outgoing = edges.filter((e) => e.source === node.id || e.source === node.data.label);
+  const primaryOutgoing = outgoing[0];
+  const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
+
+  return (
+    <div ref={menuRef} className="relative flex flex-col gap-3 border-t border-gray-100 pt-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <Timer className="h-3.5 w-3.5 text-teal-600" />
+          Wait & Delay Configuration
+          <span className="group relative inline-flex items-center">
+            <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
+              Pauses record progression until a time duration expires, a date field condition evaluates to true, or an authorized user advances the stage.
+            </span>
+          </span>
+        </span>
+      </div>
+
+      {/* Timer Duration / Hours */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-gray-200 bg-gray-50/60 p-2.5">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-1 text-xs font-semibold text-gray-700">
+            <Clock className="h-3.5 w-3.5 text-gray-500" />
+            Wait Duration (Hours)
+          </label>
+          {durationHours && (
+            <button
+              type="button"
+              onClick={() => setPreset(null)}
+              className="text-[11px] text-gray-400 hover:text-red-600"
+              title="Clear timer"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            value={durationHours}
+            onChange={(e) => setDurationHours(e.target.value)}
+            onBlur={() => commitDuration()}
+            onKeyDown={(e) => e.key === 'Enter' && commitDuration()}
+            placeholder="e.g. 24"
+            className="w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+          />
+          <span className="text-xs text-gray-500">hours</span>
+        </div>
+
+        {/* Quick presets */}
+        <div className="flex flex-wrap items-center gap-1 pt-1">
+          {[
+            { label: '1h', hours: 1 },
+            { label: '4h', hours: 4 },
+            { label: '12h', hours: 12 },
+            { label: '24h (1d)', hours: 24 },
+            { label: '48h (2d)', hours: 48 },
+            { label: '72h (3d)', hours: 72 },
+            { label: '168h (1w)', hours: 168 },
+          ].map((p) => {
+            const isSelected = durationHours === p.hours.toString();
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setPreset(p.hours)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors ${
+                  isSelected
+                    ? 'bg-teal-50 border-teal-300 text-teal-700 font-bold'
+                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Wait Condition / Gate (e.g. Date milestone or status check) */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-gray-200 bg-gray-50/60 p-2.5">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-1 text-xs font-semibold text-gray-700">
+            <ShieldCheck className="h-3.5 w-3.5 text-gray-500" />
+            Wait Condition / Gate
+          </label>
+          {!selectedConditionId && (
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              title="Add condition"
+              className="flex items-center gap-1 rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+              <span>Link Condition</span>
+            </button>
+          )}
+        </div>
+
+        {selectedConditionId ? (
+          <div className="flex items-center justify-between gap-1 rounded-md border border-gray-200 bg-white p-1.5 transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedCondition && onEditCondition) {
+                  onEditCondition(selectedCondition);
+                }
+              }}
+              className="group flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              title="Click to edit condition in condition module"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-teal-600" />
+              <span className="truncate text-xs font-semibold text-gray-800 group-hover:text-blue-600">
+                {selectedCondition?.label || selectedConditionId}
+              </span>
+              <Pencil className="h-3 w-3 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-blue-600" />
+            </button>
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setMenuOpen((o) => !o)}
+                title="Change condition"
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onNodeConditions?.(node.id, [])}
+                title="Remove condition"
+                className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <span className="text-[11px] text-gray-500">
+            Optional: Pause until a date comparison or rule tree evaluates to true.
+          </span>
+        )}
+
+        {/* Condition Dropdown Menu */}
+        {menuOpen && (
+          <div className="absolute top-1/2 left-4 right-4 z-30 mt-1 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+            {selectedConditionId && (
+              <button
+                type="button"
+                onClick={() => selectCondition('')}
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
+              >
+                <Minus className="h-3.5 w-3.5 text-gray-400" />
+                <span>— No condition (remove) —</span>
+              </button>
+            )}
+
+            {conditions.map((c) => {
+              const active = c.id === selectedConditionId;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => selectCondition(c.id)}
+                  className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                    active ? 'bg-blue-50 font-bold text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate">{c.label}</span>
+                    <span className="truncate font-mono text-[10px] text-gray-400">{c.id}</span>
+                  </div>
+                  {active && <Check className="h-3.5 w-3.5 shrink-0 text-blue-600" />}
+                </button>
+              );
+            })}
+
+            <div className="border-t border-gray-100 mt-1 pt-1 px-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNewCondition(undefined, node.id);
+                }}
+                className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Create new condition…</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Resume / Destination Step */}
+      <div className="flex flex-col gap-1.5">
+        <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          Resume Destination Step
+        </label>
+        {primaryOutgoing ? (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+            <span className="font-semibold truncate">→ {primaryOutgoing.target}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveConnection(primaryOutgoing.id)}
+              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Disconnect resume route"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value && onAddRoute) {
+                onAddRoute(node.id, e.target.value);
+              }
+            }}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="">Select destination step after wait…</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>
+                → {target}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* Operator Notes / Instructions */}
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          Wait Reason / Notes
+        </label>
+        <textarea
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          onBlur={commitInstructions}
+          rows={2}
+          placeholder="e.g. Wait 24 hours for paint curing and drying before inspection…"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none resize-none"
         />
       </div>
     </div>

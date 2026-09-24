@@ -71,7 +71,7 @@ function KindIcon({ kind, className }: { kind: NodeKind; className: string }) {
 }
 
 function StateNode({ id, data, selected }: NodeProps) {
-  const { label, kind, terminal, condition_id, conditions, description, role_id, role_name, task_instructions, onRename, onDelete, onDuplicate } = data as StateNodeData;
+  const { label, kind, terminal, condition_id, conditions, description, role_id, role_name, task_instructions, time_limit_hours, onRename, onDelete, onDuplicate } = data as StateNodeData;
   const [value, setValue] = useState(label);
   const iconColor = KIND_ICON_COLORS[kind] || 'text-gray-600';
   const activeCondition = (conditions && conditions[0]) || condition_id || null;
@@ -89,6 +89,12 @@ function StateNode({ id, data, selected }: NodeProps) {
         : 'Splits by TRUE / FALSE'
       : kind === 'task' && role_id
       ? `Role: ${role_name || role_id}`
+      : kind === 'wait'
+      ? time_limit_hours
+        ? `Duration: ${time_limit_hours}h`
+        : activeCondition
+        ? `Until: ${activeCondition}`
+        : 'Pauses for timer/condition'
       : description || KIND_DEFAULT_SUBTITLES[kind] || 'Workflow step';
 
   return (
