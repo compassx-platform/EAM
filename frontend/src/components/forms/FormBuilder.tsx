@@ -7,7 +7,7 @@ import {
 } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { Loader2, History, Calendar, X, Plus, Settings2, ShieldCheck, Lock, Eye, EyeOff, Pencil } from 'lucide-react';
+import { Loader2, History, Calendar, X, Plus, Settings2, ShieldCheck, Lock, Eye, EyeOff, Pencil, ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import { api } from '../../api/client';
 import type {
   EntityField,
@@ -112,6 +112,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const [formHistoryOpen, setFormHistoryOpen] = useState(false);
   const [formHistory, setFormHistory] = useState<FormVersion[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+  const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
 
   // Canvas container measurement
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -356,6 +358,41 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setEditingTab(null);
     setDirty(true);
     flash('ok', 'Tab deleted and fields reassigned.');
+  };
+
+  const handleMoveTab = (index: number, direction: 'left' | 'right') => {
+    const targetIndex = direction === 'left' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= tabs.length) return;
+    const newTabs = [...tabs];
+    const [movedTab] = newTabs.splice(index, 1);
+    newTabs.splice(targetIndex, 0, movedTab);
+    setTabs(newTabs);
+    setDirty(true);
+    flash('ok', `Moved tab "${movedTab.label}" ${direction}.`);
+  };
+
+  const handleMoveTabById = (tabId: string, direction: 'left' | 'right') => {
+    const index = tabs.findIndex((t) => t.id === tabId);
+    if (index !== -1) {
+      handleMoveTab(index, direction);
+    }
+  };
+
+  const handleReorderTabs = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= tabs.length ||
+      toIndex >= tabs.length
+    )
+      return;
+    const newTabs = [...tabs];
+    const [draggedTab] = newTabs.splice(fromIndex, 1);
+    newTabs.splice(toIndex, 0, draggedTab);
+    setTabs(newTabs);
+    setDirty(true);
+    flash('ok', `Reordered tabs: "${draggedTab.label}" is now #${toIndex + 1}.`);
   };
 
   const addHeading = () => {
@@ -613,7 +650,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
               {/* Master Form Tab Strip */}
               <div className="mb-6 flex items-center justify-between border-b border-gray-200">
                 <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-                  {tabs.map((tab) => {
+                  {tabs.map((tab, idx) => {
                     const isActive = tab.id === activeTabId;
                     const tabItemCount = items.filter(
                       (it) => (it.tabId ?? (it as any).tab_id ?? (tabs[0]?.id || 'general')) === tab.id
@@ -623,20 +660,63 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                       ? conditions.find((c) => c.id === condId)
                       : null;
                     const action = tab.visibility_condition?.action || 'show';
+                    const isDragging = draggedTabIndex === idx;
+                    const isOver = dragOverTabIndex === idx;
 
                     return (
                       <div
                         key={tab.id}
-                        className={`group flex items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-semibold transition-all cursor-pointer select-none ${
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', String(idx));
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedTabIndex(idx);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (dragOverTabIndex !== idx) {
+                            setDragOverTabIndex(idx);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverTabIndex === idx) {
+                            setDragOverTabIndex(null);
+                          }
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggedTabIndex !== null && draggedTabIndex !== idx) {
+                            handleReorderTabs(draggedTabIndex, idx);
+                          }
+                          setDraggedTabIndex(null);
+                          setDragOverTabIndex(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedTabIndex(null);
+                          setDragOverTabIndex(null);
+                        }}
+                        className={`group relative flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold transition-all cursor-pointer select-none ${
                           isActive
                             ? 'border-blue-600 text-blue-700 bg-blue-50/20'
                             : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
+                        } ${isDragging ? 'opacity-40 bg-gray-100' : ''} ${
+                          isOver ? 'ring-2 ring-blue-500 ring-inset bg-blue-50/40 rounded-t' : ''
                         }`}
                         onClick={() => {
                           setActiveTabId(tab.id);
                           setSelected(null);
                         }}
                       >
+                        {/* Drag grip handle */}
+                        <span
+                          className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Drag to reorder tab"
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <GripVertical className="h-3 w-3" />
+                        </span>
+
                         <span>{tab.label}</span>
 
                         <span
@@ -679,6 +759,36 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                                 : 'Show'}
                             </span>
                           </span>
+                        )}
+
+                        {/* Quick reorder buttons (Move Left / Move Right) on hover */}
+                        {tabs.length > 1 && (
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-0.5">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveTab(idx, 'left');
+                              }}
+                              title="Move tab left"
+                              className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                            >
+                              <ChevronLeft className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === tabs.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveTab(idx, 'right');
+                              }}
+                              title="Move tab right"
+                              className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+                            >
+                              <ChevronRight className="h-3 w-3" />
+                            </button>
+                          </div>
                         )}
 
                         <button
@@ -858,6 +968,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
           conditions={conditions}
           onSave={handleSaveTab}
           onDelete={handleDeleteTab}
+          onMoveTab={handleMoveTabById}
+          onReorderTabs={handleReorderTabs}
           onClose={() => {
             setTabModalOpen(false);
             setEditingTab(null);

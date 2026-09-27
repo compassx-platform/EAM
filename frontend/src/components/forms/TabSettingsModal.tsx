@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Trash2, ShieldCheck, Plus } from 'lucide-react';
+import { X, Trash2, ShieldCheck, Plus, ArrowLeft, ArrowRight } from 'lucide-react';
 import type { FormTab, ConditionDefinition } from '../../types';
 
 interface TabSettingsModalProps {
@@ -8,6 +8,8 @@ interface TabSettingsModalProps {
   conditions: ConditionDefinition[];
   onSave: (updatedTab: FormTab, oldId: string) => void;
   onDelete?: (tabId: string) => void;
+  onMoveTab?: (tabId: string, direction: 'left' | 'right') => void;
+  onReorderTabs?: (fromIndex: number, toIndex: number) => void;
   onClose: () => void;
   onOpenConditionModal?: () => void;
 }
@@ -18,6 +20,8 @@ export function TabSettingsModal({
   conditions,
   onSave,
   onDelete,
+  onMoveTab,
+  onReorderTabs,
   onClose,
   onOpenConditionModal,
 }: TabSettingsModalProps) {
@@ -166,6 +170,40 @@ export function TabSettingsModal({
               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>
+
+          {/* Tab Position & Order */}
+          {allTabs.length > 1 && (
+            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/70 p-3">
+              <div>
+                <span className="font-semibold text-gray-800">Tab Order & Position</span>
+                <p className="text-[11px] text-gray-500">
+                  Current position: <strong>#{allTabs.findIndex((t) => t.id === tab.id) + 1} of {allTabs.length}</strong>
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={allTabs.findIndex((t) => t.id === tab.id) <= 0}
+                  onClick={() => onMoveTab?.(tab.id, 'left')}
+                  title="Move tab left (earlier in order)"
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs transition-colors"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Move Left</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={allTabs.findIndex((t) => t.id === tab.id) >= allTabs.length - 1}
+                  onClick={() => onMoveTab?.(tab.id, 'right')}
+                  title="Move tab right (later in order)"
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed shadow-2xs transition-colors"
+                >
+                  <span>Move Right</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Conditional Logic */}
           <div className="space-y-2 border-t border-gray-100 pt-4">
