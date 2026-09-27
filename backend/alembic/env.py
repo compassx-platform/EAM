@@ -29,6 +29,8 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
+    if not settings.is_production and not settings.DATABASE_URL:
+        return "sqlite:////tmp/eam.db"
     return settings.sync_database_url
 
 
