@@ -170,3 +170,85 @@ def test_update_entity_custom_fields_patch(client):
     assert get_res.status_code == 200
     assert get_res.json()["entity"]["custom_fields"]["title"] == "Updated Permit Title"
     assert get_res.json()["entity"]["custom_fields"]["sop_document"][0]["name"] == "standard_operating_procedure.pdf"
+
+
+def test_interaction_node_target_form_tab_workflow_binding(client):
+    """Verifies that an interaction node's interaction_tab binds to form tabs."""
+    # 1. Update form layout to include a dedicated 'sop' tab
+    form_res = client.post(
+        "/api/forms",
+        json={
+            "entity_type": "permit",
+            "tabs": [
+                {"id": "general", "label": "General Details", "is_default": True},
+                {"id": "sop", "label": "SOP Documentation", "is_default": False},
+            ],
+            "layout": [
+                {"i": "title", "fieldName": "title", "tabId": "general", "x": 0, "y": 0, "w": 6, "h": 2},
+                {"i": "hazards_identified", "fieldName": "hazards_identified", "tabId": "sop", "x": 0, "y": 0, "w": 12, "h": 3},
+            ],
+            "cols": 12,
+            "row_height": 40,
+        },
+    )
+    assert form_res.status_code == 200
+    form_data = form_res.json()
+    assert len(form_data["tabs"]) == 2
+    assert any(t["id"] == "sop" for t in form_data["tabs"])
+
+    # 2. Publish a workflow where IsolationPrecheck is an interaction node targeting 'sop' tab
+    wf_res = client.post(
+        "/api/workflows/draft",
+        json={
+            "entity_type": "permit",
+            "version_label": "permit_v4_interaction_sop",
+            "definition": {
+                "states": ["Requested", "IsolationPrecheck", "Approved"],
+                "initial_state": "Requested",
+                "nodes": [
+                    {"name": "Requested", "kind": "state", "label": "Requested"},
+                    {
+                        "name": "IsolationPrecheck",
+                        "kind": "interaction",
+                        "label": "SOP Review Step",
+                        "interaction_tab": "sop",
+                        "task_instructions": "Upload required SOP document.",
+                    },
+                    {"name": "Approved", "kind": "state", "label": "Approved"},
+                ],
+                "transitions": [
+                    {"from": "Requested", "to": "IsolationPrecheck", "event": "SUBMIT"},
+                    {"from": "IsolationPrecheck", "to": "Approved", "event": "APPROVE"},
+                ],
+                "terminal_states": ["Approved"],
+            },
+        },
+    )
+    assert wf_res.status_code == 200
+    wf_id = wf_res.json()["id"]
+    pub_res = client.post(f"/api/workflows/{wf_id}/publish")
+    assert pub_res.status_code == 200
+
+    # 3. Create entity and transition to interaction node
+    create_res = client.post(
+        "/api/permit/create",
+        json={"custom_fields": {"title": "High Voltage Work"}},
+    )
+    assert create_res.status_code == 200
+    entity_id = create_res.json()["entity_id"]
+
+    trans_res = client.post(
+        "/api/permit/transition",
+        json={"entity_id": entity_id, "event_type": "SUBMIT"},
+    )
+    assert trans_res.status_code == 200
+    assert trans_res.json()["new_status"] == "IsolationPrecheck"
+
+    # 4. Verify entity workflow stage and node metadata
+    wf_res = client.get("/api/workflows/active/permit")
+    assert wf_res.status_code == 200
+    published = wf_res.json()
+    interaction_node = next((n for n in published["definition"]["nodes"] if n["name"] == "IsolationPrecheck"), None)
+    assert interaction_node is not None
+    assert interaction_node["kind"] == "interaction"
+    assert interaction_node["interaction_tab"] == "sop"
