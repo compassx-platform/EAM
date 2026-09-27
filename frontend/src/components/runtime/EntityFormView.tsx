@@ -706,27 +706,40 @@ export function EntityFormView({
 
   const isInteractionState = currentStateNode?.kind === 'interaction';
 
-  // Maximo-aligned Interaction Node auto-tab switching
+  const autoSwitchedKeyRef = useRef<string | null>(null);
+
+  // Maximo-aligned Interaction Node auto-tab switching (runs once on stage entry)
   useEffect(() => {
-    if (!isInteractionState) return;
+    if (!isInteractionState || visibleTabs.length === 0) return;
+    const currentStageKey = currentEntity ? `${currentEntity.id}:${currentStage || currentEntity.status}` : null;
+    if (!currentStageKey || autoSwitchedKeyRef.current === currentStageKey) return;
+
     const targetKey = currentStateNode?.interaction_tab?.toLowerCase()?.trim();
     if (targetKey && targetKey !== 'main' && targetKey !== 'details' && targetKey !== 'edit') {
       const matchedTab = visibleTabs.find(
         (t) => t.id.toLowerCase() === targetKey || t.label.toLowerCase() === targetKey
       );
-      if (matchedTab && matchedTab.id !== activeTabId) {
-        setActiveTabId(matchedTab.id);
+      if (matchedTab) {
+        autoSwitchedKeyRef.current = currentStageKey;
+        if (matchedTab.id !== activeTabId) {
+          setActiveTabId(matchedTab.id);
+        }
         return;
       }
     }
-    // If the active tab is 'general' and there is a non-default step-specific tab visible (e.g. 'sop'), switch to it
+    // If the active tab is 'general' and there is a non-default step-specific tab visible (e.g. 'sop'), switch to it once
     if (visibleTabs.length > 1) {
       const stepSpecificTab = visibleTabs.find((t) => !t.is_default && t.id !== 'general');
-      if (stepSpecificTab && activeTabId === 'general') {
-        setActiveTabId(stepSpecificTab.id);
+      if (stepSpecificTab) {
+        autoSwitchedKeyRef.current = currentStageKey;
+        if (activeTabId === 'general') {
+          setActiveTabId(stepSpecificTab.id);
+        }
+        return;
       }
     }
-  }, [isInteractionState, currentStateNode?.interaction_tab, visibleTabs, activeTabId]);
+    autoSwitchedKeyRef.current = currentStageKey;
+  }, [isInteractionState, currentStateNode?.interaction_tab, visibleTabs, currentEntity, currentStage]);
 
   const handleJumpToInteractionTarget = () => {
     if (!currentStateNode) return;
@@ -818,28 +831,30 @@ export function EntityFormView({
       return false;
     }
 
-    // 5. In an active interaction node step, items on the interaction tab are actively editable
+    // 5. In an active interaction node step, items on the designated interaction tab (or custom interaction tabs) are editable
     if (isInteractionState) {
       const itTab = it.tabId ?? (it as any).tab_id ?? 'general';
       const targetTab = currentStateNode?.interaction_tab?.toLowerCase()?.trim();
-      if (targetTab && (itTab.toLowerCase() === targetTab || itTab === activeTabId)) {
-        return false;
-      }
-      if (itTab === activeTabId && itTab !== 'general') {
-        return false;
+      if (targetTab) {
+        if (itTab.toLowerCase() === targetTab || parentTab?.label?.toLowerCase() === targetTab) {
+          return false;
+        }
+      } else {
+        if (itTab !== 'general') {
+          return false;
+        }
       }
     }
 
     // 6. Default across all other post-creation workflow stages (e.g. Approval, Review, Active): Read-Only!
     return true;
-  }, [isTerminal, isInitialDraftState, isInteractionState, currentStateNode, activeTabId, items, tabs, valuesForCondition, conditions]);
+  }, [isTerminal, isInitialDraftState, isInteractionState, currentStateNode, items, tabs, valuesForCondition, conditions]);
 
   const computeFallbackReadOnly = useCallback((_fieldName: string): boolean => {
     if (isTerminal) return true;
     if (isInitialDraftState) return false;
-    if (isInteractionState) return false;
     return true;
-  }, [isTerminal, isInitialDraftState, isInteractionState]);
+  }, [isTerminal, isInitialDraftState]);
 
   const entityTitleStr = getEntityTitle(currentEntity);
 
