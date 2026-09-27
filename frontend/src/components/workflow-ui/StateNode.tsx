@@ -139,8 +139,8 @@ export function StateNode({ id, data, selected }: NodeProps) {
       : 'Pauses for timer/condition'
     : isActionKind(kind) && action_type
     ? `Action: ${action_type}`
-    : kind === 'interaction' && interaction_app
-    ? `App: ${interaction_app}${interaction_tab ? ` / ${interaction_tab}` : ''}`
+    : kind === 'interaction'
+    ? `Target: ${interaction_tab || 'Details'}`
     : isSubprocessKind(kind) && subprocess_id
     ? `Subprocess: ${subprocess_id}`
     : description || KIND_DEFAULT_SUBTITLES[kind] || 'Workflow step';

@@ -743,7 +743,6 @@ export function EntityFormView({
 
   const handleJumpToInteractionTarget = () => {
     if (!currentStateNode) return;
-    const targetApp = (currentStateNode.interaction_app || 'records').toLowerCase();
     const targetTab = (currentStateNode.interaction_tab || 'details').toLowerCase();
 
     // Check if targetTab matches any visible form tab
@@ -755,23 +754,10 @@ export function EntityFormView({
       const el = document.getElementById('record-form-grid');
       if (el) el.scrollIntoView({ behavior: 'smooth' });
       setInteractionNavFeedback(`Switched to tab "${matchedTab.label}"`);
-    } else if (targetTab === 'history' || targetApp === 'history') {
-      setAuditLogOpen(true);
-      setInteractionNavFeedback('Opened Audit Timeline history log');
-    } else if (targetTab === 'assignments' || targetTab === 'tasks') {
-      const el = document.getElementById('workflow-tasks-section');
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
-      setInteractionNavFeedback('Focused Workflow Task Assignments section');
-    } else if (targetTab === 'files' || targetTab === 'attachments') {
-      const el = document.getElementById('attachments-section');
-      if (el) el.scrollIntoView({ behavior: 'smooth' });
-      setInteractionNavFeedback('Focused Attached Files & Media section');
-    } else if (targetTab === 'edit' || targetApp === 'forms') {
+    } else {
       const el = document.getElementById('record-form-grid');
       if (el) el.scrollIntoView({ behavior: 'smooth' });
-      setInteractionNavFeedback('Focused Form Fields editor');
-    } else {
-      setInteractionNavFeedback(`Navigated to ${targetApp} / ${targetTab}`);
+      setInteractionNavFeedback(`Focused form tab "${targetTab}"`);
     }
 
     setTimeout(() => {
@@ -1165,7 +1151,7 @@ export function EntityFormView({
                       Required User Interaction
                     </h3>
                     <span className="rounded-full bg-sky-100 border border-sky-200 px-2.5 py-0.5 text-[10px] font-semibold text-sky-800">
-                      Target: {currentStateNode.interaction_app || 'Records'} / {currentStateNode.interaction_tab || 'Details'}
+                      Target: {currentStateNode.interaction_tab || 'Details'}
                     </span>
                   </div>
                   <span className="text-[11px] text-sky-600/90 font-medium hidden sm:inline">

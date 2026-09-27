@@ -2017,35 +2017,18 @@ function InteractionConfigSection({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target App</label>
-          <select
-            value={interactionApp}
-            onChange={(e) => onNodeDataChange?.(node.id, { interaction_app: e.target.value })}
-            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
-          >
-            <option value="records">Records</option>
-            <option value="forms">Dynamic Forms</option>
-            <option value="conditions">Condition Rules</option>
-            <option value="people">People & Roles</option>
-            <option value="inventory">Assets & Equipment</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target View / Tab</label>
-          <select
-            value={interactionTab}
-            onChange={(e) => onNodeDataChange?.(node.id, { interaction_tab: e.target.value })}
-            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
-          >
-            <option value="details">Details</option>
-            <option value="edit">Edit Form</option>
-            <option value="history">History Log</option>
-            <option value="assignments">Task Assignments</option>
-          </select>
-        </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target Form Tab</label>
+        <input
+          type="text"
+          value={interactionTab}
+          onChange={(e) => onNodeDataChange?.(node.id, { interaction_app: 'records', interaction_tab: e.target.value })}
+          placeholder="e.g. details, sop, safety"
+          className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+        />
+        <p className="text-[10px] text-gray-400">
+          Tab ID from Form Builder to auto-open and enable for user interaction during this step.
+        </p>
       </div>
 
       <div className="flex flex-col gap-1">

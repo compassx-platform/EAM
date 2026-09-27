@@ -865,12 +865,6 @@ export const WorkflowInstanceVisualizer: React.FC<WorkflowInstanceVisualizerProp
                 </h4>
                 <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-500">Target Application:</span>
-                    <span className="font-semibold text-sky-900 capitalize">
-                      {String(selectedNodeData.interaction_app || 'Records')}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
                     <span className="text-gray-500">Target View / Tab:</span>
                     <span className="font-semibold text-sky-900 capitalize">
                       {String(selectedNodeData.interaction_tab || 'Details')}
