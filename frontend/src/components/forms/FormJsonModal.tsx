@@ -6,21 +6,23 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { EntityFormItem } from '../../types';
+import type { EntityFormItem, FormTab } from '../../types';
 import { normalizeFormLayout } from './formUtils';
 
 interface FormJsonModalProps {
   entityType: string;
   items: EntityFormItem[];
+  tabs?: FormTab[];
   cols: number;
   rowHeight: number;
   onClose: () => void;
-  onImport: (items: EntityFormItem[], cols: number, rowHeight: number) => void;
+  onImport: (items: EntityFormItem[], tabs: FormTab[] | undefined, cols: number, rowHeight: number) => void;
 }
 
 export function FormJsonModal({
   entityType,
   items,
+  tabs = [],
   cols,
   rowHeight,
   onClose,
@@ -31,6 +33,7 @@ export function FormJsonModal({
       entity_type: entityType,
       cols,
       row_height: rowHeight,
+      tabs,
       layout: items.map((it) => {
         const copy: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(it)) {
@@ -77,7 +80,8 @@ export function FormJsonModal({
       Number(parsed.row_height) >= 1 ? Math.round(Number(parsed.row_height)) : rowHeight;
 
     const normalized = normalizeFormLayout(parsed.layout, nextCols);
-    onImport(normalized, nextCols, nextRowHeight);
+    const importedTabs = Array.isArray(parsed.tabs) ? parsed.tabs : undefined;
+    onImport(normalized, importedTabs, nextCols, nextRowHeight);
     onClose();
   };
 

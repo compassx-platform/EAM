@@ -9,8 +9,9 @@ class EntityForm(Base):
     entity_type = Column(String(50), primary_key=True)
     version_number = Column(Integer, nullable=False, default=1)
     version_label = Column(String(50), nullable=False, default="v1")
-    layout = Column(JSON, nullable=False, default=list)  # [{i,x,y,w,h,isHeader?,label?}]
+    layout = Column(JSON, nullable=False, default=list)  # [{i,x,y,w,h,isHeader?,label?,tab_id?}]
     sections = Column(JSON, nullable=False, default=list)
+    tabs = Column(JSON, nullable=True, default=list)  # [{id, label, condition_id?, is_default?}]
     cols = Column(Integer, nullable=False, default=12)
     row_height = Column(Integer, nullable=False, default=40)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
@@ -22,6 +23,7 @@ class EntityForm(Base):
             "version_label": self.version_label or f"v{self.version_number or 1}",
             "layout": self.layout or [],
             "sections": self.sections or [],
+            "tabs": self.tabs or [],
             "cols": self.cols,
             "row_height": self.row_height,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -37,6 +39,7 @@ class FormVersion(Base):
     version_label = Column(String(50), nullable=False, default="v1")
     layout = Column(JSON, nullable=False, default=list)
     sections = Column(JSON, nullable=False, default=list)
+    tabs = Column(JSON, nullable=True, default=list)
     cols = Column(Integer, nullable=False, default=12)
     row_height = Column(Integer, nullable=False, default=40)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -50,6 +53,7 @@ class FormVersion(Base):
             "version_label": self.version_label,
             "layout": self.layout or [],
             "sections": self.sections or [],
+            "tabs": self.tabs or [],
             "cols": self.cols,
             "row_height": self.row_height,
             "created_at": self.created_at.isoformat() if self.created_at else None,

@@ -66,6 +66,8 @@ def ensure_schema_compatibility(db: Session) -> None:
     _ensure_column(db, "app_user", "person_id", "person_id VARCHAR(50)")
     _ensure_column(db, "entity_form", "version_number", "version_number INTEGER DEFAULT 1")
     _ensure_column(db, "entity_form", "version_label", "version_label VARCHAR(50) DEFAULT 'v1'")
+    _ensure_column(db, "entity_form", "tabs", "tabs JSON")
+    _ensure_column(db, "entity_form_version", "tabs", "tabs JSON")
     _ensure_column(db, "entity_type_definition", "version_number", "version_number INTEGER DEFAULT 1")
     _ensure_column(db, "entity_type_definition", "version_label", "version_label VARCHAR(50) DEFAULT 'v1'")
     _ensure_column(db, "entity_type_definition", "statuses", "statuses JSON")

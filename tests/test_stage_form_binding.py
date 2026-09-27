@@ -132,3 +132,41 @@ def test_unknown_form_type_returns_empty_workflow_stages(client):
     payload = res.json()
     assert payload["workflow_states"] == []
     assert payload["initial_state"] is None
+
+
+def test_update_entity_custom_fields_patch(client):
+    res = client.post(
+        "/api/permit/create",
+        json={
+            "custom_fields": {
+                "title": "Initial Permit Title",
+                "permit_type": "Hot Work",
+                "location": "Workshop Bay 2",
+                "hazards_identified": "Sparks and hot debris",
+            }
+        },
+    )
+    assert res.status_code == 200
+    permit_id = res.json()["entity_id"]
+
+    # PATCH custom fields
+    patch_res = client.patch(
+        f"/api/permit/{permit_id}",
+        json={
+            "custom_fields": {
+                "title": "Updated Permit Title",
+                "sop_document": [{"name": "standard_operating_procedure.pdf", "size": 1024, "type": "application/pdf", "dataUrl": "data:..."}],
+            }
+        },
+    )
+    assert patch_res.status_code == 200
+    body = patch_res.json()
+    assert body["accepted"] is True
+    assert body["entity"]["custom_fields"]["title"] == "Updated Permit Title"
+    assert len(body["entity"]["custom_fields"]["sop_document"]) == 1
+
+    # Verify get entity returns the persisted updated custom fields
+    get_res = client.get(f"/api/permit/{permit_id}")
+    assert get_res.status_code == 200
+    assert get_res.json()["entity"]["custom_fields"]["title"] == "Updated Permit Title"
+    assert get_res.json()["entity"]["custom_fields"]["sop_document"][0]["name"] == "standard_operating_procedure.pdf"

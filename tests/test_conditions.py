@@ -197,3 +197,31 @@ def test_used_by_impact_analysis(test_db):
     assert len(report["workflows"]) == 1
     assert report["workflows"][0]["version_label"] == "live_v1"
     assert len(report["workflows"][0]["references"]) == 2
+
+
+def test_workflow_status_atom(test_db):
+    """Verifies that the workflow_status atom evaluates against _workflow_status and status fields."""
+    c_eq = _cond(test_db, cid="cond_wf_eq", definition={
+        "logic": "AND",
+        "rules": [{"type": "workflow_status", "operator": "eq", "value": "upload_sop"}]
+    })
+    # Passes when _workflow_status is upload_sop
+    assert evaluate_condition(test_db, c_eq, {"_workflow_status": "upload_sop"}, "u").passed is True
+    assert evaluate_condition(test_db, c_eq, {"status": "upload_sop"}, "u").passed is True
+    assert evaluate_condition(test_db, c_eq, {"_workflow_status": "draft"}, "u").passed is False
+
+    # List matching (in / not_in)
+    c_in = _cond(test_db, cid="cond_wf_in", definition={
+        "logic": "AND",
+        "rules": [{"type": "workflow_status", "operator": "in", "value": "upload_sop, draft, active"}]
+    })
+    assert evaluate_condition(test_db, c_in, {"_workflow_status": "upload_sop"}, "u").passed is True
+    assert evaluate_condition(test_db, c_in, {"_workflow_status": "draft"}, "u").passed is True
+    assert evaluate_condition(test_db, c_in, {"_workflow_status": "closed"}, "u").passed is False
+
+    c_notin = _cond(test_db, cid="cond_wf_notin", definition={
+        "logic": "AND",
+        "rules": [{"type": "workflow_status", "operator": "not_in", "value": "closed, rejected"}]
+    })
+    assert evaluate_condition(test_db, c_notin, {"_workflow_status": "upload_sop"}, "u").passed is True
+    assert evaluate_condition(test_db, c_notin, {"_workflow_status": "closed"}, "u").passed is False

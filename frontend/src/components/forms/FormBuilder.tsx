@@ -7,7 +7,7 @@ import {
 } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { Loader2, History, Calendar, X } from 'lucide-react';
+import { Loader2, History, Calendar, X, Plus, Settings2, ShieldCheck, Lock, Eye, EyeOff, Pencil } from 'lucide-react';
 import { api } from '../../api/client';
 import type {
   EntityField,
@@ -15,6 +15,7 @@ import type {
   GenericFieldType,
   EntityFieldType,
   FormVersion,
+  FormTab,
   OptionListSummary,
   ResolvedList,
   ConditionDefinition,
@@ -30,6 +31,7 @@ import { FormCanvasItem } from './FormCanvasItem';
 import { FormInspector } from './FormInspector';
 import { FormPreviewModal } from './FormPreviewModal';
 import { FormJsonModal } from './FormJsonModal';
+import { TabSettingsModal } from './TabSettingsModal';
 import { ConditionModal } from '../workflow-ui/ConditionModal';
 import { ConditionList } from '../conditions/ConditionList';
 
@@ -73,6 +75,10 @@ function widgetForField(fieldType: EntityFieldType): { fieldType: GenericFieldTy
 
 export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps) {
   const [items, setItems] = useState<EntityFormItem[]>([]);
+  const [tabs, setTabs] = useState<FormTab[]>([
+    { id: 'general', label: 'General Details', is_default: true },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('general');
   const [fields, setFields] = useState<EntityField[]>([]);
   const [workflowStates, setWorkflowStates] = useState<string[]>([]);
   const [cols, setCols] = useState(12);
@@ -97,6 +103,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   // Modal states
   const [jsonOpen, setJsonOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [tabModalOpen, setTabModalOpen] = useState(false);
+  const [editingTab, setEditingTab] = useState<FormTab | null>(null);
   const [conditionModalOpen, setConditionModalOpen] = useState(false);
   const [conditionToEdit, setConditionToEdit] = useState<ConditionDefinition | null>(null);
   const [conditionAnchorY, setConditionAnchorY] = useState<number | null>(null);
@@ -131,6 +139,10 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
   const handleLoadFormSnapshot = (snap: FormVersion) => {
     const normalized = normalizeFormLayout(snap.layout || [], snap.cols || cols);
     setItems(normalized);
+    if (snap.tabs && snap.tabs.length > 0) {
+      setTabs(snap.tabs);
+      setActiveTabId(snap.tabs[0].id);
+    }
     setCols(snap.cols || cols);
     setRowHeight(snap.row_height || rowHeight);
     setVersionLabel(snap.version_label);
@@ -181,6 +193,14 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
         const normalized = normalizeFormLayout(formData.layout || [], formData.cols || 12);
         setItems(normalized);
+        const loadedTabs: FormTab[] =
+          formData.tabs && formData.tabs.length > 0
+            ? formData.tabs
+            : [{ id: 'general', label: 'General Details', is_default: true }];
+        setTabs(loadedTabs);
+        const defaultTab = loadedTabs.find((t) => t.is_default) || loadedTabs[0];
+        setActiveTabId(defaultTab ? defaultTab.id : 'general');
+
         setFields(formData.fields || allFields || []);
         setWorkflowStates(formData.workflow_states || []);
         setCols(formData.cols || 12);
@@ -238,18 +258,22 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   // Layout mutation handlers
   const handleLayoutChange = (newLayout: Layout) => {
-    const byId = new Map(items.map((it) => [it.i, it]));
-    setItems(
-      newLayout.map((li: LayoutItem) => {
-        const existing = byId.get(li.i);
-        return {
-          ...(existing ?? {}),
-          i: li.i,
-          x: li.x,
-          y: li.y,
-          w: li.w,
-          h: li.h,
-        } as EntityFormItem;
+    const layoutMap = new Map<string, LayoutItem>();
+    newLayout.forEach((li) => layoutMap.set(li.i, li));
+
+    setItems((prev) =>
+      prev.map((it) => {
+        const updated = layoutMap.get(it.i);
+        if (updated) {
+          return {
+            ...it,
+            x: updated.x,
+            y: updated.y,
+            w: updated.w,
+            h: updated.h,
+          };
+        }
+        return it;
       })
     );
     setDirty(true);
@@ -266,9 +290,82 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     setDirty(true);
   };
 
+  // Tab management handlers
+  const handleAddTab = () => {
+    const count = tabs.length + 1;
+    const newId = `tab_${count}`;
+    const newLabel = `Tab ${count}`;
+    const newTab: FormTab = {
+      id: newId,
+      label: newLabel,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newId);
+    setDirty(true);
+    setEditingTab(newTab);
+    setTabModalOpen(true);
+  };
+
+  const handleSaveTab = (updatedTab: FormTab, oldId: string) => {
+    setTabs((prev) => {
+      let updated = prev.map((t) => (t.id === oldId ? updatedTab : t));
+      if (updatedTab.is_default) {
+        updated = updated.map((t) => (t.id === updatedTab.id ? t : { ...t, is_default: false }));
+      }
+      return updated;
+    });
+
+    if (oldId !== updatedTab.id) {
+      setItems((prev) =>
+        prev.map((it) => {
+          const itTab = it.tabId ?? (it as any).tab_id ?? (tabs[0]?.id || 'general');
+          if (itTab === oldId) {
+            return { ...it, tabId: updatedTab.id, tab_id: updatedTab.id };
+          }
+          return it;
+        })
+      );
+      if (activeTabId === oldId) {
+        setActiveTabId(updatedTab.id);
+      }
+    }
+    setTabModalOpen(false);
+    setEditingTab(null);
+    setDirty(true);
+    flash('ok', `Tab "${updatedTab.label}" updated.`);
+  };
+
+  const handleDeleteTab = (tabId: string) => {
+    if (tabs.length <= 1) return;
+    const remaining = tabs.filter((t) => t.id !== tabId);
+    const targetFallbackId = remaining.find((t) => t.is_default)?.id || remaining[0].id;
+    setItems((prev) =>
+      prev.map((it) => {
+        const itTab = it.tabId ?? (it as any).tab_id ?? (tabs[0]?.id || 'general');
+        if (itTab === tabId) {
+          return { ...it, tabId: targetFallbackId, tab_id: targetFallbackId };
+        }
+        return it;
+      })
+    );
+    setTabs(remaining);
+    if (activeTabId === tabId) {
+      setActiveTabId(targetFallbackId);
+    }
+    setTabModalOpen(false);
+    setEditingTab(null);
+    setDirty(true);
+    flash('ok', 'Tab deleted and fields reassigned.');
+  };
+
   const addHeading = () => {
     const id = nextItemId('header');
-    const y = nextY(items, cols);
+    const fallbackTab = tabs[0]?.id || 'general';
+    const currentTabId = activeTabId || fallbackTab;
+    const currentTabItems = items.filter(
+      (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === currentTabId
+    );
+    const y = nextY(currentTabItems, cols);
     const headingCount = items.filter((it) => it.isHeader).length + 1;
     const item: EntityFormItem = {
       i: id,
@@ -278,6 +375,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       h: 1,
       isHeader: true,
       label: `Section ${headingCount}`,
+      tabId: currentTabId,
+      tab_id: currentTabId,
     };
     setItems((prev) => [...prev, item]);
     setSelected(id);
@@ -286,7 +385,12 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
 
   const addGroup = (): string => {
     const id = nextItemId('group');
-    const y = nextY(items, cols);
+    const fallbackTab = tabs[0]?.id || 'general';
+    const currentTabId = activeTabId || fallbackTab;
+    const currentTabItems = items.filter(
+      (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === currentTabId
+    );
+    const y = nextY(currentTabItems, cols);
     const groupCount = items.filter((it) => it.isGroup).length + 1;
     const title = `Group ${groupCount}`;
     const item: EntityFormItem = {
@@ -299,6 +403,8 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       groupId: id,
       label: title,
       groupTitle: title,
+      tabId: currentTabId,
+      tab_id: currentTabId,
     };
     setItems((prev) => [...prev, item]);
     setSelected(id);
@@ -313,7 +419,12 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     );
     if (alreadyPlaced.has(field.field_name)) return;
     const id = nextItemId('field');
-    const y = nextY(items, cols);
+    const fallbackTab = tabs[0]?.id || 'general';
+    const currentTabId = activeTabId || fallbackTab;
+    const currentTabItems = items.filter(
+      (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === currentTabId
+    );
+    const y = nextY(currentTabItems, cols);
     const { fieldType, w, h } = widgetForField(field.field_type);
 
     const item: EntityFormItem = {
@@ -322,18 +433,23 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       y,
       w,
       h,
-      label: field.label || field.field_name
-        .split('_')
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' '),
+      label:
+        field.label ||
+        field.field_name
+          .split('_')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' '),
       fieldName: field.field_name,
       fieldType,
       required: Boolean(field.required),
-      options: field.select_options && field.select_options.length > 0
-        ? [...field.select_options]
-        : fieldType === 'table'
-        ? ['Column 1', 'Column 2', 'Column 3']
-        : [],
+      tabId: currentTabId,
+      tab_id: currentTabId,
+      options:
+        field.select_options && field.select_options.length > 0
+          ? [...field.select_options]
+          : fieldType === 'table'
+          ? ['Column 1', 'Column 2', 'Column 3']
+          : [],
       optionsList: field.option_list_key || null,
       minRows: fieldType === 'table' ? null : undefined,
       maxRows: fieldType === 'table' ? null : undefined,
@@ -355,11 +471,15 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
       const res = await api.saveForm({
         entity_type: entityType,
         layout: items,
+        tabs,
         cols,
         row_height: rowHeight,
       });
       if (res && Array.isArray(res.layout)) {
         setItems(normalizeFormLayout(res.layout, cols));
+      }
+      if (res && res.tabs && res.tabs.length > 0) {
+        setTabs(res.tabs);
       }
       if (res && res.version_label) {
         setVersionLabel(res.version_label);
@@ -427,6 +547,11 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
     [items]
   );
 
+  const activeTabItems = useMemo(() => {
+    const fallbackTab = tabs[0]?.id || 'general';
+    return items.filter((it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === activeTabId);
+  }, [items, tabs, activeTabId]);
+
   const selectedItem = selected ? items.find((it) => it.i === selected) || null : null;
 
   return (
@@ -476,13 +601,114 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
               }}
             >
               {/* Form Title & Description matching reference design */}
-              <div className="mb-6 shrink-0">
+              <div className="mb-4 shrink-0">
                 <h1 className="text-base sm:text-lg font-semibold text-gray-900">
                   {entityType.charAt(0).toUpperCase() + entityType.slice(1)} setup
                 </h1>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Configure fields, layout arrangement, and conditional logic rules for {entityType}.
+                  Configure fields, master form tabs, and conditional logic rules for {entityType}.
                 </p>
+              </div>
+
+              {/* Master Form Tab Strip */}
+              <div className="mb-6 flex items-center justify-between border-b border-gray-200">
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  {tabs.map((tab) => {
+                    const isActive = tab.id === activeTabId;
+                    const tabItemCount = items.filter(
+                      (it) => (it.tabId ?? (it as any).tab_id ?? (tabs[0]?.id || 'general')) === tab.id
+                    ).length;
+                    const condId = tab.visibility_condition?.condition_id || tab.condition_id;
+                    const cond = condId
+                      ? conditions.find((c) => c.id === condId)
+                      : null;
+                    const action = tab.visibility_condition?.action || 'show';
+
+                    return (
+                      <div
+                        key={tab.id}
+                        className={`group flex items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-semibold transition-all cursor-pointer select-none ${
+                          isActive
+                            ? 'border-blue-600 text-blue-700 bg-blue-50/20'
+                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
+                        }`}
+                        onClick={() => {
+                          setActiveTabId(tab.id);
+                          setSelected(null);
+                        }}
+                      >
+                        <span>{tab.label}</span>
+
+                        <span
+                          className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                            isActive ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {tabItemCount}
+                        </span>
+
+                        {condId && (
+                          <span
+                            title={`Tab Rule (${action}): ${cond?.label || condId}`}
+                            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-mono font-medium ${
+                              action === 'readonly'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : action === 'editable'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : action === 'hide'
+                                ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}
+                          >
+                            {action === 'readonly' ? (
+                              <Lock className="h-2.5 w-2.5" />
+                            ) : action === 'editable' ? (
+                              <Pencil className="h-2.5 w-2.5" />
+                            ) : action === 'hide' ? (
+                              <EyeOff className="h-2.5 w-2.5" />
+                            ) : (
+                              <Eye className="h-2.5 w-2.5" />
+                            )}
+                            <span className="max-w-[80px] truncate">
+                              {action === 'readonly'
+                                ? 'Disable'
+                                : action === 'editable'
+                                ? 'Enable'
+                                : action === 'hide'
+                                ? 'Hide'
+                                : 'Show'}
+                            </span>
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          title="Configure tab settings"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTab(tab);
+                            setTabModalOpen(true);
+                          }}
+                          className={`rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors ${
+                            isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={handleAddTab}
+                    className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors ml-1"
+                    title="Add new tab to master form"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Tab</span>
+                  </button>
+                </div>
               </div>
 
               {!loaded ? (
@@ -490,11 +716,13 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   <Loader2 className="h-5 w-5 animate-spin" />
                   <span>Loading form layout…</span>
                 </div>
-              ) : items.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-12 text-center">
-                  <span className="text-sm font-semibold text-gray-800">Form Layout is Empty</span>
+              ) : activeTabItems.length === 0 ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-12 text-center my-4">
+                  <span className="text-sm font-semibold text-gray-800">
+                    No Fields in "{tabs.find((t) => t.id === activeTabId)?.label || 'this tab'}"
+                  </span>
                   <p className="max-w-sm text-xs text-gray-500">
-                    Click any widget or entity field on the left palette to add it to this form.
+                    Click any widget or registered entity field on the left palette to add it to this tab.
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <button
@@ -511,7 +739,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   {mounted && (
                     <GridLayout
                       width={canvasWidth > 0 ? canvasWidth : 800}
-                      layout={items}
+                      layout={activeTabItems}
                       compactor={verticalCompactor}
                       gridConfig={{
                         cols,
@@ -529,7 +757,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                       onLayoutChange={handleLayoutChange}
                       className="transition-all"
                     >
-                      {items.map((it) => {
+                      {activeTabItems.map((it) => {
                         const isSelected = selected === it.i;
                         const groupTitle = it.groupId
                           ? items.find((g) => g.isGroup && (g.groupId === it.groupId || g.i === it.groupId))?.label
@@ -569,6 +797,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         <FormInspector
           selectedItem={selectedItem}
           allItems={items}
+          tabs={tabs}
           cols={cols}
           publishedLists={publishedLists}
           resolvedLists={resolvedLists}
@@ -588,6 +817,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         <FormPreviewModal
           entityType={entityType}
           items={items}
+          tabs={tabs}
           cols={cols}
           rowHeight={rowHeight}
           workflowStates={workflowStates}
@@ -602,16 +832,37 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
         <FormJsonModal
           entityType={entityType}
           items={items}
+          tabs={tabs}
           cols={cols}
           rowHeight={rowHeight}
           onClose={() => setJsonOpen(false)}
-          onImport={(imported, newCols, newRowHeight) => {
+          onImport={(imported, importedTabs, newCols, newRowHeight) => {
             setItems(imported);
             setCols(newCols);
             setRowHeight(newRowHeight);
+            if (importedTabs && importedTabs.length > 0) {
+              setTabs(importedTabs);
+              setActiveTabId(importedTabs[0].id);
+            }
             setDirty(true);
             flash('ok', `Imported ${imported.length} items from schema JSON.`);
           }}
+        />
+      )}
+
+      {/* Tab Settings Modal */}
+      {tabModalOpen && editingTab && (
+        <TabSettingsModal
+          tab={editingTab}
+          allTabs={tabs}
+          conditions={conditions}
+          onSave={handleSaveTab}
+          onDelete={handleDeleteTab}
+          onClose={() => {
+            setTabModalOpen(false);
+            setEditingTab(null);
+          }}
+          onOpenConditionModal={() => handleOpenConditionModal()}
         />
       )}
 

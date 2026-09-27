@@ -91,10 +91,17 @@ def simulate_transition(
     to_state = matching_transition.get("to")
     condition_ids = matching_transition.get("conditions", []) or matching_transition.get("gates", []) or []
 
+    eval_custom_fields = dict(custom_fields)
+    eval_custom_fields["_workflow_status"] = current_stage or current_status
+    eval_custom_fields["_workflow_stage"] = current_stage or current_status
+    eval_custom_fields["workflow_stage"] = current_stage or current_status
+    eval_custom_fields["stage"] = current_stage or current_status
+    eval_custom_fields["status"] = current_status
+
     all_passed, results, failing = evaluate_condition_ids(
         db=db,
         condition_ids=condition_ids,
-        custom_fields=custom_fields,
+        custom_fields=eval_custom_fields,
         actor_id=actor_id,
         actor_type=actor_type,
         actor_roles=actor_roles,
@@ -109,7 +116,7 @@ def simulate_transition(
         resolved_to, choice_index, choice_trace, _ = _resolve_transition_target(
             db=db,
             transition=matching_transition,
-            custom_fields=custom_fields,
+            custom_fields=eval_custom_fields,
             actor_context={"actor_id": actor_id, "actor_type": actor_type, "actor_roles": actor_roles},
         )
         if resolved_to is not None:

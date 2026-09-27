@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { GridLayout, verticalCompactor } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -14,6 +14,7 @@ import {
   ListTodo,
   Loader2,
   Paperclip,
+  Plus,
   RefreshCw,
   ShieldCheck,
   ShieldX,
@@ -23,15 +24,18 @@ import {
   Zap,
   Info,
   Users,
+  ChevronDown,
+  Database,
   AlertTriangle,
   TrendingUp,
   ExternalLink,
   Play,
   Compass,
   Timer,
+  Save,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { isItemVisible, withWorkflowStatus } from '../../lib/conditions';
+import { isItemVisible, isItemReadOnly, isTabVisible, withWorkflowStatus } from '../../lib/conditions';
 import type {
   EntityField,
   EntityFormItem,
@@ -47,6 +51,7 @@ import type {
   TaskAssignment,
   WorkflowDefinition,
   Workflow as WorkflowType,
+  FormTab,
 } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
 import { WorkflowInstanceVisualizer, useLiveCountdown } from './WorkflowInstanceVisualizer';
@@ -204,6 +209,10 @@ export function EntityFormView({
     });
   }, [validTransitions]);
   const [items, setItems] = useState<EntityFormItem[]>([]);
+  const [tabs, setTabs] = useState<FormTab[]>([
+    { id: 'general', label: 'General Details', is_default: true },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('general');
   const [fields, setFields] = useState<EntityField[]>([]);
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
   const [conditionMap, setConditionMap] = useState<Record<string, { label: string; type: string }>>({});
@@ -230,6 +239,10 @@ export function EntityFormView({
   const [linkedModalRecord, setLinkedModalRecord] = useState<{ entityType: string; id: string } | null>(null);
   const [workflowDef, setWorkflowDef] = useState<WorkflowDefinition | null>(null);
   const [interactionNavFeedback, setInteractionNavFeedback] = useState<string | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [isDirty, setIsDirty] = useState(false);
+  const [savingFields, setSavingFields] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const activeId = initialRecordId || initialEntity?.id || '';
   const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || '';
@@ -243,7 +256,7 @@ export function EntityFormView({
 
     try {
       const [formRes, condList, fieldsRes, personsRes, groupsRes, wfListRes] = await Promise.all([
-        api.getForm(entityType).catch(() => ({ layout: [], fields: [], cols: 12, row_height: 40 })),
+        api.getForm(entityType).catch(() => ({ layout: [], fields: [], tabs: [], cols: 12, row_height: 40 })),
         api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
         api.listFields(entityType).catch(() => [] as EntityField[]),
         api.listPersons({ limit: 200 }).catch(() => ({ items: [] })),
@@ -264,13 +277,27 @@ export function EntityFormView({
       setPersons(personsRes.items || []);
       setPersonGroups(groupsRes.items || []);
 
+      const loadedTabs: FormTab[] =
+        formRes.tabs && formRes.tabs.length > 0
+          ? formRes.tabs
+          : [{ id: 'general', label: 'General Details', is_default: true }];
+      setTabs(loadedTabs);
+      const defaultTab = loadedTabs.find((t) => t.is_default) || loadedTabs[0];
+      setActiveTabId((prev) => {
+        const exists = loadedTabs.some((t) => t.id === prev);
+        return exists ? prev : defaultTab ? defaultTab.id : 'general';
+      });
+
       const layout = ((formRes.layout || []) as Array<any>).map((it) => {
         const isGroup = Boolean(it.isGroup ?? it.is_group ?? it.i?.startsWith('group:'));
         const isHeader = Boolean(it.isHeader ?? it.is_header ?? it.i?.startsWith('header:'));
+        const tabId = it.tabId ?? it.tab_id ?? (loadedTabs[0]?.id || 'general');
         return {
           ...it,
           isHeader,
           isGroup,
+          tabId,
+          tab_id: tabId,
           is_header: undefined,
           is_group: undefined,
           fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
@@ -305,6 +332,7 @@ export function EntityFormView({
         setResolved(r.resolved || {});
       }
 
+      let loadedCustomFields: Record<string, unknown> = {};
       // Fetch Entity, Valid Transitions, Task Assignments, and Subprocess Status
       if (activeId) {
         const [entityDetail, validRes, taskRes, subRes] = await Promise.all([
@@ -314,6 +342,7 @@ export function EntityFormView({
           api.getSubprocess(entityType, activeId).catch(() => null),
         ]);
         setEntityRecord(entityDetail.entity);
+        loadedCustomFields = entityDetail.entity?.custom_fields || {};
         setEvents(entityDetail.events || []);
         setValidTransitions(validRes.valid_transitions || []);
         setTaskAssignments(taskRes.items || []);
@@ -323,6 +352,7 @@ export function EntityFormView({
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       } else if (initialEntity) {
         setEntityRecord(initialEntity);
+        loadedCustomFields = initialEntity.custom_fields || {};
         const [validRes, taskRes, subRes] = await Promise.all([
           api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
           api.listTaskAssignments({ entity_type: entityType, entity_id: initialEntity.id }).catch(() => ({ items: [], total: 0 })),
@@ -335,6 +365,19 @@ export function EntityFormView({
         setHasPublishedWorkflow(hasPub);
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       }
+
+      const initialVals: Record<string, string> = {};
+      for (const [k, v] of Object.entries(loadedCustomFields)) {
+        if (v === null || v === undefined) {
+          initialVals[k] = '';
+        } else if (typeof v === 'object') {
+          initialVals[k] = JSON.stringify(v);
+        } else {
+          initialVals[k] = String(v);
+        }
+      }
+      setValues(initialVals);
+      setIsDirty(false);
     } catch (e: any) {
       setErr(e.message || 'Failed to load record');
     } finally {
@@ -350,48 +393,60 @@ export function EntityFormView({
   // Current entity custom fields + workflow status
   const currentEntity = entityRecord || initialEntity;
   const customFields: Record<string, unknown> = currentEntity?.custom_fields || {};
-  const baseConditionValues: Record<string, string> = {};
-  for (const [k, v] of Object.entries(customFields)) {
-    if (v === null || v === undefined) {
-      baseConditionValues[k] = '';
-    } else if (typeof v === 'object') {
-      baseConditionValues[k] = JSON.stringify(v);
-    } else {
-      baseConditionValues[k] = String(v);
+  const currentStage = currentEntity?.workflow_stage || currentEntity?.stage || currentEntity?.status || '';
+  const currentStatus = currentEntity?.status || currentStage;
+  const isTerminal = useMemo(() => {
+    const s = (currentStatus || '').toLowerCase();
+    return ['closed', 'cancelled', 'expired'].includes(s);
+  }, [currentStatus]);
+
+  const conditionValues = useMemo(() => {
+    const baseConditionValues: Record<string, string> = {};
+    for (const [k, v] of Object.entries(customFields)) {
+      if (v === null || v === undefined) {
+        baseConditionValues[k] = '';
+      } else if (typeof v === 'object') {
+        baseConditionValues[k] = JSON.stringify(v);
+      } else {
+        baseConditionValues[k] = String(v);
+      }
     }
-  }
-  const valuesForCondition = withWorkflowStatus(baseConditionValues, currentEntity?.status);
+    const merged = { ...baseConditionValues, ...values };
+    return withWorkflowStatus(merged, currentStatus, currentStage);
+  }, [customFields, values, currentStatus, currentStage]);
+
+  const valuesForCondition = conditionValues;
 
   // Workflow Stage Timer / Expiry calculation
   const currentNodeMeta = useMemo(() => {
-    if (!workflowDef || !currentEntity?.status) return null;
-    return (workflowDef.nodes || []).find((n) => n.name === currentEntity.status) || null;
-  }, [workflowDef, currentEntity?.status]);
+    if (!workflowDef || !currentStage) return null;
+    return (workflowDef.nodes || []).find((n) => n.name === currentStage || n.name === currentEntity?.status) || null;
+  }, [workflowDef, currentStage, currentEntity?.status]);
 
   const timeLimitHours = currentNodeMeta?.time_limit_hours ?? null;
 
   const targetDueTime = useMemo(() => {
-    if (!currentEntity?.status) return null;
-    const entryEvent = events.filter((e) => e.to_state === currentEntity.status).slice(-1)[0];
-    const enteredTime = entryEvent?.transaction_time || currentEntity.updated_at || currentEntity.created_at || new Date().toISOString();
+    if (!currentStage) return null;
+    const entryEvent = events.filter((e) => e.to_state === currentStage || e.to_state === currentEntity?.status).slice(-1)[0];
+    const enteredTime = entryEvent?.transaction_time || currentEntity?.updated_at || currentEntity?.created_at || new Date().toISOString();
 
     if (timeLimitHours && Number(timeLimitHours) > 0) {
       const enteredMs = new Date(enteredTime).getTime();
       return new Date(enteredMs + Number(timeLimitHours) * 3600 * 1000).toISOString();
     }
-    const cf = currentEntity.custom_fields || (currentEntity as any).data || {};
+    const cf = currentEntity?.custom_fields || (currentEntity as any)?.data || {};
     const expiryField = cf.valid_to || cf.expires_at || cf.due_date;
     if (expiryField) {
       return new Date(expiryField).toISOString();
     }
     return null;
-  }, [currentEntity, events, timeLimitHours]);
+  }, [currentEntity, events, timeLimitHours, currentStage]);
 
   const enteredTime = useMemo(() => {
-    if (!currentEntity?.status) return null;
-    const entryEvent = events.filter((e) => e.to_state === currentEntity.status).slice(-1)[0];
-    return entryEvent?.transaction_time || currentEntity.updated_at || currentEntity.created_at || null;
-  }, [currentEntity, events]);
+    if (!currentStage) return null;
+    const entryEvent = events.filter((e) => e.to_state === currentStage || e.to_state === currentEntity?.status).slice(-1)[0];
+    return entryEvent?.transaction_time || currentEntity?.updated_at || currentEntity?.created_at || null;
+  }, [currentEntity, events, currentStage]);
 
   const stageCountdown = useLiveCountdown(targetDueTime, enteredTime);
 
@@ -469,15 +524,107 @@ export function EntityFormView({
     return isItemVisible(it, items, valuesForCondition, conditions);
   });
 
+  const visibleTabs = useMemo(() => {
+    return tabs.filter((tab) => isTabVisible(tab, valuesForCondition, conditions));
+  }, [tabs, valuesForCondition, conditions]);
+
+  // Keep activeTabId in sync with visibleTabs
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((t) => t.id === activeTabId)) {
+      setActiveTabId(visibleTabs[0].id);
+    }
+  }, [visibleTabs, activeTabId]);
+
+  const tabFilteredVisibleItems = useMemo(() => {
+    const fallbackTab = tabs[0]?.id || 'general';
+    return currentlyVisibleItems.filter((it) => {
+      const itTab = it.tabId ?? (it as any).tab_id ?? fallbackTab;
+      return itTab === activeTabId;
+    });
+  }, [currentlyVisibleItems, tabs, activeTabId]);
+
+  const hasLayout = items.length > 0;
+
+  const fallbackFields =
+    !hasLayout && fields.length > 0 ? [...fields].sort((a, b) => a.field_name.localeCompare(b.field_name)) : [];
+
+  const fieldOptions = (f: EntityField): string[] => {
+    if (f.option_list_key && resolved[f.option_list_key]) {
+      const list = resolved[f.option_list_key];
+      if (list.kind === 'options') return list.items as string[];
+    }
+    return f.select_options || [];
+  };
+
+  const handleValueChange = (it: EntityFormItem, val: string) => {
+    setIsDirty(true);
+    setValues((prev) => {
+      const next = { ...prev, [it.i]: val };
+      if (it.fieldName) {
+        next[it.fieldName] = val;
+      }
+      return next;
+    });
+  };
+
+  const handleFallbackChange = (fieldName: string, val: string) => {
+    setIsDirty(true);
+    setValues((prev) => ({ ...prev, [fieldName]: val }));
+  };
+
+  const getCustomFieldsDelta = (): Record<string, unknown> => {
+    const activeDefs: ResolvedField[] = [
+      ...items
+        .filter((it) => !it.isHeader && !it.isGroup && resolveItem(it) !== null)
+        .map((it) => resolveItem(it)!),
+      ...fallbackFields.map((f) => ({
+        key: f.field_name,
+        name: f.field_name,
+        label: f.label || f.field_name,
+        type: f.field_type,
+        required: Boolean(f.required),
+        options: fieldOptions(f),
+        checklistItems:
+          f.option_list_key && resolved[f.option_list_key]?.kind === 'checklist'
+            ? (resolved[f.option_list_key].items as ChecklistItem[])
+            : undefined,
+      })),
+    ];
+    return toCustomFields(values, activeDefs);
+  };
+
+  const handleSaveFields = async () => {
+    if (!currentEntity) return;
+    setSavingFields(true);
+    setTransitionError(null);
+    setSaveSuccess(false);
+    try {
+      const delta = getCustomFieldsDelta();
+      await api.updateEntityFields(entityType, currentEntity.id, delta);
+      setIsDirty(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (e: any) {
+      setTransitionError(e.message || 'Failed to save form fields');
+    } finally {
+      setSavingFields(false);
+    }
+  };
+
   const handleFireTransition = async (t: ValidTransition) => {
     if (!currentEntity || firingEvent) return;
     setFiringEvent(t.event_type);
     setTransitionError(null);
     try {
+      const delta = getCustomFieldsDelta();
       await api.transition(entityType, {
         entity_id: currentEntity.id,
         event_type: t.event_type,
+        custom_fields_delta: delta,
       });
+      setIsDirty(false);
       await loadData(true);
       onRecordUpdated?.();
     } catch (e: any) {
@@ -544,19 +691,50 @@ export function EntityFormView({
   };
 
   const currentStateNode = useMemo(() => {
-    if (!workflowDef || !currentEntity?.status) return null;
+    if (!workflowDef || !currentStage) return null;
     const nodes = workflowDef.nodes || [];
-    return nodes.find((n) => n.name === currentEntity.status) || null;
-  }, [workflowDef, currentEntity?.status]);
+    return nodes.find((n) => n.name === currentStage || n.name === currentEntity?.status) || null;
+  }, [workflowDef, currentStage, currentEntity?.status]);
 
   const isInteractionState = currentStateNode?.kind === 'interaction';
+
+  // Maximo-aligned Interaction Node auto-tab switching
+  useEffect(() => {
+    if (!isInteractionState) return;
+    const targetKey = currentStateNode?.interaction_tab?.toLowerCase()?.trim();
+    if (targetKey && targetKey !== 'main' && targetKey !== 'details' && targetKey !== 'edit') {
+      const matchedTab = visibleTabs.find(
+        (t) => t.id.toLowerCase() === targetKey || t.label.toLowerCase() === targetKey
+      );
+      if (matchedTab && matchedTab.id !== activeTabId) {
+        setActiveTabId(matchedTab.id);
+        return;
+      }
+    }
+    // If the active tab is 'general' and there is a non-default step-specific tab visible (e.g. 'sop'), switch to it
+    if (visibleTabs.length > 1) {
+      const stepSpecificTab = visibleTabs.find((t) => !t.is_default && t.id !== 'general');
+      if (stepSpecificTab && activeTabId === 'general') {
+        setActiveTabId(stepSpecificTab.id);
+      }
+    }
+  }, [isInteractionState, currentStateNode?.interaction_tab, visibleTabs, activeTabId]);
 
   const handleJumpToInteractionTarget = () => {
     if (!currentStateNode) return;
     const targetApp = (currentStateNode.interaction_app || 'records').toLowerCase();
     const targetTab = (currentStateNode.interaction_tab || 'details').toLowerCase();
 
-    if (targetTab === 'history' || targetApp === 'history') {
+    // Check if targetTab matches any visible form tab
+    const matchedTab = visibleTabs.find(
+      (t) => t.id.toLowerCase() === targetTab || t.label.toLowerCase() === targetTab
+    );
+    if (matchedTab) {
+      setActiveTabId(matchedTab.id);
+      const el = document.getElementById('record-form-grid');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      setInteractionNavFeedback(`Switched to tab "${matchedTab.label}"`);
+    } else if (targetTab === 'history' || targetApp === 'history') {
       setAuditLogOpen(true);
       setInteractionNavFeedback('Opened Audit Timeline history log');
     } else if (targetTab === 'assignments' || targetTab === 'tasks') {
@@ -595,7 +773,66 @@ export function EntityFormView({
     }
   };
 
-  const hasLayout = items.length > 0;
+  // Initial state check (Record Creation / Draft)
+  const isInitialDraftState = useMemo(() => {
+    const s = (currentStatus || currentStage || '').toLowerCase();
+    const initSt = (workflowDef?.initial_state || 'draft').toLowerCase();
+    return s === initSt || s === 'draft' || s === 'requested' || s === 'new';
+  }, [currentStatus, currentStage, workflowDef?.initial_state]);
+
+  const computeItemReadOnly = useCallback((it: EntityFormItem): boolean => {
+    // 1. Terminal states are strictly read-only
+    if (isTerminal) return true;
+
+    // 2. Check if explicitly configured via field-level condition rules (action: 'readonly' or 'editable')
+    const itCond = it.visibilityCondition ?? (it as any).visibility_condition;
+    const hasExplicitFieldRule = Boolean(
+      (itCond?.rules?.length && (itCond.action === 'readonly' || itCond.action === 'editable')) ||
+      (itCond?.condition_id && (itCond.action === 'readonly' || itCond.action === 'editable'))
+    );
+
+    if (hasExplicitFieldRule) {
+      return isItemReadOnly(it, items, valuesForCondition, conditions, tabs);
+    }
+
+    // 3. Check if parent tab has an explicit interactivity rule (action: 'readonly' or 'editable')
+    const itTabId = it.tabId ?? (it as any).tab_id ?? tabs[0]?.id;
+    const parentTab = tabs.find((t) => t.id === itTabId);
+    if (parentTab?.visibility_condition) {
+      const tabAction = parentTab.visibility_condition.action;
+      if (tabAction === 'readonly' || tabAction === 'editable') {
+        return isItemReadOnly(it, items, valuesForCondition, conditions, tabs);
+      }
+    }
+
+    // 4. Initial draft / creation state is editable by default
+    if (isInitialDraftState) {
+      return false;
+    }
+
+    // 5. In an active interaction node step, items on the interaction tab are actively editable
+    if (isInteractionState) {
+      const itTab = it.tabId ?? (it as any).tab_id ?? 'general';
+      const targetTab = currentStateNode?.interaction_tab?.toLowerCase()?.trim();
+      if (targetTab && (itTab.toLowerCase() === targetTab || itTab === activeTabId)) {
+        return false;
+      }
+      if (itTab === activeTabId && itTab !== 'general') {
+        return false;
+      }
+    }
+
+    // 6. Default across all other post-creation workflow stages (e.g. Approval, Review, Active): Read-Only!
+    return true;
+  }, [isTerminal, isInitialDraftState, isInteractionState, currentStateNode, activeTabId, items, tabs, valuesForCondition, conditions]);
+
+  const computeFallbackReadOnly = useCallback((_fieldName: string): boolean => {
+    if (isTerminal) return true;
+    if (isInitialDraftState) return false;
+    if (isInteractionState) return false;
+    return true;
+  }, [isTerminal, isInitialDraftState, isInteractionState]);
+
   const entityTitleStr = getEntityTitle(currentEntity);
 
   const expiryValue = currentEntity?.custom_fields?.expiry_date;
@@ -753,13 +990,13 @@ export function EntityFormView({
                   <div className="flex items-center gap-2">
                     <Workflow className="h-4 w-4 text-blue-600" />
                     <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
-                      Current Stage: <span className="text-blue-700">{currentEntity.status}</span>
+                      Current Stage: <span className="text-blue-700">{currentStage || currentEntity.status}</span>
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-gray-500">
                     {validTransitions.length > 0
                       ? `Click an action to transition this ${entityType} record to the next workflow stage.`
-                      : `This record is currently in state "${currentEntity.status}".`}
+                      : `This record is currently in state "${currentStage || currentEntity.status}".`}
                   </p>
                 </div>
 
@@ -844,6 +1081,31 @@ export function EntityFormView({
                     );
                   })
                 )}
+
+                {!isTerminal && (
+                  <button
+                    type="button"
+                    disabled={savingFields || (!isDirty && !saveSuccess)}
+                    onClick={handleSaveFields}
+                    className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold shadow-2xs transition-colors cursor-pointer ${
+                      isDirty
+                        ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+                        : saveSuccess
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                        : 'border-gray-200 bg-white text-gray-400 cursor-not-allowed opacity-75'
+                    }`}
+                    title={isDirty ? 'Save changes to record fields' : 'No unsaved changes'}
+                  >
+                    {savingFields ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : saveSuccess ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
+                    <span>{savingFields ? 'Saving…' : saveSuccess ? 'Saved!' : 'Save Changes'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -888,7 +1150,7 @@ export function EntityFormView({
                       {currentStateNode.task_instructions || currentStateNode.description || `Please navigate to the ${currentStateNode.interaction_tab || 'details'} view and complete the required inputs.`}
                     </p>
                     <p className="text-[11px] text-gray-500">
-                      Stage: <span className="font-mono font-medium text-gray-700">{currentEntity?.status}</span> · Once your inputs are verified, click complete to proceed.
+                      Stage: <span className="font-mono font-medium text-gray-700">{currentStage || currentEntity?.status}</span> · Once your inputs are verified, click complete to proceed.
                     </p>
                   </div>
 
@@ -1274,88 +1536,200 @@ export function EntityFormView({
             {/* Document Sheet Container */}
             <div id="record-form-grid" className="rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-10 shadow-xs mb-8">
               {/* Document Sheet Heading */}
-              <div className="mb-6 border-b border-gray-100 pb-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-base sm:text-lg font-bold text-gray-900">
-                    {entityType.charAt(0).toUpperCase() + entityType.slice(1)} Record Form
-                  </h2>
+              <div className="mb-6 border-b border-gray-100 pb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base sm:text-lg font-bold text-gray-900">
+                      {entityType.charAt(0).toUpperCase() + entityType.slice(1)} Record Form
+                    </h2>
+                    {isDirty && (
+                      <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-700">
+                        Unsaved edits
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Document layout reflecting the registered fields and conditional stage rules.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {isDirty && !isTerminal && (
+                    <button
+                      type="button"
+                      disabled={savingFields}
+                      onClick={handleSaveFields}
+                      className="flex items-center gap-1 rounded-md bg-blue-600 hover:bg-blue-700 px-2.5 py-1 text-xs font-semibold text-white shadow-2xs transition-colors cursor-pointer"
+                    >
+                      {savingFields ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                      Save
+                    </button>
+                  )}
                   <span className="font-mono text-xs text-gray-400">
                     v{currentEntity.workflow_version || '1.0'}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  Document layout reflecting the registered fields and conditional stage rules.
-                </p>
               </div>
 
-              {hasLayout ? (
-                <div ref={containerRef}>
-                  {mounted && (
-                    <GridLayout
-                      width={width}
-                      layout={currentlyVisibleItems}
-                      compactor={verticalCompactor}
-                      gridConfig={{
-                        cols,
-                        rowHeight,
-                        margin: [16, 16],
-                        containerPadding: [0, 0],
-                      }}
-                      dragConfig={{ enabled: false }}
-                      resizeConfig={{ enabled: false }}
-                      className="rounded-lg"
-                    >
-                      {currentlyVisibleItems.map((it) => {
-                        if (it.isGroup) {
-                          return (
-                            <div
-                              key={it.i}
-                              className="flex h-full w-full flex-col justify-center rounded-xl border border-gray-200 bg-slate-50/50 p-4 shadow-2xs"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Layers className="h-4 w-4 shrink-0 text-gray-500" />
-                                <span className="text-sm font-semibold text-gray-900">
-                                  {it.label || it.groupTitle || 'Group'}
-                                </span>
-                              </div>
-                              {it.placeholder && (
-                                <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
-                              )}
-                            </div>
-                          );
-                        }
-                        if (it.isHeader) {
-                          return (
-                            <div
-                              key={it.i}
-                              className="flex h-full w-full flex-col justify-center pt-2 pb-1 border-b border-gray-100"
-                            >
-                              <h3 className="text-sm sm:text-base font-bold text-gray-900">
-                                {it.label || 'Section Header'}
-                              </h3>
-                              {it.placeholder && (
-                                <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
-                              )}
-                            </div>
-                          );
-                        }
-                        const fieldDef = resolveItem(it);
-                        if (!fieldDef) return null;
-                        const rawVal = customFields[it.fieldName || it.i] ?? customFields[it.i];
-                        return (
-                          <ReadOnlyFillCell
-                            key={it.i}
-                            def={fieldDef}
-                            value={rawVal}
-                            itemHeight={it.h}
-                            persons={persons}
-                            personGroups={personGroups}
-                          />
-                        );
-                      })}
-                    </GridLayout>
-                  )}
+              {/* Master Form Tab Strip */}
+              {visibleTabs.length > 1 && (
+                <div className="mb-6 flex items-center justify-between border-b border-gray-200">
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                    {visibleTabs.map((tab) => {
+                      const isActive = tab.id === activeTabId;
+                      const fallbackTab = tabs[0]?.id || 'general';
+                      const count = currentlyVisibleItems.filter(
+                        (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === tab.id
+                      ).length;
+                      const isInteractionTarget =
+                        isInteractionState &&
+                        currentStateNode?.interaction_tab &&
+                        (currentStateNode.interaction_tab.toLowerCase() === tab.id.toLowerCase() ||
+                          currentStateNode.interaction_tab.toLowerCase() === tab.label.toLowerCase());
+
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTabId(tab.id)}
+                          className={`relative flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer select-none ${
+                            isActive
+                              ? 'border-blue-600 text-blue-700 bg-blue-50/20'
+                              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
+                          }`}
+                        >
+                          <span>{tab.label}</span>
+                          <span
+                            className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                              isActive ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                          {isInteractionTarget && (
+                            <span
+                              className="flex h-2 w-2 rounded-full bg-sky-500 animate-ping"
+                              title="Target of current interaction step"
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+              )}
+
+              {hasLayout ? (
+                tabFilteredVisibleItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <p className="text-xs text-gray-400">
+                      No fields configured or visible in "{visibleTabs.find((t) => t.id === activeTabId)?.label || 'this tab'}" for the current record state.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <div ref={containerRef}>
+                      {mounted && (
+                        <GridLayout
+                          width={width}
+                          layout={tabFilteredVisibleItems}
+                          compactor={verticalCompactor}
+                          gridConfig={{
+                            cols,
+                            rowHeight,
+                            margin: [16, 16],
+                            containerPadding: [0, 0],
+                          }}
+                          dragConfig={{ enabled: false }}
+                          resizeConfig={{ enabled: false }}
+                          className="rounded-lg"
+                        >
+                          {tabFilteredVisibleItems.map((it) => {
+                            if (it.isGroup) {
+                              return (
+                                <div
+                                  key={it.i}
+                                  className="flex h-full w-full flex-col justify-center rounded-xl border border-gray-200 bg-slate-50/50 p-4 shadow-2xs"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Layers className="h-4 w-4 shrink-0 text-gray-500" />
+                                    <span className="text-sm font-semibold text-gray-900">
+                                      {it.label || it.groupTitle || 'Group'}
+                                    </span>
+                                  </div>
+                                  {it.placeholder && (
+                                    <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
+                                  )}
+                                </div>
+                              );
+                            }
+                            if (it.isHeader) {
+                              return (
+                                <div
+                                  key={it.i}
+                                  className="flex h-full w-full flex-col justify-center pt-2 pb-1 border-b border-gray-100"
+                                >
+                                  <h3 className="text-sm sm:text-base font-bold text-gray-900">
+                                    {it.label || 'Section Header'}
+                                  </h3>
+                                  {it.placeholder && (
+                                    <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
+                                  )}
+                                </div>
+                              );
+                            }
+                            const fieldDef = resolveItem(it);
+                            if (!fieldDef) return null;
+                            const isReadOnly = computeItemReadOnly(it);
+                            const currentVal = values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? '';
+                            return (
+                              <FillCell
+                                key={it.i}
+                                def={fieldDef}
+                                value={currentVal}
+                                itemHeight={it.h}
+                                readOnly={isReadOnly}
+                                persons={persons}
+                                personGroups={personGroups}
+                                onChange={(v) => handleValueChange(it, v)}
+                              />
+                            );
+                          })}
+                        </GridLayout>
+                      )}
+                    </div>
+
+                    {fallbackFields.length > 0 && (
+                      <div className="mt-8 flex flex-col gap-4 pt-4 border-t border-gray-100">
+                        <div className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                          Additional Fields
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {fallbackFields.map((f) => (
+                            <FieldRow
+                              key={`fallback-${f.field_name}`}
+                              def={{
+                                key: f.field_name,
+                                name: f.field_name,
+                                label: f.label || f.field_name,
+                                type: f.field_type,
+                                required: Boolean(f.required),
+                                options: fieldOptions(f),
+                                referenceEntityType:
+                                  f.reference_entity_type ||
+                                  (f.field_name === 'assigned_to' ? 'person' : f.field_name === 'owner_group' ? 'person_group' : null),
+                              }}
+                              value={values[f.field_name] ?? ''}
+                              persons={persons}
+                              personGroups={personGroups}
+                              readOnly={computeFallbackReadOnly(f.field_name)}
+                              onChange={(v) => handleFallbackChange(f.field_name, v)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
               ) : (
                 /* Fallback when no form layout exists */
                 <div className="flex flex-col gap-4">
@@ -1366,19 +1740,22 @@ export function EntityFormView({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {Object.entries(customFields).map(([k, v]) => (
                       <div key={k} className="flex flex-col gap-1.5">
-                        <span className="text-xs font-semibold text-gray-900">{k}</span>
-                        <ReadOnlyWidget
+                        <FieldRow
+                          key={k}
                           def={{
                             key: k,
                             name: k,
+                            label: k,
                             type: k === 'assigned_to' || k.toLowerCase().includes('person') ? 'entity_reference' : k === 'owner_group' || k.toLowerCase().includes('group') ? 'entity_reference' : 'text',
                             required: false,
                             options: [],
                             referenceEntityType: k === 'assigned_to' ? 'person' : k === 'owner_group' ? 'person_group' : null,
                           }}
-                          value={v}
+                          value={values[k] ?? (typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''))}
                           persons={persons}
                           personGroups={personGroups}
+                          readOnly={computeFallbackReadOnly(k)}
+                          onChange={(newVal) => handleFallbackChange(k, newVal)}
                         />
                       </div>
                     ))}
@@ -1504,421 +1881,807 @@ export function EntityFormView({
   );
 }
 
-// --- Read-only Grid Cell: Stacked Label + Input --------------------------------------
-const ReadOnlyFillCell = forwardRef<
-  HTMLDivElement,
-  {
-    def: ResolvedField;
-    value: unknown;
-    itemHeight?: number;
-    persons?: Person[];
-    personGroups?: PersonGroup[];
-    className?: string;
-    style?: CSSProperties;
-  }
->(function ReadOnlyFillCell({ def, value, itemHeight = 1, persons = [], personGroups = [], className, style }, ref) {
+// --- grid cell: stacked label+input on clean white card form ----
+const FillCell = forwardRef<HTMLDivElement, {
+  def: ResolvedField;
+  value: string;
+  itemHeight?: number;
+  readOnly?: boolean;
+  persons?: Person[];
+  personGroups?: PersonGroup[];
+  onChange: (v: string) => void;
+  className?: string;
+  style?: CSSProperties;
+}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], onChange, className, style }, ref) {
+  const id = useId();
+  const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
+  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups);
   return (
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1`}
+      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1 ${
+        readOnly ? 'opacity-90' : ''
+      }`}
     >
-      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
-        <span className="truncate" title={def.label || def.name}>
-          {def.label || def.name}
-        </span>
+      <label htmlFor={id} className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
+        <span className="truncate" title={def.label || def.name}>{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
+        {def.placeholder && (
+          <span title={def.placeholder} className="group relative">
+            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
+          </span>
+        )}
+        {readOnly && (
+          <span className="rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
+            Read-only
+          </span>
+        )}
       </label>
-      <div className="min-w-0 flex-1">
-        <ReadOnlyWidget def={def} value={value} itemHeight={itemHeight} persons={persons} personGroups={personGroups} />
-      </div>
+      <div className="min-w-0 flex-1">{input}</div>
     </div>
   );
 });
 
-// --- Widget Renderers in Read-Only Mode -----------------------------------------------
-function ReadOnlyWidget({
+// --- full-width vertical label+input row (used for auto-appended fields) ----
+function FieldRow({
   def,
   value,
-  itemHeight = 1,
   persons = [],
   personGroups = [],
+  readOnly = false,
+  onChange,
 }: {
   def: ResolvedField;
-  value: unknown;
-  itemHeight?: number;
+  value: string;
   persons?: Person[];
   personGroups?: PersonGroup[];
+  readOnly?: boolean;
+  onChange: (v: string) => void;
 }) {
-  const boxCls = 'w-full rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs text-gray-900 font-medium shadow-2xs';
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="flex items-center gap-1 text-xs font-semibold text-gray-900">
+        {def.label || def.name}
+        {def.required && <span className="text-red-500">*</span>}
+        {readOnly && (
+          <span className="ml-auto rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
+            Read-only
+          </span>
+        )}
+      </label>
+      {makeInput(def, id, value, onChange, 3, readOnly, persons, personGroups)}
+    </div>
+  );
+}
 
-  // 1. File Attachment
-  if (def.type === 'file') {
-    let files: AttachedFile[] = [];
-    if (Array.isArray(value)) {
-      files = value.filter((f) => f && typeof f === 'object' && f.name);
-    } else if (typeof value === 'string' && value.trim()) {
-      try {
-        const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) files = parsed.filter((f) => f && typeof f === 'object' && f.name);
-      } catch {}
-    }
+function makeInput(
+  def: ResolvedField,
+  id: string,
+  value: string,
+  onChange: (v: string) => void,
+  textareaRows?: number,
+  readOnly = false,
+  persons: Person[] = [],
+  personGroups: PersonGroup[] = []
+) {
+  const cls = `w-full rounded-md border px-3 py-2 text-xs transition-colors shadow-2xs ${
+    readOnly
+      ? 'border-gray-200 bg-gray-100/90 text-gray-500 cursor-not-allowed select-none'
+      : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600'
+  }`;
 
-    if (files.length === 0) {
-      return (
-        <div className="flex items-center gap-1.5 rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-gray-400 italic">
-          <Paperclip className="h-3.5 w-3.5 text-gray-400" /> No files attached
-        </div>
-      );
-    }
-
+  if (def.type === 'long_text') {
     return (
-      <div className="flex flex-wrap gap-2">
-        {files.map((f, idx) => (
-          <div
-            key={idx}
-            className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-1.5 shadow-2xs"
-          >
-            <Paperclip className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="max-w-[160px] truncate text-xs font-semibold text-gray-800" title={f.name}>
-              {f.name}
-            </span>
-            <span className="font-mono text-[10px] text-gray-500 shrink-0">
-              {formatFileSize(f.size)}
-            </span>
-            {f.dataUrl && (
-              <a
-                href={f.dataUrl}
-                download={f.name}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-0.5 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-blue-700"
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => !readOnly && onChange(e.target.value)}
+        disabled={readOnly}
+        readOnly={readOnly}
+        rows={textareaRows ?? 3}
+        placeholder={def.placeholder || ''}
+        className={`${cls} h-full min-h-[36px] resize-none leading-relaxed`}
+      />
+    );
+  }
+  if (def.type === 'selection') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
+        {def.options.length === 0 ? (
+          <span className="text-xs text-gray-400">No options defined</span>
+        ) : (
+          def.options.map((o) => {
+            const isSelected = value === o;
+            const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+            const title = parts[0].trim();
+            const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
+            return (
+              <div
+                key={o}
+                onClick={() => !readOnly && onChange(o)}
+                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
+                  isSelected
+                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
               >
-                <Download className="h-2.5 w-2.5" /> Download
-              </a>
-            )}
-          </div>
-        ))}
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                  </div>
+                  <div
+                    className={`h-4 w-4 shrink-0 rounded-full border flex items-center justify-center ${
+                      isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
+                    }`}
+                  >
+                    {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </div>
+                </div>
+                {desc && (
+                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+  if (def.type === 'checkbox_group') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
+        {def.options.length === 0 ? (
+          <span className="text-xs text-gray-400">No options defined</span>
+        ) : (
+          def.options.map((o) => {
+            const checked = value.split(',').map((s) => s.trim()).includes(o);
+            const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
+            const title = parts[0].trim();
+            const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
+
+            return (
+              <label
+                key={o}
+                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
+                  checked
+                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
+              >
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
+                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={readOnly}
+                    onChange={() => !readOnly && onChange(toggleMulti(value, o))}
+                    className="accent-blue-600 h-4 w-4 rounded"
+                  />
+                </div>
+                {desc && (
+                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
+                )}
+              </label>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+  if (def.type === 'boolean') {
+    const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const isYes = (value as any) === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
+    const isNo = (value as any) === false || rawLower === 'false' || rawLower === 'no' || rawLower === '0' || (!value && value !== '');
+    return (
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => !readOnly && onChange('yes')}
+          className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
+            isYes
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => !readOnly && onChange('no')}
+          className={`rounded-md border px-4 py-2 text-xs font-semibold transition-all ${
+            isNo
+              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
+              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          No
+        </button>
       </div>
     );
   }
 
-  // 2. Checklist
   if (def.type === 'checklist') {
     const tasks = def.checklistItems ?? [];
-    let checkedSet = new Set<string>();
-    if (Array.isArray(value)) {
-      checkedSet = new Set(value.map((s) => String(s)));
-    } else if (typeof value === 'string' && value.trim()) {
-      try {
-        const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) checkedSet = new Set(parsed.map((s) => String(s)));
-      } catch {
-        checkedSet = new Set(value.split(',').map((s) => s.trim()));
-      }
-    }
-
     if (tasks.length === 0) {
-      return (
-        <span className="text-xs text-gray-400 italic">
-          {checkedSet.size > 0 ? [...checkedSet].join(', ') : 'No checklist items'}
-        </span>
-      );
+      return <span className="text-[11px] text-gray-400">No tasks defined for this checklist</span>;
     }
-
+    const checked = new Set(parseCheckedList(value));
+    const toggle = (label: string) => {
+      if (readOnly) return;
+      const next = new Set(checked);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      onChange(JSON.stringify([...next]));
+    };
     return (
-      <div className="flex w-full flex-col divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white shadow-2xs">
+      <div className="flex w-full flex-col gap-1.5">
         {tasks.map((t) => {
-          const isDone = checkedSet.has(t.label);
+          const done = checked.has(t.label);
+          const pendingReq = !done && t.required;
           return (
-            <div
+            <label
               key={t.label}
-              className={`flex items-center gap-2.5 px-3 py-2 text-xs ${
-                isDone ? 'bg-blue-50/40 text-gray-900' : 'text-gray-500'
+              className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${
+                readOnly
+                  ? 'cursor-not-allowed border-gray-200 bg-gray-100/70 text-gray-400'
+                  : done
+                  ? 'border-blue-200 bg-blue-50/50 cursor-pointer'
+                  : pendingReq
+                  ? 'border-amber-200 bg-amber-50/40 cursor-pointer'
+                  : 'border-gray-300 bg-white cursor-pointer'
               }`}
             >
               <input
                 type="checkbox"
-                checked={isDone}
-                readOnly
-                disabled
-                className="h-3.5 w-3.5 rounded border-gray-300 accent-blue-600"
+                checked={done}
+                disabled={readOnly}
+                onChange={() => toggle(t.label)}
+                className="accent-blue-600 h-3.5 w-3.5"
               />
-              <span className={isDone ? 'font-medium text-gray-900' : 'text-gray-500'}>
+              <span className={done ? 'font-medium text-gray-900' : readOnly ? 'text-gray-500' : 'text-gray-800'}>
                 {t.label}
               </span>
               {t.required && (
-                <span className={`ml-auto text-[10px] font-bold ${isDone ? 'text-blue-600' : 'text-amber-600'}`}>
-                  {isDone ? '✓ Completed' : 'Required'}
+                <span className="ml-auto shrink-0 text-[10px] font-medium text-amber-600">
+                  {done ? 'required ✓' : 'required'}
                 </span>
               )}
-              {t.assigned_role && (
-                <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[9px] text-gray-500">
-                  {t.assigned_role}
-                </span>
-              )}
-            </div>
+            </label>
           );
         })}
       </div>
     );
   }
 
-  // 3. Dynamic Table
   if (def.type === 'table') {
-    let rows: Record<string, string>[] = [];
-    if (Array.isArray(value)) {
-      rows = value as Record<string, string>[];
-    } else if (typeof value === 'string' && value.trim()) {
-      try {
-        const parsed = JSON.parse(value);
-        if (Array.isArray(parsed)) rows = parsed;
-      } catch {}
-    }
-    const cols = def.options && def.options.length > 0 ? def.options : (rows.length > 0 ? Object.keys(rows[0]) : []);
-
-    if (rows.length === 0) {
-      return (
-        <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 text-center text-xs text-gray-400 italic">
-          No table rows recorded
-        </div>
-      );
-    }
-
-    return (
-      <div className="w-full overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="bg-gray-50 text-left text-gray-600 border-b border-gray-200 font-semibold">
-              {cols.map((c) => (
-                <th key={c} className="px-3 py-2 font-semibold text-gray-700">
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map((row, ri) => (
-              <tr key={ri} className="hover:bg-gray-50/50">
-                {cols.map((c) => (
-                  <td key={c} className="px-3 py-2 text-gray-800">
-                    {row[c] || '—'}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
+    return <DynamicTable def={def} value={value} onChange={onChange} readOnly={readOnly} />;
   }
-
-  // 4. Selection / Radio Choice Cards
-  if (def.type === 'selection') {
-    const valStr = String(value ?? '');
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
-        {def.options.map((o) => {
-          const isSelected = valStr === o;
-          const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
-          const title = parts[0].trim();
-          const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
-
-          return (
-            <div
-              key={o}
-              className={`rounded-xl border p-4 text-left flex flex-col justify-between ${
-                isSelected
-                  ? 'border-blue-300 bg-blue-50/20 ring-1 ring-blue-600/30 shadow-xs'
-                  : 'border-gray-200 bg-white opacity-70'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3 w-full">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
-                  <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                </div>
-                <div
-                  className={`h-4 w-4 shrink-0 rounded-full border flex items-center justify-center ${
-                    isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
-                  }`}
-                >
-                  {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
-                </div>
-              </div>
-              {desc && (
-                <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
+  if (def.type === 'file') {
+    return <FileInput def={def} value={value} onChange={onChange} readOnly={readOnly} />;
   }
-
-  // 5. Checkbox Group Choice Cards
-  if (def.type === 'checkbox_group') {
-    let checkedList: string[] = [];
-    if (Array.isArray(value)) checkedList = value.map(String);
-    else if (typeof value === 'string') checkedList = value.split(',').map((s) => s.trim());
-
+  if (def.type === 'dropdown' || def.type === 'select') {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
-        {def.options.map((o) => {
-          const isSelected = checkedList.includes(o);
-          const parts = o.includes(' | ') ? o.split(' | ') : o.includes(' - ') ? o.split(' - ') : [o];
-          const title = parts[0].trim();
-          const desc = parts.length > 1 ? parts.slice(1).join(' - ').trim() : null;
-
-          return (
-            <div
-              key={o}
-              className={`rounded-xl border p-4 text-left flex flex-col justify-between ${
-                isSelected
-                  ? 'border-blue-300 bg-blue-50/20 ring-1 ring-blue-600/30 shadow-xs'
-                  : 'border-gray-200 bg-white opacity-70'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3 w-full">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
-                  <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                </div>
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  readOnly
-                  disabled
-                  className="accent-blue-600 h-4 w-4 rounded"
-                />
-              </div>
-              {desc && (
-                <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // 6. Boolean Toggle Badges
-  if (def.type === 'boolean') {
-    const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : (typeof value === 'boolean' ? (value ? 'true' : 'false') : '');
-    const isYes = value === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
-    return (
-      <div className="flex items-center gap-3">
-        <div
-          className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
-            isYes
-              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
-              : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
-          }`}
+      <div className="relative w-full">
+        <select
+          id={id}
+          value={value}
+          disabled={readOnly}
+          onChange={(e) => !readOnly && onChange(e.target.value)}
+          className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
         >
-          Yes
-        </div>
-        <div
-          className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
-            !isYes
-              ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600'
-              : 'border-gray-200 bg-gray-50/50 text-gray-400 opacity-60'
-          }`}
-        >
-          No
-        </div>
+          <option value="">{def.placeholder || 'Select…'}</option>
+          {(def.options || []).map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+        <Database className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
       </div>
     );
   }
-
-  // 7. Long Text
-  if (def.type === 'long_text') {
-    return (
-      <div className={`${boxCls} whitespace-pre-wrap leading-relaxed min-h-[60px]`}>
-        {value ? String(value) : <span className="text-gray-400 italic">None</span>}
-      </div>
-    );
-  }
-
-  // 8. Entity Reference (Person or Person Group)
   if (def.type === 'entity_reference' || def.referenceEntityType) {
     const isPerson = def.referenceEntityType === 'person' || def.name === 'assigned_to' || def.name.toLowerCase().includes('person');
     const isGroup = def.referenceEntityType === 'person_group' || def.name === 'owner_group' || def.name.toLowerCase().includes('group');
 
     if (isPerson) {
-      const pid = String(value || '');
-      const p = persons.find((x) => x.person_id === pid);
       return (
-        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs font-medium text-gray-900 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Users className="h-3.5 w-3.5 text-gray-500" />
-            <span>
-              {p ? (
-                <span>
-                  <strong className="font-semibold text-gray-900">{p.display_name}</strong>{' '}
-                  <span className="font-mono text-gray-400 text-[11px]">({p.person_id})</span>
-                </span>
-              ) : pid ? (
-                <span className="font-mono font-semibold text-gray-900">{pid}</span>
-              ) : (
-                <span className="text-gray-400 italic">Unassigned</span>
-              )}
-            </span>
-          </div>
-          {pid && (
-            <a
-              href={`#/people/${encodeURIComponent(pid)}`}
-              className="text-[11px] font-semibold text-blue-600 hover:underline"
-            >
-              View Person
-            </a>
-          )}
+        <div className="relative w-full">
+          <select
+            id={id}
+            value={value}
+            disabled={readOnly}
+            onChange={(e) => !readOnly && onChange(e.target.value)}
+            className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
+          >
+            <option value="">{def.placeholder || 'Select Person…'}</option>
+            {persons.map((p) => (
+              <option key={p.person_id} value={p.person_id}>
+                {p.display_name} ({p.person_id})
+              </option>
+            ))}
+          </select>
+          <Users className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
         </div>
       );
     }
 
     if (isGroup) {
-      const gname = String(value || '');
-      const g = personGroups.find((x) => x.group_name === gname);
       return (
-        <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-2 text-xs font-medium text-gray-900 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Layers className="h-3.5 w-3.5 text-gray-500" />
-            <span>
-              {g ? (
-                <span>
-                  <strong className="font-mono font-semibold text-gray-900">{g.group_name}</strong>
-                  {g.description ? <span className="text-gray-500"> — {g.description}</span> : ''}
-                </span>
-              ) : gname ? (
-                <span className="font-mono font-semibold text-gray-900">{gname}</span>
-              ) : (
-                <span className="text-gray-400 italic">No Group</span>
-              )}
-            </span>
-          </div>
-          {gname && (
-            <a
-              href={`#/people/groups/${encodeURIComponent(gname)}`}
-              className="text-[11px] font-semibold text-blue-600 hover:underline"
-            >
-              View Group
-            </a>
-          )}
+        <div className="relative w-full">
+          <select
+            id={id}
+            value={value}
+            disabled={readOnly}
+            onChange={(e) => !readOnly && onChange(e.target.value)}
+            className="w-full appearance-none rounded-md border border-gray-300 bg-white pl-8 pr-8 py-2 text-xs text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"
+          >
+            <option value="">{def.placeholder || 'Select Person Group…'}</option>
+            {personGroups.map((g) => (
+              <option key={g.group_name} value={g.group_name}>
+                {g.group_name} {g.description ? `— ${g.description}` : ''}
+              </option>
+            ))}
+          </select>
+          <Layers className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
         </div>
       );
     }
   }
-
-  // 9. Text / Date / Time / Email / Phone / URL / Number
+  const nativeType: Record<string, string> = {
+    number: 'number',
+    email: 'email',
+    phone: 'tel',
+    url: 'url',
+    date: 'date',
+    datetime: 'datetime-local',
+    time: 'time',
+  };
   return (
-    <div className={boxCls}>
-      {value !== undefined && value !== null && String(value).trim() !== '' ? (
-        String(value)
-      ) : (
-        <span className="text-gray-400 italic">Empty</span>
+    <input
+      id={id}
+      type={nativeType[def.type] ?? 'text'}
+      value={value}
+      disabled={readOnly}
+      readOnly={readOnly}
+      onChange={(e) => !readOnly && onChange(e.target.value)}
+      placeholder={def.placeholder || ''}
+      className={cls}
+    />
+  );
+}
+
+/** Toggle one option in a comma-joined multi-select value string. */
+function toggleMulti(current: string, option: string): string {
+  const set = new Set(current ? current.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  if (set.has(option)) set.delete(option);
+  else set.add(option);
+  return [...set].join(',');
+}
+
+/** Parse the JSON-array value of a checklist field into checked task labels. */
+function parseCheckedList(value: string): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map((s) => String(s)).filter(Boolean);
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
+/** Parse the JSON-array value of a file attachment field into AttachedFile items. */
+function parseFileList(value: string): AttachedFile[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((f) => f && typeof f === 'object' && f.name);
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
+function FileInput({
+  def,
+  value,
+  onChange,
+  readOnly = false,
+}: {
+  def: ResolvedField;
+  value: string;
+  onChange: (v: string) => void;
+  readOnly?: boolean;
+}) {
+  const [files, setFiles] = useState<AttachedFile[]>(() => parseFileList(value));
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync internal files state when external value changes
+  useEffect(() => {
+    setFiles(parseFileList(value));
+  }, [value]);
+
+  const maxMb = def.maxFileSizeMb || 10;
+  const maxBytes = maxMb * 1024 * 1024;
+  const allowMultiple = Boolean(def.allowMultiple);
+  const maxFiles = def.maxFiles || 5;
+
+  const commit = (next: AttachedFile[]) => {
+    setFiles(next);
+    onChange(JSON.stringify(next));
+  };
+
+  const processFiles = (fileList: FileList | File[]) => {
+    if (readOnly) return;
+    setError(null);
+    const incoming = Array.from(fileList);
+    if (!incoming.length) return;
+
+    if (!allowMultiple && (incoming.length > 1 || files.length >= 1)) {
+      if (incoming.length > 1) {
+        setError('Only a single file attachment is allowed.');
+        return;
+      }
+    }
+
+    if (allowMultiple && files.length + incoming.length > maxFiles) {
+      setError(`Cannot attach more than ${maxFiles} files in total.`);
+      return;
+    }
+
+    // Validate size
+    for (const f of incoming) {
+      if (f.size > maxBytes) {
+        setError(`File "${f.name}" exceeds maximum allowed size of ${maxMb} MB.`);
+        return;
+      }
+    }
+
+    const readers: Promise<AttachedFile>[] = incoming.map(
+      (f) =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            resolve({
+              name: f.name,
+              size: f.size,
+              type: f.type || 'application/octet-stream',
+              dataUrl: reader.result as string,
+              lastModified: f.lastModified,
+            });
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(f);
+        })
+    );
+
+    Promise.all(readers)
+      .then((newAttachments) => {
+        if (!allowMultiple) {
+          commit(newAttachments.slice(0, 1));
+        } else {
+          commit([...files, ...newAttachments]);
+        }
+      })
+      .catch(() => {
+        setError('Failed to read file content.');
+      });
+  };
+
+  const removeFile = (idx: number) => {
+    if (readOnly) return;
+    commit(files.filter((_, i) => i !== idx));
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(e.dataTransfer.files);
+    }
+  };
+
+  if (readOnly && files.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50/60 p-2 text-xs italic text-gray-400">
+        No file attached
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        multiple={allowMultiple}
+        accept={def.accept || undefined}
+        onChange={(e) => {
+          if (e.target.files) {
+            processFiles(e.target.files);
+            e.target.value = '';
+          }
+        }}
+        className="hidden"
+      />
+
+      {/* Dropzone area */}
+      {!readOnly && (!files.length || (allowMultiple && files.length < maxFiles)) && (
+        <div
+          onDragEnter={handleDrag}
+          onDragOver={handleDrag}
+          onDragLeave={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center transition-colors ${
+            dragActive
+              ? 'border-blue-500 bg-blue-50/80'
+              : 'border-gray-300 bg-gray-50/70 hover:border-blue-400 hover:bg-gray-100/70'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+            <Paperclip className="h-4 w-4 shrink-0 text-blue-600" />
+            <span>{def.placeholder || 'Click or drag files to attach'}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-gray-400">
+            {def.accept ? (
+              <span className="rounded bg-gray-200/70 px-1 font-mono text-gray-600">{def.accept}</span>
+            ) : (
+              <span>Any file type</span>
+            )}
+            <span>·</span>
+            <span>Max {maxMb} MB</span>
+            {allowMultiple && (
+              <>
+                <span>·</span>
+                <span>Max {maxFiles} files</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p className="flex items-center gap-1 text-[11px] font-medium text-red-600">
+          <X className="h-3 w-3" /> {error}
+        </p>
+      )}
+
+      {/* Attached file list */}
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {files.map((f, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 shadow-xs"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                <span className="truncate text-xs font-medium text-gray-800" title={f.name}>
+                  {f.name}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-gray-400">
+                  {formatFileSize(f.size)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {f.dataUrl && (
+                  <a
+                    href={f.dataUrl}
+                    download={f.name}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50"
+                  >
+                    Download
+                  </a>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(idx);
+                    }}
+                    className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                    title="Remove file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
+}
+
+/**
+ * Dynamic-row table. Columns come from the form-builder definition (added at
+ * build time); rows are added/removed by the user while filling the form.
+ * The value binding is a JSON string of row objects keyed by column name.
+ */
+function parseTableRows(value: string): Record<string, string>[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => (row && typeof row === 'object' ? Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String((v ?? '') as unknown)])) : {}))
+      .filter((row) => Object.keys(row).length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function DynamicTable({
+  def,
+  value,
+  onChange,
+  readOnly = false,
+}: {
+  def: ResolvedField;
+  value: string;
+  onChange: (v: string) => void;
+  readOnly?: boolean;
+}) {
+  const cols = def.options && def.options.length > 0 ? def.options : [''];
+  const [rows, setRows] = useState<Record<string, string>[]>(() => parseTableRows(value));
+
+  // Sync internal rows state when external value changes
+  useEffect(() => {
+    setRows(parseTableRows(value));
+  }, [value]);
+
+  const commit = (next: Record<string, string>[]) => {
+    if (readOnly) return;
+    setRows(next);
+    onChange(JSON.stringify(next.filter((r) => Object.values(r).some((v) => v.trim() !== ''))));
+  };
+
+  const addRow = () => {
+    if (readOnly) return;
+    const empty = Object.fromEntries(cols.map((c) => [c, ''])) as Record<string, string>;
+    commit([...rows, empty]);
+  };
+
+  const removeRow = (idx: number) => {
+    if (readOnly) return;
+    commit(rows.filter((_, i) => i !== idx));
+  };
+
+  const setCell = (rowIdx: number, col: string, cellValue: string) => {
+    if (readOnly) return;
+    const next = rows.map((r, i) => (i === rowIdx ? { ...r, [col]: cellValue } : r));
+    commit(next);
+  };
+
+  return (
+    <div className="w-full overflow-hidden rounded-md border border-gray-300">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-gray-50 text-left text-gray-500">
+              {cols.map((c) => (
+                <th key={c} className="border-b border-gray-200 px-2 py-1.5 font-medium">
+                  {c}
+                </th>
+              ))}
+              {!readOnly && <th className="w-8 border-b border-gray-200" />}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={cols.length + (readOnly ? 0 : 1)} className="px-2 py-2 text-center text-[11px] text-gray-400">
+                  {readOnly ? 'No table rows entered.' : 'No rows yet — click “Add row”.'}
+                </td>
+              </tr>
+            )}
+            {rows.map((row, ri) => (
+              <tr key={ri} className="border-b border-gray-100 last:border-b-0">
+                {cols.map((c) => (
+                  <td key={c} className="border-r border-gray-100 px-1 py-1 last:border-r-0">
+                    <input
+                      value={row[c] ?? ''}
+                      disabled={readOnly}
+                      readOnly={readOnly}
+                      onChange={(e) => !readOnly && setCell(ri, c, e.target.value)}
+                      className={`w-full rounded border px-1.5 py-1 text-xs ${
+                        readOnly
+                          ? 'border-transparent bg-gray-50 text-gray-600'
+                          : 'border-transparent text-gray-800 focus:border-blue-400 focus:outline-none'
+                      }`}
+                    />
+                  </td>
+                ))}
+                {!readOnly && (
+                  <td className="px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => removeRow(ri)}
+                      title="Remove row"
+                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!readOnly && (
+        <div className="border-t border-gray-200 bg-gray-50/60 px-2 py-1.5">
+          <button
+            type="button"
+            onClick={addRow}
+            className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1 text-xs font-medium text-gray-500 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            <Plus className="h-3 w-3" /> Add row
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const def of defs) {
+    const rawVal = values[def.key] ?? values[def.name];
+    if (rawVal === undefined || rawVal === null) continue;
+    const trimmed = String(rawVal).trim();
+    if (trimmed === '') continue;
+    const name = def.name || def.key;
+    if (def.type === 'number') {
+      const n = Number(trimmed);
+      out[name] = Number.isNaN(n) ? trimmed : n;
+    } else if (def.type === 'boolean') {
+      out[name] = trimmed === 'yes';
+    } else if (def.type === 'checkbox_group') {
+      out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (def.type === 'table') {
+      out[name] = parseTableRows(trimmed);
+    } else if (def.type === 'checklist') {
+      out[name] = parseCheckedList(trimmed);
+    } else if (def.type === 'file') {
+      out[name] = parseFileList(trimmed);
+    } else {
+      out[name] = trimmed;
+    }
+  }
+  return out;
 }
 
 // ---- Event Log Row ------------------------------------------------------------------

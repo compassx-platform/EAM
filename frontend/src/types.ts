@@ -176,6 +176,11 @@ export interface WorkflowImportResult {
 
 export type ConditionAtom =
   | {
+      type: 'workflow_status';
+      operator?: string;
+      value?: unknown;
+    }
+  | {
       type: 'attribute';
       field: string;
       operator: string;
@@ -400,12 +405,22 @@ export interface VisibilityCondition {
   value?: string;
 }
 
+export interface FormTab {
+  id: string;
+  label: string;
+  condition_id?: string | null;
+  visibility_condition?: VisibilityCondition | null;
+  is_default?: boolean;
+}
+
 export interface EntityFormItem {
   i: string;
   x: number;
   y: number;
   w: number;
   h: number;
+  tabId?: string | null;
+  tab_id?: string | null;
   isHeader?: boolean;
   is_header?: boolean;
   isGroup?: boolean;
@@ -463,6 +478,7 @@ export interface FormVersion {
   cols: number;
   row_height: number;
   layout: EntityFormItem[];
+  tabs?: FormTab[];
   created_by?: string | null;
   created_at?: string | null;
 }
@@ -473,6 +489,7 @@ export interface EntityForm {
   version_label?: string;
   layout: EntityFormItem[];
   sections: string[];
+  tabs?: FormTab[];
   cols: number;
   row_height: number;
   updated_at?: string | null;

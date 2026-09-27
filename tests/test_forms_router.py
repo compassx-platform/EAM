@@ -437,4 +437,138 @@ def test_form_versioning_and_no_change_save(test_db):
     res3 = save(test_db, "permit", layout_mod)
     v_count3 = test_db.query(FormVersion).filter(FormVersion.entity_type == "permit").count()
     assert v_count3 == v_count2 + 1
+
+
+def test_master_form_tabs_and_tab_filtering(test_db):
+    from backend.routers.forms import FormTab, EntityFormRequest, FormItem
+    from backend.models.forms import FormVersion
+
+    tabs = [
+        FormTab(id="general", label="General Details", is_default=True),
+        FormTab(id="sop_docs", label="SOP & Documents", condition_id="cond_sop"),
+        FormTab(id="hazards", label="Hazards & Safety"),
+    ]
+    layout = [
+        {
+            "i": "field:f1",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "title",
+            "fieldType": "text",
+            "required": True,
+            "label": "Permit Title",
+            "tab_id": "general",
+        },
+        {
+            "i": "field:f2",
+            "x": 0, "y": 0, "w": 12, "h": 2,
+            "fieldName": "sop_file",
+            "fieldType": "file",
+            "required": False,
+            "label": "SOP Document",
+            "tab_id": "sop_docs",
+        },
+    ]
+    _register(test_db, "permit", layout)
+
+    res = create_or_update_form(
+        EntityFormRequest(
+            entity_type="permit",
+            layout=[FormItem(**it) for it in layout],
+            tabs=tabs,
+        ),
+        test_db,
+    )
+
+    assert "tabs" in res
+    assert res["tabs"] is not None
+    assert len(res["tabs"]) == 3
+    assert res["tabs"][0]["id"] == "general"
+    assert res["tabs"][1]["id"] == "sop_docs"
+    assert res["tabs"][1]["condition_id"] == "cond_sop"
+
+    # Get form
+    fetched = get_form("permit", test_db)
+    assert len(fetched["tabs"]) == 3
+    assert fetched["tabs"][1]["label"] == "SOP & Documents"
+    assert fetched["layout"][0]["tab_id"] == "general"
+    assert fetched["layout"][1]["tab_id"] == "sop_docs"
+
+    # Verify FormVersion recorded tabs
+    latest_ver = (
+        test_db.query(FormVersion)
+        .filter(FormVersion.entity_type == "permit")
+        .order_by(FormVersion.version_number.desc())
+        .first()
+    )
+    assert latest_ver is not None
+    assert latest_ver.tabs is not None
+    assert len(latest_ver.tabs) == 3
+
+
+def test_form_tabs_with_conditional_actions(test_db):
+    """Test saving tabs and items with editable and readonly visibility conditions."""
+    tabs = [
+        {"id": "general", "label": "General", "is_default": True},
+        {
+            "id": "sop_docs",
+            "label": "SOP Upload",
+            "visibility_condition": {
+                "action": "editable",
+                "condition_id": "is_sop_stage",
+            },
+        },
+        {
+            "id": "audit_tab",
+            "label": "Audit Review",
+            "visibility_condition": {
+                "action": "readonly",
+                "condition_id": "is_closed_stage",
+            },
+        },
+    ]
+    layout = [
+        {
+            "i": "field:f1",
+            "x": 0, "y": 0, "w": 6, "h": 1,
+            "fieldName": "permit_title",
+            "fieldType": "text",
+            "required": True,
+            "label": "Permit Title",
+            "tab_id": "general",
+        },
+        {
+            "i": "field:f2",
+            "x": 0, "y": 0, "w": 12, "h": 2,
+            "fieldName": "sop_attachment",
+            "fieldType": "file",
+            "required": False,
+            "label": "SOP Attachment",
+            "tab_id": "sop_docs",
+            "visibility_condition": {
+                "action": "editable",
+                "condition_id": "is_sop_stage",
+            },
+        },
+    ]
+    _register(test_db, "permit", layout)
+
+    res = create_or_update_form(
+        EntityFormRequest(
+            entity_type="permit",
+            layout=[FormItem(**it) for it in layout],
+            tabs=tabs,
+        ),
+        test_db,
+    )
+
+    assert "tabs" in res
+    assert res["tabs"][1]["visibility_condition"]["action"] == "editable"
+    assert res["tabs"][1]["visibility_condition"]["condition_id"] == "is_sop_stage"
+    assert res["tabs"][2]["visibility_condition"]["action"] == "readonly"
+
+    fetched = get_form("permit", test_db)
+    assert fetched["tabs"][1]["visibility_condition"]["action"] == "editable"
+    assert fetched["layout"][1]["visibility_condition"]["action"] == "editable"
+
+
 

@@ -1,5 +1,6 @@
 import type {
   EntityFormItem,
+  FormTab,
   VisibilityCondition,
   ConditionRule,
   ConditionAction,
@@ -19,15 +20,30 @@ import type {
 export const WORKFLOW_STATUS_FIELD = '_workflow_status';
 
 /**
- * Merges the entity's current workflow stage into condition values so that
- * rules referencing the `_workflow_status` pseudo-field can be evaluated.
+ * Merges the entity's current workflow stage and status into condition values so that
+ * rules referencing the `_workflow_status` pseudo-field, `workflow_stage`, or `status` can be evaluated.
  */
 export function withWorkflowStatus(
   values: Record<string, unknown> = {},
-  status?: string | null
+  status?: string | null,
+  stage?: string | null
 ): Record<string, unknown> {
-  if (!status) return values;
-  return { ...values, [WORKFLOW_STATUS_FIELD]: status };
+  const effectiveStage = stage || status;
+  if (!effectiveStage && !status) return values;
+  const result: Record<string, unknown> = { ...values };
+  if (effectiveStage) {
+    result[WORKFLOW_STATUS_FIELD] = effectiveStage;
+    result['_workflow_stage'] = effectiveStage;
+    result['workflow_stage'] = effectiveStage;
+    result['stage'] = effectiveStage;
+  }
+  if (status) {
+    result['status'] = status;
+    if (!result[WORKFLOW_STATUS_FIELD]) {
+      result[WORKFLOW_STATUS_FIELD] = status;
+    }
+  }
+  return result;
 }
 
 /**
@@ -225,6 +241,42 @@ export function evaluateConditionAtom(
       const rawVal = getFieldValue(values, atom.relationship_field);
       if (!rawVal) return false;
       return true;
+    }
+
+    case 'workflow_status': {
+      const currentStatus = String(getFieldValue(values, '_workflow_status') ?? getFieldValue(values, '_workflow_stage') ?? getFieldValue(values, 'workflow_stage') ?? getFieldValue(values, 'stage') ?? getFieldValue(values, 'status') ?? '').trim().toLowerCase();
+      const rawStatus = String(getFieldValue(values, 'status') ?? '').trim().toLowerCase();
+      const rawStage = String(getFieldValue(values, '_workflow_stage') ?? getFieldValue(values, 'workflow_stage') ?? getFieldValue(values, 'stage') ?? '').trim().toLowerCase();
+      const targetVal = String(atom.value ?? '').trim().toLowerCase();
+      const op = atom.operator || 'eq';
+      if (op === 'ne' || op === 'not_equal') {
+        return currentStatus !== targetVal && rawStatus !== targetVal && rawStage !== targetVal;
+      }
+      if (op === 'in' || op === 'is_one_of') {
+        const allowed = Array.isArray(atom.value)
+          ? atom.value.map((v) => String(v).trim().toLowerCase())
+          : targetVal.split(',').map((s) => s.trim().toLowerCase());
+        return (
+          allowed.includes(currentStatus) ||
+          allowed.includes(rawStatus) ||
+          allowed.includes(rawStage)
+        );
+      }
+      if (op === 'not_in' || op === 'is_none_of') {
+        const notAllowed = Array.isArray(atom.value)
+          ? atom.value.map((v) => String(v).trim().toLowerCase())
+          : targetVal.split(',').map((s) => s.trim().toLowerCase());
+        return (
+          !notAllowed.includes(currentStatus) &&
+          !notAllowed.includes(rawStatus) &&
+          !notAllowed.includes(rawStage)
+        );
+      }
+      return (
+        currentStatus === targetVal ||
+        rawStatus === targetVal ||
+        rawStage === targetVal
+      );
     }
 
     case 'expression': {
@@ -490,14 +542,17 @@ export function isItemVisible(
 }
 
 /**
- * Checks whether an EntityFormItem is currently read-only, checking both its parent
- * group's condition (if grouped) and the item's own condition.
+ * Checks whether an EntityFormItem is currently read-only, checking:
+ * 1. Parent group's condition (if grouped)
+ * 2. Parent tab's condition (if tabs provided)
+ * 3. Item's own condition
  */
 export function isItemReadOnly(
   item: EntityFormItem,
   allItems: EntityFormItem[],
   values: Record<string, unknown> = {},
-  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null,
+  tabs?: FormTab[]
 ): boolean {
   // 1. Check parent group read-only condition
   const groupId = item.groupId ?? item.group_id;
@@ -513,7 +568,21 @@ export function isItemReadOnly(
     }
   }
 
-  // 2. Check item's own read-only condition
+  // 2. Check parent tab read-only condition
+  if (tabs && tabs.length > 0) {
+    const tabId = item.tabId ?? (item as any).tab_id ?? tabs[0]?.id;
+    const parentTab = tabs.find((t) => t.id === tabId);
+    if (parentTab?.visibility_condition) {
+      const tabCond = parentTab.visibility_condition;
+      if (tabCond.action === 'readonly' || tabCond.action === 'editable') {
+        if (evaluateReadOnly(tabCond, values, conditionDefs)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 3. Check item's own read-only condition
   const itemCond = item.visibilityCondition ?? item.visibility_condition;
   return evaluateReadOnly(itemCond, values, conditionDefs);
 }
@@ -563,10 +632,10 @@ export function formatConditionSummary(
     action === 'hide'
       ? 'Hide when'
       : action === 'show'
-      ? 'Show only when'
+      ? 'Show when'
       : action === 'readonly'
-      ? 'Read-only when'
-      : 'Editable only when';
+      ? 'Disable / Read-Only when'
+      : 'Enable / Editable when';
 
   // 1. Central condition reference
   if (condition.condition_id) {
@@ -586,4 +655,56 @@ export function formatConditionSummary(
   const rulesText = rules.map(formatRuleSummary).join(joiner);
   return `${actionLabel} ${rulesText}`;
 }
+
+/**
+ * Evaluates whether a FormTab should be displayed based on entity values,
+ * workflow status, and centralized conditions.
+ */
+export function isTabVisible(
+  tab: FormTab,
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null,
+  userContext?: { role?: string; roles?: string[] }
+): boolean {
+  if (!tab) return true;
+  if (!tab.condition_id && !tab.visibility_condition) return true;
+
+  if (tab.visibility_condition) {
+    const action = tab.visibility_condition.action || 'show';
+    // Read-only / Editable action tabs are always visible in the tab bar
+    if (action === 'readonly' || action === 'editable') {
+      return true;
+    }
+    return evaluateVisibility(tab.visibility_condition, values, conditionDefs);
+  }
+
+  if (tab.condition_id) {
+    const map = toConditionMap(conditionDefs);
+    const def = map[tab.condition_id];
+    if (def) {
+      return evaluateConditionDefinition(def, values, userContext);
+    }
+    return true;
+  }
+
+  return true;
+}
+
+/**
+ * Evaluates whether a FormTab is marked read-only based on condition rules.
+ * Returns true if the tab and its fields should be read-only/disabled.
+ */
+export function isTabReadOnly(
+  tab: FormTab,
+  values: Record<string, unknown> = {},
+  conditionDefs?: ConditionDefinition[] | Record<string, ConditionDefinition> | null,
+  userContext?: { role?: string; roles?: string[] }
+): boolean {
+  if (!tab || !tab.visibility_condition) return false;
+  const action = tab.visibility_condition.action;
+  if (action !== 'readonly' && action !== 'editable') return false;
+  return evaluateReadOnly(tab.visibility_condition, values, conditionDefs);
+}
+
+
 

@@ -13,6 +13,7 @@ import type {
   ValidTransition,
   EntityForm,
   EntityFormItem,
+  FormTab,
   FormVersion,
   OptionListSummary,
   ListDefinition,
@@ -247,6 +248,7 @@ export const api = {
   saveForm(input: {
     entity_type: string;
     layout: EntityFormItem[];
+    tabs?: FormTab[];
     cols?: number;
     row_height?: number;
   }): Promise<EntityForm & { fields?: EntityField[] }> {
@@ -254,13 +256,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({
         entity_type: input.entity_type,
+        tabs: input.tabs,
         cols: input.cols,
         row_height: input.row_height,
         layout: input.layout.map((it) => {
           const isGroup = Boolean(it.isGroup ?? (it as any).is_group ?? it.i?.startsWith('group:'));
           const isHeader = Boolean(it.isHeader ?? (it as any).is_header ?? it.i?.startsWith('header:'));
+          const tabId = it.tabId ?? (it as any).tab_id ?? (input.tabs?.[0]?.id || 'general');
           return {
             ...it,
+            tabId,
+            tab_id: tabId,
             isGroup,
             is_group: isGroup,
             isHeader,
@@ -363,6 +369,17 @@ export const api = {
 
   getEntity(entityType: string, id: string): Promise<{ entity: EntityRecord; events: EntityEvent[] }> {
     return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}`);
+  },
+
+  updateEntityFields(
+    entityType: string,
+    id: string,
+    customFields: Record<string, unknown>
+  ): Promise<{ accepted: boolean; entity: EntityRecord }> {
+    return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ custom_fields: customFields }),
+    });
   },
 
   listValidTransitions(entityType: string, id: string): Promise<{

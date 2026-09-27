@@ -14,6 +14,11 @@ router = APIRouter(prefix="/conditions", tags=["Conditions"])
 # Atom-type catalog (metadata-driven rule builder) — superset of the old gate types.
 ATOM_TYPES_CATALOG = [
     {
+        "type": "workflow_status",
+        "name": "Workflow Stage / Status",
+        "description": "Checks the current workflow state of the record (e.g. upload_sop, draft, approved, active).",
+    },
+    {
         "type": "attribute",
         "name": "Field comparison",
         "description": "Compare an entity field against a value (equality, ordering, membership, substring, emptiness).",

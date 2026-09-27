@@ -20,15 +20,18 @@ import {
 } from 'lucide-react';
 import type {
   EntityFormItem,
+  FormTab,
   OptionListSummary,
   ResolvedList,
   ChecklistItem,
   ConditionDefinition,
 } from '../../types';
+import { FormConditionSelector } from './FormConditionSelector';
 
 interface FormInspectorProps {
   selectedItem: EntityFormItem | null;
   allItems: EntityFormItem[];
+  tabs?: FormTab[];
   cols: number;
   publishedLists: OptionListSummary[];
   resolvedLists: Record<string, ResolvedList>;
@@ -1036,10 +1039,12 @@ function GeneralSettingsModal({
 export function FormInspector({
   selectedItem,
   allItems,
+  tabs = [],
   cols,
   publishedLists,
   resolvedLists,
   conditions,
+  entityType,
   onPatchItem,
   onRemoveItem,
   onEnsureResolved,
@@ -1052,17 +1057,12 @@ export function FormInspector({
   >(null);
   const [modalAnchorY, setModalAnchorY] = useState<number | null>(null);
   const [optionsPickerOpen, setOptionsPickerOpen] = useState(false);
-  const [conditionPickerOpen, setConditionPickerOpen] = useState(false);
   const optionsPickerRef = useRef<HTMLDivElement>(null);
-  const conditionPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       if (optionsPickerRef.current && !optionsPickerRef.current.contains(e.target as Node)) {
         setOptionsPickerOpen(false);
-      }
-      if (conditionPickerRef.current && !conditionPickerRef.current.contains(e.target as Node)) {
-        setConditionPickerOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutside);
@@ -1145,98 +1145,19 @@ export function FormInspector({
           </div>
 
           {/* Conditional Logic Section */}
-          <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3.5 w-3.5 text-blue-700" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
-                  Conditional Logic
-                </span>
-                <InfoTooltip text="Group-level condition cascades to all assigned member fields." />
-              </div>
-
-              {!hasCondition && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    if (conditions.length > 0) {
-                      onPatchItem(selectedItem.i, {
-                        visibilityCondition: { action: 'show', condition_id: conditions[0].id },
-                        visibility_condition: { action: 'show', condition_id: conditions[0].id },
-                      });
-                    } else {
-                      const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                      onOpenConditionModal(null, anchor);
-                    }
-                  }}
-                  title="Add condition"
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {hasCondition && (
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={selectedItem.visibilityCondition?.condition_id ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__new__') {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      onOpenConditionModal(null, rect.top + rect.height / 2);
-                    } else {
-                      const patch = {
-                        action: selectedItem.visibilityCondition?.action || 'show',
-                        condition_id: val || null,
-                      };
-                      onPatchItem(selectedItem.i, {
-                        visibilityCondition: patch,
-                        visibility_condition: patch,
-                      });
-                    }
-                  }}
-                  className={`${INPUT_CLS} flex-1 text-xs`}
-                >
-                  {conditions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label || c.id}
-                    </option>
-                  ))}
-                  <option value="__new__">+ Create new condition…</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    const selectedDef = conditions.find(
-                      (c) => c.id === selectedItem.visibilityCondition?.condition_id
-                    );
-                    const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                    onOpenConditionModal(selectedDef || null, anchor);
-                  }}
-                  title="Edit in Condition Builder"
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                >
-                  <MoreVertical className="h-3.5 w-3.5" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    onPatchItem(selectedItem.i, {
-                      visibilityCondition: null,
-                      visibility_condition: null,
-                    })
-                  }
-                  title="Remove Condition"
-                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+          <div className="border-t border-gray-100 pt-3">
+            <FormConditionSelector
+              condition={selectedItem.visibilityCondition ?? selectedItem.visibility_condition}
+              conditions={conditions}
+              entityType={entityType}
+              onChange={(cond) =>
+                onPatchItem(selectedItem.i, {
+                  visibilityCondition: cond,
+                  visibility_condition: cond,
+                })
+              }
+              onOpenConditionModal={onOpenConditionModal}
+            />
           </div>
 
           {/* General Settings (Grid Sizing) Section */}
@@ -1327,98 +1248,19 @@ export function FormInspector({
 
         <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4">
           {/* Conditional Logic Section */}
-          <div className="flex flex-col gap-2 pt-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="h-3.5 w-3.5 text-blue-700" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
-                  Conditional Logic
-                </span>
-                <InfoTooltip text="Hide or show this entire section heading dynamically." />
-              </div>
-
-              {!hasCondition && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    if (conditions.length > 0) {
-                      onPatchItem(selectedItem.i, {
-                        visibilityCondition: { action: 'show', condition_id: conditions[0].id },
-                        visibility_condition: { action: 'show', condition_id: conditions[0].id },
-                      });
-                    } else {
-                      const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                      onOpenConditionModal(null, anchor);
-                    }
-                  }}
-                  title="Add condition"
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {hasCondition && (
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={selectedItem.visibilityCondition?.condition_id ?? ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__new__') {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      onOpenConditionModal(null, rect.top + rect.height / 2);
-                    } else {
-                      const patch = {
-                        action: selectedItem.visibilityCondition?.action || 'show',
-                        condition_id: val || null,
-                      };
-                      onPatchItem(selectedItem.i, {
-                        visibilityCondition: patch,
-                        visibility_condition: patch,
-                      });
-                    }
-                  }}
-                  className={`${INPUT_CLS} flex-1 text-xs`}
-                >
-                  {conditions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label || c.id}
-                    </option>
-                  ))}
-                  <option value="__new__">+ Create new condition…</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    const selectedDef = conditions.find(
-                      (c) => c.id === selectedItem.visibilityCondition?.condition_id
-                    );
-                    const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                    onOpenConditionModal(selectedDef || null, anchor);
-                  }}
-                  title="Edit in Condition Builder"
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                >
-                  <MoreVertical className="h-3.5 w-3.5" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    onPatchItem(selectedItem.i, {
-                      visibilityCondition: null,
-                      visibility_condition: null,
-                    })
-                  }
-                  title="Remove Condition"
-                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                  <Minus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+          <div className="border-t border-gray-100 pt-3">
+            <FormConditionSelector
+              condition={selectedItem.visibilityCondition ?? selectedItem.visibility_condition}
+              conditions={conditions}
+              entityType={entityType}
+              onChange={(cond) =>
+                onPatchItem(selectedItem.i, {
+                  visibilityCondition: cond,
+                  visibility_condition: cond,
+                })
+              }
+              onOpenConditionModal={onOpenConditionModal}
+            />
           </div>
 
           {/* General Settings (Grid Sizing) Section */}
@@ -1818,143 +1660,25 @@ export function FormInspector({
         {/* -------------------------------------------------------------------
             High-Level Section 2: Conditional Logic (Progressive 1-Level)
         ------------------------------------------------------------------- */}
-        <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5 text-blue-700" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
-                Conditional Logic
-              </span>
-              <InfoTooltip text="Link condition definitions from the Central Conditions module." />
-            </div>
-
-            {!hasCondition && (
-              <div ref={conditionPickerRef} className="relative">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    if (conditions.length > 0) {
-                      setConditionPickerOpen((v) => !v);
-                    } else {
-                      const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                      onOpenConditionModal(null, anchor);
-                    }
-                  }}
-                  title="Add condition"
-                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-
-                {conditionPickerOpen && (
-                  <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl text-xs">
-                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                      Link Condition
-                    </div>
-                    {conditions.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => {
-                          setConditionPickerOpen(false);
-                          onPatchItem(selectedItem.i, {
-                            visibilityCondition: { action: 'show', condition_id: c.id },
-                            visibility_condition: { action: 'show', condition_id: c.id },
-                          });
-                        }}
-                        className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-gray-700 hover:bg-gray-50 hover:text-blue-600"
-                      >
-                        <span className="truncate">{c.label || c.id}</span>
-                      </button>
-                    ))}
-                    <div className="my-1 border-t border-gray-100" />
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        setConditionPickerOpen(false);
-                        const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                        onOpenConditionModal(null, anchor);
-                      }}
-                      className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left font-medium text-blue-600 hover:bg-blue-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      <span>Create New Condition…</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {hasCondition && (
-            <div className="flex items-center gap-1.5">
-              <select
-                value={selectedItem.visibilityCondition?.condition_id ?? ''}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === '__new__') {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    onOpenConditionModal(null, rect.top + rect.height / 2);
-                  } else {
-                    const patch = {
-                      action: selectedItem.visibilityCondition?.action || 'show',
-                      condition_id: val || null,
-                    };
-                    onPatchItem(selectedItem.i, {
-                      visibilityCondition: patch,
-                      visibility_condition: patch,
-                    });
-                  }
-                }}
-                className={`${INPUT_CLS} flex-1 text-xs`}
-              >
-                {conditions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label || c.id}
-                  </option>
-                ))}
-                <option value="__new__">+ Create new condition…</option>
-              </select>
-
-              {/* ⋯ Open in full Condition Builder Modal */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  const selectedDef = conditions.find(
-                    (c) => c.id === selectedItem.visibilityCondition?.condition_id
-                  );
-                  const anchor = e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2;
-                  onOpenConditionModal(selectedDef || null, anchor);
-                }}
-                title="Edit in Condition Builder Modal"
-                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-              >
-                <MoreVertical className="h-3.5 w-3.5" />
-              </button>
-
-              {/* Clear Condition */}
-              <button
-                type="button"
-                onClick={() =>
-                  onPatchItem(selectedItem.i, {
-                    visibilityCondition: null,
-                    visibility_condition: null,
-                  })
-                }
-                title="Remove Condition"
-                className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Group Inheritance Note */}
-          {parentGroup && (parentGroup.item.visibilityCondition || parentGroup.item.visibility_condition) && (
-            <div className="rounded border border-purple-200 bg-purple-50/50 px-2.5 py-1.5 text-[11px] text-purple-900">
-              <span className="font-semibold">Inherited from {parentGroup.title}:</span> Group condition rules also apply.
-            </div>
-          )}
+        <div className="border-t border-gray-100 pt-3">
+          <FormConditionSelector
+            condition={selectedItem.visibilityCondition ?? selectedItem.visibility_condition}
+            conditions={conditions}
+            entityType={entityType}
+            onChange={(cond) =>
+              onPatchItem(selectedItem.i, {
+                visibilityCondition: cond,
+                visibility_condition: cond,
+              })
+            }
+            onOpenConditionModal={onOpenConditionModal}
+            inheritedGroupCondition={
+              parentGroup
+                ? parentGroup.item.visibilityCondition ?? parentGroup.item.visibility_condition
+                : null
+            }
+            groupTitle={parentGroup?.title}
+          />
         </div>
 
         {/* -------------------------------------------------------------------
@@ -2030,6 +1754,34 @@ export function FormInspector({
             </div>
           )}
         </div>
+
+        {/* -------------------------------------------------------------------
+            High-Level Section: Assigned Tab (Multi-Tab Master Form)
+        ------------------------------------------------------------------- */}
+        {tabs && tabs.length > 1 && (
+          <div className="flex flex-col gap-2 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5 text-blue-600" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                  Assigned Tab
+                </span>
+                <InfoTooltip text="Assign this field or section to a specific tab on the master form." />
+              </div>
+            </div>
+            <select
+              value={selectedItem.tabId ?? selectedItem.tab_id ?? tabs[0]?.id ?? 'general'}
+              onChange={(e) => onPatchItem(selectedItem.i, { tabId: e.target.value, tab_id: e.target.value })}
+              className={INPUT_CLS}
+            >
+              {tabs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label} ({t.id})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* -------------------------------------------------------------------
             High-Level Section 4: File Upload Rules (if File Type)

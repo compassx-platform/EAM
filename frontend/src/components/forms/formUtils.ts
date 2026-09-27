@@ -112,6 +112,8 @@ export function normalizeFormLayout(rawItems: any[], cols: number = 12): EntityF
       isGroup,
       is_header: undefined,
       is_group: undefined,
+      tabId: it.tabId ?? it.tab_id ?? null,
+      tab_id: it.tabId ?? it.tab_id ?? null,
       label: it.label ?? (isHeader ? 'Section Header' : isGroup ? 'Form Group' : 'Field'),
       fieldName: it.fieldName ?? it.field_name ?? (isHeader || isGroup ? null : it.i),
       field_name: undefined,

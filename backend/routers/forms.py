@@ -66,6 +66,14 @@ def _published_workflow_states(db: Session, entity_type: str):
                 break
     return states, initial_state
 
+class FormTab(BaseModel):
+    id: str
+    label: str
+    condition_id: Optional[str] = None
+    visibility_condition: Optional[Dict[str, Any]] = None
+    is_default: Optional[bool] = False
+    model_config = ConfigDict(extra="allow")
+
 class FormItem(BaseModel):
     i: str
     x: int = 0
@@ -77,6 +85,8 @@ class FormItem(BaseModel):
     isGroup: Optional[bool] = False
     is_group: Optional[bool] = False
     label: Optional[str] = None
+    tab_id: Optional[str] = None
+    tabId: Optional[str] = None
     fieldName: Optional[str] = None
     field_name: Optional[str] = None
     fieldType: Optional[str] = None
@@ -106,6 +116,8 @@ class FormItem(BaseModel):
 class EntityFormRequest(BaseModel):
     entity_type: str
     layout: List[FormItem] = []
+    tabs: Optional[List[FormTab]] = []
+    sections: Optional[List[Dict[str, Any]]] = []
     cols: int = 12
     row_height: int = 40
 
@@ -140,6 +152,7 @@ def get_form(entity_type: str, db: Session = Depends(get_db)):
             "entity_type": et,
             "layout": [],
             "sections": [],
+            "tabs": [],
             "cols": 12,
             "row_height": 40,
             "updated_at": None,
@@ -149,6 +162,7 @@ def get_form(entity_type: str, db: Session = Depends(get_db)):
         }
 
     result = form.to_dict()
+    result["tabs"] = form.tabs or []
     result["fields"] = with_fields
     result["workflow_states"] = workflow_states
     result["initial_state"] = initial_state
@@ -165,6 +179,21 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
     }
     used = set()
 
+    cleaned_tabs = []
+    seen_tab_ids = set()
+    for t in (req.tabs or []):
+        t_id = (t.id or "").strip()
+        if not t_id or t_id in seen_tab_ids:
+            continue
+        seen_tab_ids.add(t_id)
+        cleaned_tabs.append({
+            "id": t_id,
+            "label": (t.label or t_id.replace("_", " ").title()).strip(),
+            "condition_id": t.condition_id or None,
+            "visibility_condition": t.visibility_condition or None,
+            "is_default": bool(t.is_default),
+        })
+
     seen: Dict[str, Any] = {}
     cleaned = []
     for item in req.layout:
@@ -175,6 +204,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
 
         w = max(1, min(item.w, req.cols))
         h = max(1, item.h)
+        tab_id = (item.tab_id or item.tabId or "").strip() or None
 
         is_grp = bool(item.isGroup or item.is_group or i.startswith("group:"))
         is_hdr = bool(item.isHeader or item.is_header or i.startswith("header:"))
@@ -189,6 +219,8 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 "y": max(0, item.y),
                 "w": w,
                 "h": h,
+                "tab_id": tab_id,
+                "tabId": tab_id,
                 "isHeader": is_hdr,
                 "isGroup": is_grp,
                 "label": (item.label or i.replace("header:", "").replace("group:", "").replace("_", " ")).strip() or ("Section" if is_hdr else "Group"),
@@ -288,6 +320,8 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 "y": max(0, item.y),
                 "w": w,
                 "h": h,
+                "tab_id": tab_id,
+                "tabId": tab_id,
                 "isHeader": False,
                 "isGroup": False,
                 "label": (item.label or name).strip(),
@@ -328,6 +362,8 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             "y": max(0, item.y),
             "w": w,
             "h": h,
+            "tab_id": tab_id,
+            "tabId": tab_id,
             "isHeader": False,
             "isGroup": False,
             "label": item.label,
@@ -343,6 +379,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
     if form:
         has_changed = (
             form.layout != cleaned
+            or (form.tabs or []) != cleaned_tabs
             or form.cols != req.cols
             or form.row_height != req.row_height
         )
@@ -351,6 +388,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             form.version_number = new_version
             form.version_label = f"v{new_version}"
             form.layout = cleaned
+            form.tabs = cleaned_tabs
             form.cols = req.cols
             form.row_height = req.row_height
             form.updated_at = utc_now()
@@ -362,6 +400,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 version_label=form.version_label,
                 layout=cleaned,
                 sections=[],
+                tabs=cleaned_tabs,
                 cols=req.cols,
                 row_height=req.row_height,
                 created_at=utc_now(),
@@ -375,8 +414,11 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             version_number=1,
             version_label="v1",
             layout=cleaned,
+            sections=[],
+            tabs=cleaned_tabs,
             cols=req.cols,
             row_height=req.row_height,
+            updated_at=utc_now(),
         )
         db.add(form)
 
@@ -387,6 +429,7 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
             version_label=form.version_label,
             layout=cleaned,
             sections=[],
+            tabs=cleaned_tabs,
             cols=req.cols,
             row_height=req.row_height,
             created_at=utc_now(),

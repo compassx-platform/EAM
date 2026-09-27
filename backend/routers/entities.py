@@ -15,10 +15,11 @@ from backend.services.command_handler import (
     InvalidTransitionError,
     ConditionFailedError,
 )
-from backend.services.field_validator import FieldValidationError
+from backend.models.base import utc_now
+from backend.services.field_validator import FieldValidationError, validate_custom_fields
 from backend.services.simulator import simulate_transition
 from backend.services.projector import rebuild_entity_from_events
-from backend.services.actor import resolve_actor_roles
+from backend.services.actor import resolve_actor_roles, resolve_actor
 
 router = APIRouter(tags=["Entities (Command & Query API)"])
 
@@ -47,6 +48,9 @@ class SimulateRequest(BaseModel):
     custom_fields_override: Optional[Dict[str, Any]] = None
     current_status_override: Optional[str] = None
     workflow_version_override: Optional[str] = None
+
+class UpdateEntityFieldsRequest(BaseModel):
+    custom_fields: Dict[str, Any] = {}
 
 def _verify_entity_type(db: Session, entity_type: str) -> str:
     key = (entity_type or "").strip().lower()
@@ -229,6 +233,45 @@ def get_entity_detail(entity_type: str, id: str, db: Session = Depends(get_db)):
         "entity": entity.to_dict(),
         "events": [e.to_dict() for e in events],
     }
+
+
+@router.patch("/api/{entity_type}/{id}")
+@router.put("/api/{entity_type}/{id}")
+def update_entity_fields_endpoint(
+    entity_type: str,
+    id: str,
+    req: UpdateEntityFieldsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Updates custom fields of an entity record without changing its workflow status.
+    """
+    key = _verify_entity_type(db, entity_type)
+    EntityModel, _ = get_entity_models(key)
+    query = db.query(EntityModel).filter(EntityModel.id == id)
+    if EntityModel == DynamicEntity:
+        query = query.filter(DynamicEntity.entity_type == key)
+    entity = query.first()
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"{key} '{id}' not found")
+    
+    current_fields = dict(entity.custom_fields or {})
+    current_fields.update(req.custom_fields)
+    try:
+        validated_fields = validate_custom_fields(
+            db=db,
+            entity_type=key,
+            custom_fields=current_fields,
+            is_create=False,
+        )
+        entity.custom_fields = validated_fields
+    except Exception:
+        entity.custom_fields = current_fields
+
+    entity.updated_at = utc_now()
+    db.commit()
+    db.refresh(entity)
+    return {"accepted": True, "entity": entity.to_dict()}
 
 
 @router.get("/api/{entity_type}/{id}/valid-transitions")

@@ -80,6 +80,7 @@ const inputCls =
   'rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 focus:border-blue-500 focus:outline-none';
 
 function seedParamsFor(type: string): Record<string, unknown> {
+  if (type === 'workflow_status') return { operator: 'eq', value: '' };
   if (type === 'attribute') return { operator: 'eq', case_sensitive: false };
   if (type === 'date') return { operator: 'ge', value: 'now' };
   if (type === 'expression') return { operator: 'gt', value: 0 };
@@ -114,6 +115,12 @@ function importGroup(def: ConditionGroup): DraftGroup {
 function buildAtom(node: DraftAtom): ConditionAtom | null {
   const p = node.params;
   switch (node.type) {
+    case 'workflow_status':
+      return {
+        type: 'workflow_status',
+        operator: String(p['operator'] ?? 'eq'),
+        value: p['value'] ?? '',
+      };
     case 'attribute':
       return {
         type: 'attribute',
@@ -183,6 +190,15 @@ function validateNode(node: DraftNode): string | null {
   }
   const { type, params } = node;
   switch (type) {
+    case 'workflow_status':
+      if (
+        params['operator'] &&
+        !['is_empty', 'is_not_empty'].includes(String(params['operator'])) &&
+        (params['value'] === undefined || params['value'] === '')
+      ) {
+        return 'Workflow stage is required';
+      }
+      break;
     case 'attribute':
       if (!params['field']) return 'Field is required';
       if (
@@ -280,7 +296,6 @@ export function ConditionModal({
   anchorY,
 }: ConditionModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const atoms = conditionTypes?.atoms ?? [];
   const [entityType, setEntityType] = useState(initial?.entity_type ?? initialEntityType ?? '');
   const [label, setLabel] = useState(initial?.label ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
@@ -344,6 +359,7 @@ export function ConditionModal({
   const addAtPath = (path: number[], node: DraftNode) => setRoot((cur) => addAt(cur, path, node));
 
   const [extraFields, setExtraFields] = useState<EntityField[]>([]);
+  const [workflowStates, setWorkflowStates] = useState<string[]>([]);
 
   useEffect(() => {
     if (entityType) {
@@ -352,6 +368,20 @@ export function ConditionModal({
           setExtraFields(fetched);
         }
       }).catch(() => {});
+
+      api.listWorkflows(entityType).then((wfList) => {
+        const pubWf = (wfList || []).find((w) => w.status === 'published') || wfList[0];
+        if (pubWf && pubWf.definition && Array.isArray(pubWf.definition.nodes)) {
+          const states = pubWf.definition.nodes.map((n: any) => n.name).filter(Boolean);
+          if (states.length > 0) {
+            setWorkflowStates(states);
+            return;
+          }
+        }
+        setWorkflowStates(['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected', 'closed']);
+      }).catch(() => {
+        setWorkflowStates(['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected', 'closed']);
+      });
     }
   }, [entityType]);
 
@@ -362,10 +392,54 @@ export function ConditionModal({
     return Array.from(map.values());
   }, [fields, extraFields]);
 
-  const scopedFields = useMemo(
-    () => allFields.filter((f) => !entityType || f.entity_type === entityType).sort((a, b) => a.field_name.localeCompare(b.field_name)),
-    [allFields, entityType],
-  );
+  const scopedFields = useMemo(() => {
+    const list = allFields
+      .filter((f) => !entityType || f.entity_type === entityType)
+      .sort((a, b) => a.field_name.localeCompare(b.field_name));
+
+    const hasWf = list.some((f) => f.field_name === '_workflow_status');
+    const hasSt = list.some((f) => f.field_name === 'status');
+    const systemFields: EntityField[] = [];
+    if (!hasWf) {
+      systemFields.push({
+        id: 'sys:workflow_status',
+        entity_type: entityType || 'any',
+        field_name: '_workflow_status',
+        field_type: 'select',
+        label: '⚡ Workflow Stage (_workflow_status)',
+        required: false,
+        select_options: workflowStates.length > 0 ? workflowStates : ['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected'],
+      } as EntityField);
+    }
+    if (!hasSt) {
+      systemFields.push({
+        id: 'sys:status',
+        entity_type: entityType || 'any',
+        field_name: 'status',
+        field_type: 'select',
+        label: '⚡ Record Status (status)',
+        required: false,
+        select_options: workflowStates.length > 0 ? workflowStates : ['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected'],
+      } as EntityField);
+    }
+
+    return [...systemFields, ...list];
+  }, [allFields, entityType, workflowStates]);
+
+  const atoms = useMemo(() => {
+    const base = conditionTypes?.atoms ?? [];
+    if (!base.some((a) => a.type === 'workflow_status')) {
+      return [
+        {
+          type: 'workflow_status',
+          name: 'Workflow Stage / Status',
+          description: 'Checks the current workflow state of the record (e.g. upload_sop, draft, approved, active).',
+        },
+        ...base,
+      ];
+    }
+    return base;
+  }, [conditionTypes]);
 
   const [listOptionsMap, setListOptionsMap] = useState<Record<string, string[]>>({});
 
@@ -527,6 +601,7 @@ export function ConditionModal({
           atoms={atoms}
           scopedFields={scopedFields}
           fieldTypeOf={fieldTypeOf}
+          workflowStates={workflowStates}
           onPickType={pickType}
           onPatchAtom={patchAtom}
           onPatchGroup={patchGroup}
@@ -761,6 +836,7 @@ function RuleGroupEditor({
   atoms,
   scopedFields,
   fieldTypeOf,
+  workflowStates = [],
   onPickType,
   onPatchAtom,
   onPatchGroup,
@@ -775,6 +851,7 @@ function RuleGroupEditor({
   atoms: Array<{ type: string; name: string; description: string }>;
   scopedFields: EntityField[];
   fieldTypeOf: (name?: unknown) => string | undefined;
+  workflowStates?: string[];
   onPickType: (path: number[], type: string) => void;
   onPatchAtom: (path: number[], patch: Record<string, unknown>) => void;
   onPatchGroup: (path: number[], patch: Partial<DraftGroup>) => void;
@@ -827,6 +904,7 @@ function RuleGroupEditor({
               atoms={atoms}
               scopedFields={scopedFields}
               fieldTypeOf={fieldTypeOf}
+              workflowStates={workflowStates}
               onPickType={onPickType}
               onPatchAtom={onPatchAtom}
               onPatchGroup={onPatchGroup}
@@ -845,6 +923,7 @@ function RuleGroupEditor({
             atoms={atoms}
             scopedFields={scopedFields}
             fieldTypeOf={fieldTypeOf}
+            workflowStates={workflowStates}
             onPickType={onPickType}
             onPatchAtom={onPatchAtom}
             onRemove={onRemove}
@@ -857,10 +936,17 @@ function RuleGroupEditor({
       <div className="flex items-center gap-2">
         <button
           type="button"
+          onClick={() => onAdd(path, makeAtom('workflow_status'))}
+          className="flex items-center gap-1 rounded-md border border-dashed border-blue-300 bg-blue-50/50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100/70"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add workflow stage rule
+        </button>
+        <button
+          type="button"
           onClick={() => onAdd(path, makeAtom('attribute'))}
           className="flex items-center gap-1 rounded-md border border-dashed border-gray-300 px-2 py-1 text-xs font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
         >
-          <Plus className="h-3.5 w-3.5" /> Add rule
+          <Plus className="h-3.5 w-3.5" /> Add field rule
         </button>
         <button
           type="button"
@@ -880,6 +966,7 @@ function AtomEditor({
   atoms,
   scopedFields,
   fieldTypeOf,
+  workflowStates = [],
   onPickType,
   onPatchAtom,
   onRemove,
@@ -891,6 +978,7 @@ function AtomEditor({
   atoms: Array<{ type: string; name: string; description: string }>;
   scopedFields: EntityField[];
   fieldTypeOf: (name?: unknown) => string | undefined;
+  workflowStates?: string[];
   onPickType: (path: number[], type: string) => void;
   onPatchAtom: (path: number[], patch: Record<string, unknown>) => void;
   onRemove: (path: number[]) => void;
@@ -938,7 +1026,12 @@ function AtomEditor({
       );
     }
 
-    const fieldOptions = getFieldOptions(selectedField, listOptionsMap);
+    const isWfField = p['field'] === '_workflow_status' || p['field'] === 'status';
+    const baseOptions = getFieldOptions(selectedField, listOptionsMap);
+    const fieldOptions = isWfField && workflowStates.length > 0
+      ? Array.from(new Set([...workflowStates, ...baseOptions]))
+      : baseOptions;
+
     if (
       (SELECT_TYPES.includes(fieldType || '') || fieldOptions.length > 0) &&
       fieldOptions.length > 0 &&
@@ -1047,6 +1140,62 @@ function AtomEditor({
       </div>
 
       <div className="mt-2 flex flex-col gap-2">
+        {node.type === 'workflow_status' && (
+          <div className="grid grid-cols-[auto_130px_1fr] gap-1.5 items-center">
+            <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-700">
+              <span className="h-2 w-2 rounded-full bg-blue-600" />
+              Stage
+            </span>
+
+            <select
+              value={String(p['operator'] ?? 'eq')}
+              onChange={(e) => onPatchAtom(path, { ...p, operator: e.target.value })}
+              className={`${inputCls} text-xs font-medium`}
+            >
+              <option value="eq">equals</option>
+              <option value="ne">does not equal</option>
+              <option value="in">is one of</option>
+              <option value="not_in">is none of</option>
+            </select>
+
+            {['in', 'not_in'].includes(String(p['operator'] ?? '')) ? (
+              <input
+                value={Array.isArray(p['value']) ? p['value'].join(', ') : String(p['value'] ?? '')}
+                onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+                placeholder="e.g. upload_sop, draft, active"
+                className={`${inputCls} text-xs`}
+              />
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={String(p['value'] ?? '')}
+                  onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+                  className={`${inputCls} flex-1 text-xs`}
+                >
+                  <option value="">— select workflow stage —</option>
+                  {(workflowStates.length > 0 ? workflowStates : ['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected']).map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                  {p['value'] &&
+                    !workflowStates.includes(String(p['value'])) &&
+                    !['draft', 'upload_sop', 'active', 'approved', 'completed', 'rejected'].includes(String(p['value'])) && (
+                      <option value={String(p['value'])}>{String(p['value'])} (custom)</option>
+                    )}
+                </select>
+                <input
+                  value={String(p['value'] ?? '')}
+                  onChange={(e) => onPatchAtom(path, { ...p, value: e.target.value })}
+                  placeholder="or type"
+                  className={`${inputCls} w-28 text-xs`}
+                  title="Or type custom workflow stage name"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {node.type === 'attribute' && (
           <>
             <div className="grid grid-cols-[1fr_auto_1fr] gap-1.5 items-center">

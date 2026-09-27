@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   Lock,
   Eye,
+  EyeOff,
+  Pencil,
   Trash2,
   Info,
   ChevronDown,
@@ -18,8 +20,52 @@ import type {
   ResolvedList,
   ChecklistItem,
   ConditionDefinition,
+  VisibilityCondition,
 } from '../../types';
 import { formatConditionSummary } from '../../lib/conditions';
+
+function ConditionPill({
+  condition,
+  conditions,
+}: {
+  condition: VisibilityCondition;
+  conditions: ConditionDefinition[];
+}) {
+  const action = condition.action || 'show';
+  const condId = condition.condition_id || 'rule';
+  const def = condition.condition_id ? conditions.find((c) => c.id === condition.condition_id) : null;
+  const label = def?.label || condId;
+
+  let badgeCls = 'bg-blue-50 text-blue-700 border border-blue-200';
+  let Icon = Eye;
+  let actionPrefix = 'Show';
+
+  if (action === 'readonly') {
+    badgeCls = 'bg-amber-50 text-amber-800 border border-amber-200';
+    Icon = Lock;
+    actionPrefix = 'Disable';
+  } else if (action === 'editable') {
+    badgeCls = 'bg-emerald-50 text-emerald-800 border border-emerald-200';
+    Icon = Pencil;
+    actionPrefix = 'Enable';
+  } else if (action === 'hide') {
+    badgeCls = 'bg-gray-100 text-gray-700 border border-gray-200';
+    Icon = EyeOff;
+    actionPrefix = 'Hide';
+  }
+
+  return (
+    <span
+      className={`inline-flex max-w-[130px] items-center gap-1 truncate rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold ${badgeCls}`}
+      title={formatConditionSummary(condition, conditions)}
+    >
+      <Icon className="h-2.5 w-2.5 shrink-0" />
+      <span className="truncate">
+        {actionPrefix}: {label}
+      </span>
+    </span>
+  );
+}
 
 interface FormCanvasItemProps {
   item: EntityFormItem;
@@ -88,16 +134,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              {hasCondition && (
-                <span
-                  className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
-                  title={formatConditionSummary(condition, conditions)}
-                >
-                  <ShieldCheck className="h-3 w-3 text-blue-600" />
-                  <span className="max-w-[120px] truncate">
-                    {condition?.condition_id ? condition.condition_id : 'Condition'}
-                  </span>
-                </span>
+              {hasCondition && condition && (
+                <ConditionPill condition={condition} conditions={conditions} />
               )}
               <GripVertical className="h-4 w-4 shrink-0 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab drag-handle" />
               <button
@@ -147,16 +185,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              {hasCondition && (
-                <span
-                  className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
-                  title={formatConditionSummary(condition, conditions)}
-                >
-                  <ShieldCheck className="h-3 w-3 text-blue-600" />
-                  <span className="max-w-[120px] truncate">
-                    {condition?.condition_id ? condition.condition_id : 'Condition'}
-                  </span>
-                </span>
+              {hasCondition && condition && (
+                <ConditionPill condition={condition} conditions={conditions} />
               )}
               <GripVertical className="h-4 w-4 shrink-0 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab drag-handle" />
               <button
@@ -208,20 +238,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
             )}
 
             {/* Central Condition Badge */}
-            {hasCondition && (
-              <span
-                className={`inline-flex max-w-[90px] items-center gap-0.5 truncate rounded px-1.5 py-0.5 font-mono text-[9px] ${
-                  isReadOnlyCondition
-                    ? 'bg-amber-50 text-amber-700 font-semibold'
-                    : 'bg-blue-50 text-blue-700 font-semibold'
-                }`}
-                title={formatConditionSummary(condition, conditions)}
-              >
-                {isReadOnlyCondition ? <Lock className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
-                <span className="truncate">
-                  {condition?.condition_id ? condition.condition_id : 'cond'}
-                </span>
-              </span>
+            {hasCondition && condition && (
+              <ConditionPill condition={condition} conditions={conditions} />
             )}
 
             {/* Drag Handle at top-right end */}

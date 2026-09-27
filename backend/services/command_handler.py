@@ -370,11 +370,18 @@ def propose_transition(
 
     condition_ids = matching_transition.get("conditions", []) or matching_transition.get("gates", []) or []
 
+    eval_custom_fields = dict(current_custom_fields)
+    eval_custom_fields["_workflow_status"] = current_stage
+    eval_custom_fields["_workflow_stage"] = current_stage
+    eval_custom_fields["workflow_stage"] = current_stage
+    eval_custom_fields["stage"] = current_stage
+    eval_custom_fields["status"] = current_status
+
     # Step 4 & 5: Evaluate transition-level conditions (blocking checks)
     all_passed, results, failing = evaluate_condition_ids(
         db=db,
         condition_ids=condition_ids,
-        custom_fields=current_custom_fields,
+        custom_fields=eval_custom_fields,
         actor_id=actor_id,
         actor_type=actor_type,
         actor_roles=actor_roles,
@@ -393,7 +400,7 @@ def propose_transition(
     to_state, choice_index, choice_trace, on_after = _resolve_transition_target(
         db=db,
         transition=matching_transition,
-        custom_fields=current_custom_fields,
+        custom_fields=eval_custom_fields,
         actor_context=actor_context,
     )
 

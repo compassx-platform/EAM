@@ -23,6 +23,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import type {
   EntityFormItem,
+  FormTab,
   ResolvedList,
   ConditionDefinition,
   ChecklistItem,
@@ -30,12 +31,14 @@ import type {
 import {
   isItemVisible,
   isItemReadOnly,
+  isTabVisible,
   withWorkflowStatus,
 } from '../../lib/conditions';
 
 interface FormPreviewModalProps {
   entityType: string;
   items: EntityFormItem[];
+  tabs?: FormTab[];
   cols: number;
   rowHeight: number;
   workflowStates: string[];
@@ -47,6 +50,7 @@ interface FormPreviewModalProps {
 export function FormPreviewModal({
   entityType,
   items,
+  tabs = [],
   cols,
   rowHeight,
   workflowStates,
@@ -58,6 +62,7 @@ export function FormPreviewModal({
   const [simulatedStage, setSimulatedStage] = useState<string>(workflowStates[0] || 'Requested');
   const [showHidden, setShowHidden] = useState(false);
   const [showPayload, setShowPayload] = useState(false);
+  const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id || 'general');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
@@ -83,7 +88,17 @@ export function FormPreviewModal({
     setValues({});
   };
 
+  const visibleTabs = tabs.length > 0
+    ? tabs.filter((tab) => isTabVisible(tab, valuesForEvaluation, conditions))
+    : [];
+  const activeTab = visibleTabs.find((t) => t.id === activeTabId) || visibleTabs[0];
+  const currentTabId = activeTab?.id || activeTabId || 'general';
+
   const visibleItems = items.filter((it) => {
+    if (visibleTabs.length > 1) {
+      const itemTab = it.tabId || it.tab_id || visibleTabs[0]?.id || 'general';
+      if (itemTab !== currentTabId) return false;
+    }
     if (showHidden) return true;
     return isItemVisible(it, items, valuesForEvaluation, conditions);
   });
@@ -198,6 +213,26 @@ export function FormPreviewModal({
                 </p>
               </div>
 
+              {/* Top Tab Strip (if multiple tabs exist) */}
+              {visibleTabs.length > 1 && (
+                <div className="flex items-center gap-1 border-b border-gray-200 mb-6 overflow-x-auto">
+                  {visibleTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveTabId(tab.id)}
+                      className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold border-b-2 transition-all shrink-0 select-none ${
+                        currentTabId === tab.id
+                          ? 'border-blue-600 text-blue-700 bg-blue-50/50 rounded-t-lg'
+                          : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {items.length === 0 ? (
                 <div className="py-20 text-center text-xs text-gray-400">
                   No items on form yet. Add fields on the builder canvas to preview.
@@ -256,7 +291,7 @@ export function FormPreviewModal({
                       );
                     }
 
-                    const readOnly = isItemReadOnly(it, items, valuesForEvaluation, conditions);
+                    const readOnly = isItemReadOnly(it, items, valuesForEvaluation, conditions, tabs);
                     const isHidden = !isItemVisible(it, items, valuesForEvaluation, conditions);
                     const val = values[key];
                     const resolved = it.optionsList ? resolvedLists[it.optionsList] : null;

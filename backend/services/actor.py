@@ -32,3 +32,20 @@ def resolve_actor_roles(db: Session, actor_id: str, actor_roles: Optional[List[s
         except Exception:
             pass
     return []
+
+
+def resolve_actor(
+    req_actor_id: Optional[str],
+    req_actor_roles: Optional[List[str]],
+    header_actor_id: Optional[str],
+    header_actor_role: Optional[str],
+    db: Session,
+) -> tuple[str, List[str]]:
+    actor_id = req_actor_id or header_actor_id or "system"
+    if req_actor_roles:
+        roles = list(req_actor_roles)
+    elif header_actor_role:
+        roles = [header_actor_role]
+    else:
+        roles = resolve_actor_roles(db, actor_id, None)
+    return actor_id, roles

@@ -168,6 +168,32 @@ def evaluate_atom(atom: Dict[str, Any], db: Session, custom_fields: Dict[str, An
         passed = _apply_string_op(op, val, expected, case_sensitive=case_sensitive)
         return passed, f"'{field}' ({val!r}) {op} ({expected!r})"
 
+    if atom_type == "workflow_status":
+        op = str(atom.get("operator", "eq")).lower()
+        expected = atom.get("value")
+        current_status = custom_fields.get("_workflow_status") or custom_fields.get("workflow_stage") or custom_fields.get("stage") or custom_fields.get("status") or ""
+        raw_status = custom_fields.get("status") or ""
+        raw_stage = custom_fields.get("workflow_stage") or custom_fields.get("stage") or ""
+        if op in ("in", "not_in", "is_one_of", "is_none_of"):
+            raw_list = expected if isinstance(expected, list) else [s.strip() for s in str(expected).split(",") if s.strip()]
+            norm_list = [str(x).strip().lower() for x in raw_list]
+            curr_norm = str(current_status).strip().lower()
+            status_norm = str(raw_status).strip().lower()
+            stage_norm = str(raw_stage).strip().lower()
+            if op in ("in", "is_one_of"):
+                passed = curr_norm in norm_list or status_norm in norm_list or stage_norm in norm_list
+                return passed, f"Workflow status '{current_status}' is in {raw_list}"
+            else:
+                passed = curr_norm not in norm_list and status_norm not in norm_list and stage_norm not in norm_list
+                return passed, f"Workflow status '{current_status}' is not in {raw_list}"
+        mapped_op = "eq" if op in ("=", "==") else "ne" if op in ("!=", "<>") else op
+        passed = (
+            _apply_string_op(mapped_op, str(current_status), str(expected), case_sensitive=False)
+            or _apply_string_op(mapped_op, str(raw_status), str(expected), case_sensitive=False)
+            or _apply_string_op(mapped_op, str(raw_stage), str(expected), case_sensitive=False)
+        )
+        return passed, f"Workflow status '{current_status}' {mapped_op} '{expected}'"
+
     if atom_type == "role":
         required_role = atom.get("role")
         if not required_role:
