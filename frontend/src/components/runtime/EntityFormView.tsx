@@ -843,7 +843,13 @@ export function EntityFormView({
 
   const entityTitleStr = getEntityTitle(currentEntity);
 
-  const expiryValue = currentEntity?.custom_fields?.expiry_date;
+  const expiryValue =
+    currentEntity?.custom_fields?.expiry_date ||
+    currentEntity?.custom_fields?.valid_until ||
+    currentEntity?.custom_fields?.valid_to ||
+    currentEntity?.custom_fields?.expires_at ||
+    currentEntity?.custom_fields?.due_date ||
+    currentEntity?.custom_fields?.expiry;
   const isExpiredStatus = currentEntity?.status?.toLowerCase() === 'expired';
   const isPastExpiryDate = useMemo(() => {
     if (!expiryValue) return false;

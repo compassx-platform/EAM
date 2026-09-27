@@ -39,10 +39,20 @@ function truncate(id: string, n = 14) {
 }
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
+const EXPIRY_KEYS = ['expiry_date', 'valid_until', 'valid_to', 'expires_at', 'expiry', 'due_date', 'validUntil', 'validTo', 'expiryDate'];
 
 function entityTitle(e: { custom_fields?: Record<string, unknown> }): string | null {
   const cf = e.custom_fields || {};
   for (const k of TITLE_KEYS) {
+    const v = cf[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+  }
+  return null;
+}
+
+function entityExpiry(e: { custom_fields?: Record<string, unknown> }): string | null {
+  const cf = e.custom_fields || {};
+  for (const k of EXPIRY_KEYS) {
     const v = cf[k];
     if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
   }
@@ -211,9 +221,9 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      {e.custom_fields?.expiry_date || e.custom_fields?.valid_until ? (
+                      {entityExpiry(e) ? (
                         <span className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-700 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
-                          {String(e.custom_fields.expiry_date || e.custom_fields.valid_until)}
+                          {entityExpiry(e)}
                         </span>
                       ) : (
                         <span className="text-gray-400">—</span>
