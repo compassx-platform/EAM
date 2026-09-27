@@ -26,6 +26,7 @@ import type {
   EntityField,
   WorkflowRole,
   EntityLifecycleStatus,
+  FormTab,
 } from '../../types';
 import {
   HeaderBar,
@@ -100,6 +101,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   const [conditionTypes, setConditionTypes] = useState<ConditionTypeInfo | null>(null);
   const [actionTypes, setActionTypes] = useState<Array<{ type: string; name: string; description: string }>>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
+  const [formTabs, setFormTabs] = useState<FormTab[]>([]);
 
   const [conditionModalOpen, setConditionModalOpen] = useState(false);
   const [editingCondition, setEditingCondition] = useState<ConditionDefinition | null>(null);
@@ -255,6 +257,10 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
       .getEntityType(entityType)
       .then((et) => setEntityStatuses(et.statuses || []))
       .catch(() => setEntityStatuses([]));
+    api
+      .getForm(entityType)
+      .then((f) => setFormTabs(f.tabs || []))
+      .catch(() => setFormTabs([]));
   }, [entityType]);
 
   useEffect(() => {
@@ -1015,6 +1021,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
               conditions={conditions}
               roles={roles}
               entityStatuses={entityStatuses}
+              formTabs={formTabs}
               onKind={(nodeId, kind) => {
                 setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, kind } } : n)));
                 setDirty(true);

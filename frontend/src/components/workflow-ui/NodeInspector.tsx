@@ -29,7 +29,7 @@ import {
   Workflow,
   Zap,
 } from 'lucide-react';
-import type { ConditionDefinition, WorkflowRole, EntityLifecycleStatus } from '../../types';
+import type { ConditionDefinition, WorkflowRole, EntityLifecycleStatus, FormTab } from '../../types';
 import {
   KIND_LABEL,
   NODE_KINDS,
@@ -85,6 +85,7 @@ interface NodeInspectorProps {
   conditions: ConditionDefinition[];
   roles?: WorkflowRole[];
   entityStatuses?: EntityLifecycleStatus[];
+  formTabs?: FormTab[];
   onKind: (id: string, kind: NodeKind) => void;
   onRename: (oldLabel: string, newLabel: string) => void;
   onDuplicate: (id: string) => void;
@@ -119,6 +120,7 @@ export function NodeInspector({
   conditions,
   roles = [],
   entityStatuses = [],
+  formTabs = [],
   onKind,
   onRename,
   onDuplicate,
@@ -378,6 +380,7 @@ export function NodeInspector({
           node={node}
           edges={edges}
           nodeLabels={nodeLabels}
+          formTabs={formTabs}
           onNodeDataChange={onNodeDataChange}
           onAddRoute={onAddRoute}
           onRemoveConnection={onRemoveConnection}
@@ -1983,6 +1986,7 @@ function InteractionConfigSection({
   node,
   edges,
   nodeLabels,
+  formTabs = [],
   onNodeDataChange,
   onAddRoute,
   onRemoveConnection,
@@ -1990,6 +1994,7 @@ function InteractionConfigSection({
   node: WorkflowFlowNode;
   edges: WorkflowFlowEdge[];
   nodeLabels: string[];
+  formTabs?: FormTab[];
   onNodeDataChange?: (nodeId: string, updates: Partial<StateNodeData>) => void;
   onAddRoute?: (sourceId: string, targetId: string) => string | void;
   onRemoveConnection: (id: string) => void;
@@ -2002,6 +2007,12 @@ function InteractionConfigSection({
   const primaryOutgoing = outgoing[0];
   const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
 
+  // Available tabs from Form Builder (fallback to default 'general' tab if none configured)
+  const availableTabs: FormTab[] =
+    formTabs.length > 0
+      ? formTabs
+      : [{ id: 'general', label: 'General Details', is_default: true }];
+
   return (
     <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
       <div className="flex items-center justify-between">
@@ -2011,7 +2022,7 @@ function InteractionConfigSection({
           <span className="group relative inline-flex items-center">
             <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
             <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
-              Directs the user seamlessly to a target application, form tab, or view with contextual entity state.
+              Directs the user seamlessly to a target form tab and unlocks it for task completion.
             </span>
           </span>
         </span>
@@ -2019,15 +2030,24 @@ function InteractionConfigSection({
 
       <div className="flex flex-col gap-1">
         <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target Form Tab</label>
-        <input
-          type="text"
+        <select
           value={interactionTab}
           onChange={(e) => onNodeDataChange?.(node.id, { interaction_app: 'records', interaction_tab: e.target.value })}
-          placeholder="e.g. details, sop, safety"
-          className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
-        />
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer font-medium"
+        >
+          {availableTabs.map((tab) => (
+            <option key={tab.id} value={tab.id}>
+              {tab.label} ({tab.id})
+            </option>
+          ))}
+          {Boolean(interactionTab) && !availableTabs.some((t) => t.id === interactionTab || t.id.toLowerCase() === interactionTab.toLowerCase()) && (
+            <option value={interactionTab}>
+              {interactionTab} (Custom / Current)
+            </option>
+          )}
+        </select>
         <p className="text-[10px] text-gray-400">
-          Tab ID from Form Builder to auto-open and enable for user interaction during this step.
+          When this stage is entered, the record will auto-navigate to and enable this tab.
         </p>
       </div>
 
