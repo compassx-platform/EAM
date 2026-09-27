@@ -419,3 +419,66 @@ def test_delete_all_entity_types_remains_empty(client, test_db):
     res_after = client.get("/api/entity-types")
     assert res_after.status_code == 200
     assert res_after.json() == []
+
+
+def test_boolean_entity_field_lifecycle(client, test_db):
+    from backend.models.workflow import WorkflowDefinition
+    from backend.models.base import generate_uuid
+
+    # 1. Create entity type with a boolean field
+    req = {
+        "name": "safety_check",
+        "display_name": "Safety Check",
+        "description": "Safety check with boolean fields",
+        "fields": [
+            {"field_name": "title", "field_type": "text", "required": True, "label": "Title"},
+            {"field_name": "is_hazardous", "field_type": "boolean", "required": False, "label": "Is Hazardous"},
+            {"field_name": "hot_work_approved", "field_type": "boolean", "required": False, "label": "Hot Work Approved"},
+        ],
+    }
+    res_type = client.post("/api/entity-types", json=req)
+    assert res_type.status_code == 200
+
+    # Add published workflow for safety_check
+    test_db.add(WorkflowDefinition(
+        id=generate_uuid(),
+        entity_type="safety_check",
+        version_label="v1",
+        status="published",
+        definition={"states": ["Draft", "Active"], "transitions": []},
+    ))
+    test_db.commit()
+
+    # 2. Create record with boolean True and string 'yes'
+    res_rec = client.post("/api/safety_check/create", json={
+        "custom_fields": {
+            "title": "Inspection A",
+            "is_hazardous": True,
+            "hot_work_approved": "yes",
+        }
+    })
+    assert res_rec.status_code == 200
+    rec_id = res_rec.json()["entity_id"]
+
+    # 3. Retrieve record and verify both are True
+    res_get = client.get(f"/api/safety_check/{rec_id}")
+    assert res_get.status_code == 200
+    cf = res_get.json()["entity"]["custom_fields"]
+    assert cf["is_hazardous"] is True
+    assert cf["hot_work_approved"] is True
+
+    # 4. Update fields to False and 'no'
+    res_patch = client.patch(f"/api/safety_check/{rec_id}", json={
+        "custom_fields": {
+            "is_hazardous": False,
+            "hot_work_approved": "no",
+        }
+    })
+    assert res_patch.status_code == 200
+
+    # 5. Retrieve record and verify both are False
+    res_get2 = client.get(f"/api/safety_check/{rec_id}")
+    assert res_get2.status_code == 200
+    cf2 = res_get2.json()["entity"]["custom_fields"]
+    assert cf2["is_hazardous"] is False
+    assert cf2["hot_work_approved"] is False

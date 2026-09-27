@@ -93,7 +93,21 @@ def validate_custom_fields(
             except (ValueError, TypeError):
                 raise FieldValidationError(f"Field '{f.field_name}' must be a number, got '{val}'", field_name=f.field_name)
 
-        elif f.field_type in TEXT_LIKE or f.field_type == "boolean" or f.field_type == "checkbox_group":
+        elif f.field_type == "boolean":
+            if isinstance(val, bool):
+                cleaned_fields[f.field_name] = val
+            elif isinstance(val, str):
+                low = val.strip().lower()
+                if low in ("true", "yes", "1"):
+                    cleaned_fields[f.field_name] = True
+                elif low in ("false", "no", "0"):
+                    cleaned_fields[f.field_name] = False
+                else:
+                    cleaned_fields[f.field_name] = bool(val)
+            else:
+                cleaned_fields[f.field_name] = bool(val)
+
+        elif f.field_type in TEXT_LIKE or f.field_type == "checkbox_group":
             cleaned_fields[f.field_name] = str(val)
 
         elif f.field_type in SELECT_VALUE_TYPES:

@@ -568,7 +568,7 @@ function InteractiveControl({
   if (type === 'boolean') {
     const rawLower = typeof value === 'string' ? value.trim().toLowerCase() : (typeof value === 'boolean' ? (value ? 'true' : 'false') : '');
     const isYes = (value as any) === true || rawLower === 'true' || rawLower === 'yes' || rawLower === '1';
-    const isNo = (value as any) === false || rawLower === 'false' || rawLower === 'no' || rawLower === '0' || (!value && value !== undefined && value !== '');
+    const isNo = (value as any) === false || rawLower === 'false' || rawLower === 'no' || rawLower === '0';
     return (
       <div className="flex items-center gap-3">
         <button
