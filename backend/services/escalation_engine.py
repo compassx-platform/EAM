@@ -183,8 +183,12 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
 
             # Read date value from custom_fields or entity columns
             raw_date = fields.get(date_field) or getattr(p, date_field, None)
-            if not raw_date and date_field == "expiry_date":
-                raw_date = fields.get("valid_until") or fields.get("expires_at") or fields.get("expiry")
+            if not raw_date:
+                # Fallback to alternative date field keys
+                for alt_key in ("expiry_date", "valid_until", "valid_to", "expires_at", "expiry", "due_date", "expiryDate", "validTo", "validUntil"):
+                    if fields.get(alt_key):
+                        raw_date = fields.get(alt_key)
+                        break
 
             target_dt = _normalize_dt(raw_date)
             if not target_dt:
@@ -202,18 +206,26 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
                     try:
                         if act_type == "TRANSITION_WORKFLOW":
                             event_type = act.get("event") or act.get("event_type") or "EXPIRED"
-                            has_transition = any(
-                                (t.get("from") == p.status or t.get("from") == getattr(p, "workflow_stage", None))
-                                and (t.get("event") or "").upper() == event_type.upper()
-                                for t in transitions
+                            # Match transition case-insensitively or check common synonyms
+                            matching_t = next(
+                                (
+                                    t for t in transitions
+                                    if (t.get("from") == p.status or t.get("from") == getattr(p, "workflow_stage", None))
+                                    and (
+                                        (t.get("event") or "").upper() == event_type.upper()
+                                        or (event_type.upper() in ("EXPIRED", "EXPIRE") and (t.get("event") or "").upper() in ("EXPIRED", "EXPIRE", "TIMEOUT", "AUTO_EXPIRE"))
+                                    )
+                                ),
+                                None
                             )
-                            if has_transition:
-                                actor_id = act.get("actor_id") or ("system:expiry-checker" if event_type.upper() in ("EXPIRED", "EXPIRE") else f"system:escalation-{escalation.id.lower()}")
+                            if matching_t:
+                                actual_event = matching_t.get("event") or event_type
+                                actor_id = act.get("actor_id") or ("system:expiry-checker" if actual_event.upper() in ("EXPIRED", "EXPIRE") else f"system:escalation-{escalation.id.lower()}")
                                 res = propose_transition(
                                     db=db,
                                     entity_type=p.entity_type,
                                     entity_id=p.id,
-                                    event_type=event_type,
+                                    event_type=actual_event,
                                     actor_id=actor_id,
                                     actor_type="system",
                                     payload={"reason": act.get("reason") or f"Escalated by {escalation.name} at {now.isoformat()}"}
@@ -224,7 +236,7 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
                                     entity_id=p.id,
                                     action_type=act_type,
                                     status="SUCCESS",
-                                    message=f"Transitioned from {prev_status} to {res.get('new_status')} via {event_type}",
+                                    message=f"Transitioned from {prev_status} to {res.get('new_status')} via {actual_event}",
                                     details=res,
                                     execution_time=now,
                                 )
@@ -237,6 +249,20 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
                                     "event_id": res.get("event_id"),
                                     "escalation_id": escalation.id,
                                 })
+                            else:
+                                msg = f"Record '{p.id}' reached expiry trigger ({trigger_dt.isoformat()}), but workflow has no transition for event '{event_type}' from state '{p.status}' (stage: '{stage}')"
+                                logger.warning(f"[Escalation Engine] {msg}")
+                                log = EscalationLog(
+                                    escalation_id=escalation.id,
+                                    entity_type=p.entity_type,
+                                    entity_id=p.id,
+                                    action_type=act_type,
+                                    status="SKIPPED",
+                                    message=msg,
+                                    details={"available_transitions": [t.get("event") for t in transitions if t.get("from") in (p.status, stage)]},
+                                    execution_time=now,
+                                )
+                                db.add(log)
                         elif act_type == "CHANGE_STATUS":
                             target_status = act.get("target_status") or act.get("status_value")
                             if target_status and target_status != p.status:

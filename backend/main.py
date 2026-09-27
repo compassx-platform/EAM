@@ -33,6 +33,10 @@ from backend.routers import (
 )
 from backend.services.escalation_engine import seed_default_escalations
 
+import logging
+
+logger = logging.getLogger("compassx.watchdogs")
+
 async def periodic_expiry_checker():
     """Background task to automatically expire permits past their expiry_date (Section 7.4)"""
     while True:
@@ -42,8 +46,8 @@ async def periodic_expiry_checker():
                 check_and_expire_permits(db)
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error(f"[CompassX Expiry Watchdog] Error during check: {exc}", exc_info=True)
         await asyncio.sleep(settings.EXPIRY_CHECK_INTERVAL_SECONDS)
 
 
@@ -56,8 +60,8 @@ async def periodic_escalation_checker():
                 check_and_escalate_overdue_tasks(db)
             finally:
                 db.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error(f"[CompassX Escalation Watchdog] Error during check: {exc}", exc_info=True)
         await asyncio.sleep(settings.EXPIRY_CHECK_INTERVAL_SECONDS)
 
 @asynccontextmanager
