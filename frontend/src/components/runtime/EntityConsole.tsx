@@ -39,20 +39,10 @@ function truncate(id: string, n = 14) {
 }
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
-const EXPIRY_KEYS = ['expiry_date', 'valid_until', 'valid_to', 'expires_at', 'expiry', 'due_date', 'validUntil', 'validTo', 'expiryDate'];
 
 function entityTitle(e: { custom_fields?: Record<string, unknown> }): string | null {
   const cf = e.custom_fields || {};
   for (const k of TITLE_KEYS) {
-    const v = cf[k];
-    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
-  }
-  return null;
-}
-
-function entityExpiry(e: { custom_fields?: Record<string, unknown> }): string | null {
-  const cf = e.custom_fields || {};
-  for (const k of EXPIRY_KEYS) {
     const v = cf[k];
     if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
   }
@@ -180,7 +170,6 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
                 <th className="px-4 py-3">Record ID</th>
                 <th className="px-4 py-3">Lifecycle Status</th>
                 <th className="px-4 py-3">Workflow Step</th>
-                <th className="px-4 py-3">Expiry Date</th>
                 <th className="px-4 py-3">Version</th>
                 <th className="px-4 py-3">Updated</th>
               </tr>
@@ -188,14 +177,14 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
             <tbody className="divide-y divide-gray-100">
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-600" />
                     Loading {type} records…
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
                     No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Click &ldquo;Create {displayName || type}&rdquo; to start.
                   </td>
                 </tr>
@@ -219,15 +208,6 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
                       <span className="font-mono text-xs text-gray-700 font-medium">
                         {e.workflow_stage || e.status}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs">
-                      {entityExpiry(e) ? (
-                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-700 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
-                          {entityExpiry(e)}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{e.workflow_version}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">
