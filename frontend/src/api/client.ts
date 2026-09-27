@@ -32,6 +32,14 @@ import type {
   WorkflowRole,
   RoleResolutionResult,
   TaskAssignment,
+  InAppNotification,
+  WorkflowTemplateManifest,
+  WorkflowBundle,
+  WorkflowImportPayload,
+  WorkflowImportResult,
+  Escalation,
+  EscalationLog,
+  EntityLifecycleStatus,
 } from '../types';
 
 const API_BASE = '/api';
@@ -115,8 +123,31 @@ export const api = {
     return request(`/workflows/${encodeURIComponent(id)}/publish`, { method: 'POST' });
   },
 
+  deprecateWorkflow(id: string): Promise<Workflow> {
+    return request<Workflow>(`/workflows/${encodeURIComponent(id)}/deprecate`, { method: 'POST' });
+  },
+
   deleteWorkflow(id: string): Promise<{ deleted: boolean; id: string }> {
     return request(`/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  listWorkflowTemplates(): Promise<WorkflowTemplateManifest[]> {
+    return request<WorkflowTemplateManifest[]>('/workflows/templates');
+  },
+
+  getWorkflowTemplate(templateId: string): Promise<WorkflowBundle> {
+    return request<WorkflowBundle>(`/workflows/templates/${encodeURIComponent(templateId)}`);
+  },
+
+  exportWorkflow(id: string): Promise<WorkflowBundle> {
+    return request<WorkflowBundle>(`/workflows/${encodeURIComponent(id)}/export`);
+  },
+
+  importWorkflow(payload: WorkflowImportPayload): Promise<WorkflowImportResult> {
+    return request<WorkflowImportResult>('/workflows/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   listConditions(entityType?: string): Promise<ConditionDefinition[]> {
@@ -390,6 +421,7 @@ export const api = {
     description?: string;
     icon?: string;
     fields?: EntityFieldInput[];
+    statuses?: EntityLifecycleStatus[];
   }): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>('/entity-types', {
       method: 'POST',
@@ -399,7 +431,12 @@ export const api = {
 
   updateEntityType(
     name: string,
-    input: { display_name?: string; description?: string; icon?: string }
+    input: {
+      display_name?: string;
+      description?: string;
+      icon?: string;
+      statuses?: EntityLifecycleStatus[];
+    }
   ): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`, {
       method: 'PUT',
@@ -693,5 +730,187 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     });
+  },
+
+  triggerEscalationCheck(): Promise<{ checked: number; escalated_count: number; results: any[] }> {
+    return request('/tasks/escalations/check', { method: 'POST' });
+  },
+
+  escalateTask(
+    taskId: string,
+    input?: { target_person_id?: string; reason?: string }
+  ): Promise<{ success: boolean; task_id: string; status: string; escalated_to_person_id?: string; escalation_reason?: string; new_task_id?: string }> {
+    return request(`/tasks/assignments/${encodeURIComponent(taskId)}/escalate`, {
+      method: 'POST',
+      body: JSON.stringify(input || {}),
+    });
+  },
+
+  // ---- In-App Notifications (Notification Center) --------------------------
+
+  listNotifications(params?: {
+    recipient_id?: string;
+    is_read?: boolean;
+    category?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: InAppNotification[]; total: number; unread_count: number }> {
+    const sp = new URLSearchParams();
+    if (params?.recipient_id) sp.set('recipient_id', params.recipient_id);
+    if (params?.is_read !== undefined) sp.set('is_read', String(params.is_read));
+    if (params?.category) sp.set('category', params.category);
+    if (params?.limit) sp.set('limit', String(params.limit));
+    if (params?.offset) sp.set('offset', String(params.offset));
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<{ items: InAppNotification[]; total: number; unread_count: number }>(`/notifications${qs}`);
+  },
+
+  getUnreadNotificationsCount(recipient_id?: string): Promise<{ unread_count: number }> {
+    const sp = new URLSearchParams();
+    if (recipient_id) sp.set('recipient_id', recipient_id);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<{ unread_count: number }>(`/notifications/unread_count${qs}`);
+  },
+
+  createNotification(input: {
+    recipient_id: string;
+    title: string;
+    message: string;
+    category?: string;
+    entity_type?: string;
+    entity_id?: string;
+    link_url?: string;
+    sender_id?: string;
+  }): Promise<InAppNotification> {
+    return request<InAppNotification>('/notifications', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  markNotificationRead(id: string, is_read: boolean = true): Promise<InAppNotification> {
+    return request<InAppNotification>(`/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_read }),
+    });
+  },
+
+  markAllNotificationsRead(recipient_id?: string): Promise<{ marked_count: number }> {
+    return request<{ marked_count: number }>('/notifications/mark_all_read', {
+      method: 'POST',
+      body: JSON.stringify({ recipient_id }),
+    });
+  },
+
+  deleteNotification(id: string): Promise<{ deleted: boolean; id: string }> {
+    return request<{ deleted: boolean; id: string }>(`/notifications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getSubprocess(entityType: string, id: string): Promise<{
+    found: boolean;
+    entity_id?: string;
+    entity_type?: string;
+    status?: string;
+    is_subprocess_state?: boolean;
+    is_child_record?: boolean;
+    subprocess_node?: {
+      name: string;
+      subprocess_id: string;
+      target_entity_type: string;
+      resume_event: string;
+      autocreate_child: boolean;
+    };
+    child_subprocess?: {
+      child_id: string;
+      child_entity_type: string;
+      child_status: string;
+      created_at?: string;
+      updated_at?: string;
+      custom_fields?: Record<string, unknown>;
+    } | null;
+    parent_workflow?: {
+      parent_entity_id: string;
+      parent_entity_type: string;
+      parent_state?: string;
+      parent_status?: string;
+      subprocess_id?: string;
+    } | null;
+  }> {
+    return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/subprocess`);
+  },
+
+  launchSubprocess(entityType: string, id: string): Promise<{
+    success: boolean;
+    subprocess: {
+      subprocess_id: string;
+      target_entity_type: string;
+      child_id: string;
+      child_status: string;
+      action: string;
+    };
+  }> {
+    return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/subprocess/launch`, {
+      method: 'POST',
+    });
+  },
+
+  // Escalations Engine
+  listEscalations(params?: { entity_type?: string; status?: string }): Promise<Escalation[]> {
+    const sp = new URLSearchParams();
+    if (params?.entity_type) sp.set('entity_type', params.entity_type);
+    if (params?.status) sp.set('status', params.status);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<Escalation[]>(`/escalations${qs}`);
+  },
+
+  getEscalation(id: string): Promise<Escalation> {
+    return request<Escalation>(`/escalations/${encodeURIComponent(id)}`);
+  },
+
+  createEscalation(input: Partial<Escalation>): Promise<Escalation> {
+    return request<Escalation>('/escalations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateEscalation(id: string, input: Partial<Escalation>): Promise<Escalation> {
+    return request<Escalation>(`/escalations/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteEscalation(id: string): Promise<{ deleted: boolean; id: string }> {
+    return request<{ deleted: boolean; id: string }>(`/escalations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  activateEscalation(id: string, active: boolean = true): Promise<{ id: string; status: string }> {
+    return request<{ id: string; status: string }>(`/escalations/${encodeURIComponent(id)}/activate?active=${active}`, {
+      method: 'POST',
+    });
+  },
+
+  runEscalation(id: string): Promise<{ escalation_id: string; executed: boolean; triggered_count: number; results: unknown[] }> {
+    return request(`/escalations/${encodeURIComponent(id)}/run`, {
+      method: 'POST',
+    });
+  },
+
+  runAllEscalations(): Promise<{ executed: boolean; triggered_count: number; results: unknown[] }> {
+    return request('/escalations/run-all', {
+      method: 'POST',
+    });
+  },
+
+  getEscalationLogs(id?: string, limit: number = 50): Promise<EscalationLog[]> {
+    if (id) {
+      return request<EscalationLog[]>(`/escalations/${encodeURIComponent(id)}/logs?limit=${limit}`);
+    }
+    return request<EscalationLog[]>(`/escalations/logs?limit=${limit}`);
   },
 };

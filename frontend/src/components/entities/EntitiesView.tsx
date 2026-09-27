@@ -13,6 +13,7 @@ import {
   Cpu,
   Tag,
   Box,
+  ShieldAlert,
   Pencil,
   Trash2,
   GitBranch,
@@ -29,6 +30,7 @@ import type { EntityTypeDefinition } from '../../types';
 const ICON_MAP: Record<string, typeof Layers> = {
   ClipboardList,
   ShieldCheck,
+  ShieldAlert,
   Calendar,
   AlertTriangle,
   FileText,

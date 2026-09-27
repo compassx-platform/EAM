@@ -273,13 +273,25 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
 
     transitions = (wf.definition or {}).get("transitions", [])
     valid_transitions = []
+    current_stage = getattr(entity, "workflow_stage", None) or entity.status
 
     for t in transitions:
-        if t.get("from") == entity.status:
+        t_from = t.get("from")
+        if t_from in (current_stage, entity.status):
+            event_name = t.get("event") or t.get("label") or (f"TO_{t.get('to')}" if t.get("to") else "ACTION")
+            is_sys = bool(
+                t.get("is_system")
+                or event_name in ["EXPIRED", "TRUE", "FALSE", "TIMEOUT", "AUTO"]
+            )
             entry: Dict[str, Any] = {
-                "event_type": t.get("event"),
+                "event_type": event_name,
                 "to_state": t.get("to"),
                 "conditions": t.get("conditions", []) or [],
+                "label": t.get("label") or t.get("button_label"),
+                "button_label": t.get("button_label") or t.get("label"),
+                "button_style": t.get("button_style") or t.get("style"),
+                "is_system": is_sys,
+                "description": t.get("description") or t.get("instructions"),
             }
             if t.get("choices"):
                 entry["choices"] = t.get("choices")
@@ -289,14 +301,22 @@ def get_valid_transitions(entity_type: str, id: str, db: Session = Depends(get_d
 
     auto_pending = []
     for a in (wf.definition or {}).get("auto_transitions", []) or []:
-        if a.get("from") == entity.status:
+        if a.get("from") in (current_stage, entity.status):
             auto_pending.append(a)
+
+    current_node = None
+    for n in (wf.definition or {}).get("nodes", []) or []:
+        if n.get("name") in (current_stage, entity.status):
+            current_node = n
+            break
 
     return {
         "entity_id": id,
         "entity_type": key,
         "current_status": entity.status,
+        "workflow_stage": current_stage,
         "workflow_version": wf.version_label,
+        "current_node": current_node,
         "valid_transitions": valid_transitions,
         "auto_transitions_pending": auto_pending,
         "has_published_workflow": True,
@@ -314,3 +334,58 @@ def rebuild_entity_cache(entity_type: str, id: str, db: Session = Depends(get_db
         return {"rebuilt": True, "entity": rebuilt}
     except Exception as ex:
         raise HTTPException(status_code=500, detail=str(ex))
+
+
+@router.get("/api/{entity_type}/{id}/subprocess")
+def get_entity_subprocess_endpoint(entity_type: str, id: str, db: Session = Depends(get_db)):
+    """
+    Returns the linked child subprocess or parent workflow relationship and status for this entity.
+    """
+    key = _verify_entity_type(db, entity_type)
+    from backend.services.subprocess_service import get_subprocess_status
+    status_data = get_subprocess_status(db, key, id)
+    return status_data
+
+
+@router.post("/api/{entity_type}/{id}/subprocess/launch")
+def launch_entity_subprocess_endpoint(
+    entity_type: str,
+    id: str,
+    target_entity_type: Optional[str] = None,
+    subprocess_id: Optional[str] = None,
+    x_actor_id: Optional[str] = Header(None, alias="X-Actor-Id"),
+    db: Session = Depends(get_db),
+):
+    """
+    Explicitly launches or re-links a child subprocess for this entity record at its current state.
+    """
+    key = _verify_entity_type(db, entity_type)
+    from backend.services.subprocess_service import handle_subprocess_state_entry, _load_workflow
+    from backend.models.entities import get_entity_models
+
+    EntityModel, _ = get_entity_models(key)
+    entity = db.query(EntityModel).filter(EntityModel.id == id).first()
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"Entity '{id}' not found")
+
+    try:
+        wf = _load_workflow(db, key, entity.workflow_version)
+        definition = wf.definition or {}
+        custom_fields = dict(entity.custom_fields or {})
+        # Force clear existing child link if re-launching
+        custom_fields.pop("subprocess_child_id", None)
+
+        sub_res = handle_subprocess_state_entry(
+            db=db,
+            entity_type=key,
+            entity_id=id,
+            state_name=entity.status,
+            definition=definition,
+            custom_fields=custom_fields,
+            workflow_version=entity.workflow_version,
+        )
+        if not sub_res:
+            raise HTTPException(status_code=400, detail="Current state is not a subprocess node or child launch failed")
+        return {"success": True, "subprocess": sub_res}
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=str(ex))

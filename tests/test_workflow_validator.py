@@ -63,3 +63,62 @@ def test_node_condition_validation(test_db):
     errors, warnings = validate_workflow_definition(test_db, "workorder", invalid_def)
     assert any("Node 'CheckCondition': Condition ID 'non_existent_cond' does not exist" in e for e in errors)
 
+
+def test_maximo_router_validation_rules(test_db):
+    # Router missing condition
+    no_cond_def = {
+        "entity_type": "workorder",
+        "states": ["Draft", "EvaluateCost", "Approved", "Rejected"],
+        "nodes": [
+            {"name": "Draft", "kind": "start", "position": {"x": 0, "y": 0}},
+            {"name": "EvaluateCost", "kind": "router", "position": {"x": 100, "y": 0}},
+            {"name": "Approved", "kind": "state", "position": {"x": 200, "y": 0}},
+            {"name": "Rejected", "kind": "end", "position": {"x": 200, "y": 100}},
+        ],
+        "transitions": [
+            {"from": "Draft", "event": "SUBMIT", "to": "EvaluateCost", "conditions": []},
+            {"from": "EvaluateCost", "event": "TRUE", "to": "Approved", "conditions": []},
+            {"from": "EvaluateCost", "event": "FALSE", "to": "Rejected", "conditions": []},
+        ],
+    }
+    errors, warnings = validate_workflow_definition(test_db, "workorder", no_cond_def)
+    assert any("Router 'EvaluateCost' must have a condition assigned" in e for e in errors)
+
+    # Router missing FALSE branch
+    missing_false_def = {
+        "entity_type": "workorder",
+        "states": ["Draft", "EvaluateCost", "Approved"],
+        "nodes": [
+            {"name": "Draft", "kind": "start", "position": {"x": 0, "y": 0}},
+            {"name": "EvaluateCost", "kind": "router", "position": {"x": 100, "y": 0}, "condition_id": "cond_role_supervisor"},
+            {"name": "Approved", "kind": "state", "position": {"x": 200, "y": 0}},
+        ],
+        "transitions": [
+            {"from": "Draft", "event": "SUBMIT", "to": "EvaluateCost", "conditions": []},
+            {"from": "EvaluateCost", "event": "TRUE", "to": "Approved", "conditions": []},
+        ],
+    }
+    errors, warnings = validate_workflow_definition(test_db, "workorder", missing_false_def)
+    assert any("Router 'EvaluateCost' is missing an outgoing FALSE branch" in e for e in errors)
+
+    # Valid complete router workflow
+    valid_router_def = {
+        "entity_type": "workorder",
+        "states": ["Draft", "EvaluateCost", "Approved", "Rejected"],
+        "nodes": [
+            {"name": "Draft", "kind": "start", "position": {"x": 0, "y": 0}},
+            {"name": "EvaluateCost", "kind": "router", "position": {"x": 100, "y": 0}, "condition_id": "cond_role_supervisor"},
+            {"name": "Approved", "kind": "state", "position": {"x": 200, "y": 0}},
+            {"name": "Rejected", "kind": "end", "position": {"x": 200, "y": 100}},
+        ],
+        "transitions": [
+            {"from": "Draft", "event": "SUBMIT", "to": "EvaluateCost", "conditions": []},
+            {"from": "EvaluateCost", "event": "TRUE", "to": "Approved", "conditions": []},
+            {"from": "EvaluateCost", "event": "FALSE", "to": "Rejected", "conditions": []},
+        ],
+        "terminal_states": ["Rejected"],
+    }
+    errors, warnings = validate_workflow_definition(test_db, "workorder", valid_router_def)
+    assert len(errors) == 0
+
+

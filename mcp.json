@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "compassx_sql_warehouse": {
+      "url": "https://135.13.180.167.nip.io/api/v1/ai-gateway/mcp/servers/compassx_sql_warehouse/sse",
+      "type": "sse"
+    },
+    "compassx_catalog_search": {
+      "url": "https://135.13.180.167.nip.io/api/v1/ai-gateway/mcp/servers/compassx_catalog_search/sse",
+      "type": "sse"
+    },
+    "compassx_notebook_manager": {
+      "url": "https://135.13.180.167.nip.io/api/v1/ai-gateway/mcp/servers/compassx_notebook_manager/sse",
+      "type": "sse"
+    },
+    "compassx_dashboard_manager": {
+      "url": "https://135.13.180.167.nip.io/api/v1/ai-gateway/mcp/servers/compassx_dashboard_manager/sse",
+      "type": "sse"
+    },
+    "EAM_MCP": {
+      "url": "https://eam.135.13.180.167.nip.io/mcp/sse",
+      "type": "sse"
+    }
+  }
+}

@@ -13,7 +13,7 @@ import type {
   ConditionDefinition,
   ConditionAction,
 } from '../../types';
-import { ConditionCard } from '../builder/studio/ConditionCard';
+import { ConditionCard } from '../workflow-ui/ConditionCard';
 import { formatConditionSummary } from '../../lib/conditions';
 
 interface FormConditionSelectorProps {

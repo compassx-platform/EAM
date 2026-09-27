@@ -75,9 +75,23 @@ ACTION_TYPES_CATALOG = [
             {"name": "payload_template", "label": "Payload Template ({{field}} supported)", "type": "json", "required": False},
         ],
     },
+    {
+        "type": "send_in_app_notification",
+        "name": "Send In-App Notification",
+        "description": (
+            "Dispatches an in-app notification to a person, role assignee, or user on transition. "
+            "Supports {{field}} template variables in recipient, title, and message."
+        ),
+        "parameters": [
+            {"name": "recipient", "label": "Recipient (Person ID, email, or {{field}})", "type": "string", "required": True},
+            {"name": "title", "label": "Notification Title ({{field}} supported)", "type": "string", "required": True},
+            {"name": "message", "label": "Notification Message ({{field}} supported)", "type": "string", "required": True},
+            {"name": "category", "label": "Category (task_assigned / workflow_action / system_alert)", "type": "string", "required": False},
+        ],
+    },
 ]
 
-ACTION_TYPE_SET = {a["type"] for a in ACTION_TYPES_CATALOG}
+ACTION_TYPE_SET = {a["type"] for a in ACTION_TYPES_CATALOG} | {"in_app_notification"}
 
 
 def update_entity_fields(
@@ -238,6 +252,35 @@ def execute_actions(
                         payload={**(rendered or {}), "reason": f"Side effect of {entity_type} '{entity_id}'"},
                     )
                     entry.update({"success": True, "target_entity_id": linked_id, "new_status": result.get("new_status"), "unresolved_placeholders": unresolved})
+
+            elif atype in ("send_in_app_notification", "in_app_notification"):
+                from backend.services.notification_service import dispatch_notification
+                recipient_raw = params.get("recipient") or params.get("recipient_id") or params.get("recipient_field")
+                if recipient_raw and recipient_raw in custom_fields:
+                    recipient = str(custom_fields[recipient_raw])
+                else:
+                    recipient, _ = render_template(str(recipient_raw or "ALL"), custom_fields)
+
+                title_template = params.get("title", f"Workflow Notice: {entity_type} {entity_id}")
+                msg_template = params.get("message", f"Transition triggered on {entity_type} {entity_id}")
+
+                title, _ = render_template(str(title_template), custom_fields)
+                message, _ = render_template(str(msg_template), custom_fields)
+                category = params.get("category", "workflow_action")
+
+                notif = dispatch_notification(
+                    db=db,
+                    recipient_id=recipient,
+                    title=title,
+                    message=message,
+                    category=category,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    link_url=f"/records/{entity_id}?type={entity_type}",
+                    sender_id=SYSTEM_ACTOR_ID,
+                    auto_commit=True,
+                )
+                entry.update({"success": True, "notification_id": notif.id, "recipient_id": recipient, "title": title})
         except Exception as ex:  # best-effort: record, never rollback the transition
             entry.update({"success": False, "error": str(ex)})
         results.append(entry)

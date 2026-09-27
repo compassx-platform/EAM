@@ -1,91 +1,61 @@
-import type { Node, Edge } from '@xyflow/react';
+import { MarkerType } from '@xyflow/react';
 import type {
   WorkflowDefinition,
   WorkflowTransition,
   WorkflowChoice,
-  WorkflowAction,
   WorkflowAutoTransition,
 } from '../../types';
-
-export type NodeKind = 'start' | 'state' | 'task' | 'gate' | 'router' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
-
-export interface NodeMeta {
-  name: string;
-  kind: NodeKind;
-  position: { x: number; y: number };
-  condition_id?: string | null;
-  conditions?: string[];
-  description?: string;
-  role_id?: string | null;
-  task_instructions?: string | null;
-  time_limit_hours?: number | null;
-}
-
-export type WorkflowFlowNode = Node<
-  {
-    label: string;
-    kind: NodeKind;
-    /** True when this state is a declared terminal state (cannot advance). */
-    terminal?: boolean;
-    condition_id?: string | null;
-    condition_label?: string | null;
-    conditions?: string[];
-    description?: string;
-    role_id?: string | null;
-    role_name?: string | null;
-    task_instructions?: string | null;
-    time_limit_hours?: number | null;
-    onRename?: (oldLabel: string, newLabel: string) => void;
-    onDelete?: (id: string) => void;
-    onDuplicate?: (id: string) => void;
-  },
-  'state'
->;
-export type WorkflowFlowEdge = Edge<
-  {
-    event: string;
-    conditions: string[];
-    choices?: WorkflowChoice[];
-    on_after?: WorkflowAction[];
-    isRouterSource?: boolean;
-    onRenameEvent?: (edgeId: string, event: string) => void;
-    onDelete?: (id: string) => void;
-  },
-  'event'
->;
-
-/** True when the connection has been split into conditional branches. */
-export function edgeIsBranching(e: WorkflowFlowEdge): boolean {
-  return (e.data?.choices?.length ?? 0) > 0;
-}
-
-/** Number of conditional branches on a connection (0 = plain transition). */
-export function edgeBranchCount(e: WorkflowFlowEdge): number {
-  return e.data?.choices?.length ?? 0;
-}
-
-/** Editable copy of a single edge for live editing in an inspector. */
-export function edgeDescription(e: WorkflowFlowEdge): {
-  from: string;
-  event: string;
-  to: string | null;
-  guardCount: number;
-  branchCount: number;
-} {
-  const branches = e.data?.choices ?? [];
-  const fallback = branches.find((c) => !c.when || c.when.length === 0)?.to ?? branches[0]?.to ?? null;
-  return {
-    from: e.source,
-    event: e.data?.event ?? 'EVENT',
-    to: e.data?.choices?.length ? fallback : e.target || fallback,
-    guardCount: e.data?.conditions?.length ?? 0,
-    branchCount: branches.length,
-  };
-}
+import type {
+  WorkflowFlowNode,
+  WorkflowFlowEdge,
+  NodeMeta,
+  NodeKind,
+} from './types';
+import {
+  kindDefaultLabel,
+  NODE_KINDS,
+  isConditionKind,
+  isStopKind,
+  isActionKind,
+  isSubprocessKind,
+  isSingleOutgoingKind,
+} from './types';
 
 export interface WorkflowDefinitionExtras {
   terminal_states?: string[];
   auto_transitions?: WorkflowAutoTransition[];
+}
+
+const COLUMN_GAP = 280;
+const ROW_GAP = 120;
+const COLS = 3;
+
+export function layoutPosition(index: number) {
+  const col = index % COLS;
+  const row = Math.floor(index / COLS);
+  return { x: 48 + col * COLUMN_GAP, y: 48 + row * ROW_GAP };
+}
+
+export function defaultPositionFor(kind: NodeKind, index: number) {
+  const base = layoutPosition(index);
+  const offset = {
+    start: 0,
+    stop: 0,
+    end: 0,
+    condition: 40,
+    router: 40,
+    gate: 50,
+    task: 0,
+    state: 0,
+    manual: 0,
+    action: 0,
+    comm: 0,
+    wait: 0,
+    interaction: 0,
+    subprocess: 0,
+    sub: 0,
+  }[kind] || 0;
+  return { x: base.x + offset, y: base.y };
 }
 
 /** Display target for a transition: explicit `to`, or the default branch target. */
@@ -97,44 +67,9 @@ export function transitionTargetLabel(t: WorkflowTransition): string | null {
   return choices.length > 0 ? choices[0].to : null;
 }
 
-export const NODE_KINDS: Array<{ kind: NodeKind; label: string; description: string }> = [
-  { kind: 'start', label: 'Start', description: 'Entry point — new records begin here' },
-  { kind: 'state', label: 'Step', description: 'A step in the process' },
-  { kind: 'router', label: 'Router', description: 'Splits and routes to different target states based on conditions' },
-  { kind: 'task', label: 'Task', description: 'Work by a user, e.g. an approval' },
-  { kind: 'gate', label: 'Condition', description: 'Evaluates a condition' },
-  { kind: 'manual', label: 'Manual Input', description: 'Prompts the user to pick an option' },
-  { kind: 'wait', label: 'Wait', description: 'Pauses the workflow until a date or condition is met' },
-  { kind: 'sub', label: 'Sub-Process', description: 'Starts another workflow process as a sub-routine' },
-  { kind: 'comm', label: 'Communication', description: 'Sends a message or notification when reached' },
-  { kind: 'end', label: 'Stop', description: 'Terminal outcome — the workflow stops here' },
-];
-
-export const KIND_LABEL: Record<NodeKind, string> = Object.fromEntries(
-  NODE_KINDS.map((k) => [k.kind, k.label])
-) as Record<NodeKind, string>;
-
-export function kindDefaultLabel(kind: NodeKind): string {
-  const entry = NODE_KINDS.find((k) => k.kind === kind);
-  return entry ? entry.label : 'State';
-}
-
-export function defaultPositionFor(kind: NodeKind, index: number) {
-  const base = layoutPosition(index);
-  const offset = { start: 0, end: 0, router: 50, gate: 60, task: 0, state: 0, manual: 0, wait: 0, sub: 0, comm: 0 }[kind] || 0;
-  return { x: base.x + offset, y: base.y };
-}
-
-const COLUMN_GAP = 240;
-const ROW_GAP = 130;
-const COLS = 3;
-
-export function layoutPosition(index: number) {
-  const col = index % COLS;
-  const row = Math.floor(index / COLS);
-  return { x: 48 + col * COLUMN_GAP, y: 48 + row * ROW_GAP };
-}
-
+/**
+ * Converts backend WorkflowDefinition into React Flow nodes and edges.
+ */
 export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] } {
   const metaByName = new Map<string, NodeMeta>((def.nodes || []).map((m) => [m.name, m]));
   const autoByState = new Map<string, WorkflowAutoTransition[]>();
@@ -149,7 +84,7 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
     let condId = meta?.condition_id || (meta?.conditions && meta.conditions[0]) || null;
     let conds = meta?.conditions || (condId ? [condId] : []);
 
-    if ((meta?.kind === 'router' || (!meta && autoByState.has(label))) && !condId) {
+    if ((isConditionKind(meta?.kind) || (!meta && autoByState.has(label))) && !condId) {
       const autos = autoByState.get(label) || [];
       const trueAuto = autos.find((a) => a.event === 'TRUE');
       if (trueAuto?.when && trueAuto.when.length > 0) {
@@ -164,32 +99,59 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
       position: meta?.position || layoutPosition(i),
       data: {
         label,
-        kind: meta?.kind || 'state',
+        kind: meta?.kind || (i === 0 ? 'start' : (def.terminal_states || []).includes(label) ? 'stop' : 'task'),
+        entity_status: meta?.entity_status || null,
         condition_id: condId,
         conditions: conds,
         description: meta?.description,
         role_id: meta?.role_id || null,
         task_instructions: meta?.task_instructions || null,
         time_limit_hours: meta?.time_limit_hours || null,
+        action_type: meta?.action_type || null,
+        action_target_field: meta?.action_target_field || null,
+        action_value: meta?.action_value || null,
+        action_message: meta?.action_message || null,
+        interaction_app: meta?.interaction_app || null,
+        interaction_tab: meta?.interaction_tab || null,
+        subprocess_id: meta?.subprocess_id || null,
+        subprocess_entity_type: meta?.subprocess_entity_type || null,
+        autocreate_child: meta?.autocreate_child ?? true,
+        resume_event: meta?.resume_event || null,
+        on_child_terminal_states: meta?.on_child_terminal_states || [],
       },
     };
   });
 
   const edges: WorkflowFlowEdge[] = def.transitions.map((t) => {
     const fromNodeMeta = metaByName.get(t.from);
-    const isRouterSource = fromNodeMeta?.kind === 'router';
+    const eventUpper = (t.event || '').toUpperCase();
+    const isRouterSource = isConditionKind(fromNodeMeta?.kind) || eventUpper === 'TRUE' || eventUpper === 'FALSE';
+    const sourceHandle = isRouterSource && (eventUpper === 'TRUE' || eventUpper === 'FALSE') ? eventUpper : undefined;
     return {
       id: `${t.from}|${t.event}|${t.to || ''}|${Math.random().toString(36).slice(2, 7)}`,
       type: 'event',
       source: t.from,
       target: transitionTargetLabel(t) || '',
-      sourceHandle: isRouterSource && (t.event === 'TRUE' || t.event === 'FALSE') ? t.event : undefined,
+      sourceHandle,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 14,
+        height: 14,
+        color: isRouterSource ? '#64748b' : '#94a3b8',
+      },
       data: {
         event: t.event,
+        label: t.label || t.button_label,
+        button_label: t.button_label || t.label,
+        button_style: t.button_style,
+        is_system: t.is_system,
+        description: t.description,
         conditions: t.conditions ?? t.gates ?? [],
         choices: t.choices,
         on_after: t.on_after,
         isRouterSource,
+        sourceNodeKind: fromNodeMeta?.kind,
+        sourceNodeLabel: t.from,
       },
     };
   });
@@ -197,6 +159,9 @@ export function definitionToFlow(def: WorkflowDefinition): { nodes: WorkflowFlow
   return { nodes, edges };
 }
 
+/**
+ * Converts React Flow nodes and edges back into clean backend WorkflowDefinition.
+ */
 export function flowToDefinition(
   nodes: WorkflowFlowNode[],
   edges: WorkflowFlowEdge[],
@@ -204,12 +169,14 @@ export function flowToDefinition(
   versionLabel: string,
   extras?: WorkflowDefinitionExtras
 ): WorkflowDefinition {
-  // Map both node.id and node.data.label to canonical state name (node.data.label)
   const idToLabel = new Map<string, string>();
+  const nodeKindByIdOrLabel = new Map<string, NodeKind>();
   for (const n of nodes) {
     if (n.data?.label) {
       idToLabel.set(n.id, n.data.label.trim());
       idToLabel.set(n.data.label, n.data.label.trim());
+      nodeKindByIdOrLabel.set(n.id, n.data.kind);
+      nodeKindByIdOrLabel.set(n.data.label.trim(), n.data.kind);
     }
   }
 
@@ -226,14 +193,26 @@ export function flowToDefinition(
     const conds = rawConds.filter((c): c is string => Boolean(c && typeof c === 'string' && c.trim())).map((c) => c.trim());
     return {
       name: n.data.label?.trim() || n.id,
-      kind: n.data.kind || 'state',
+      kind: n.data.kind || 'task',
       position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      entity_status: n.data.entity_status ? n.data.entity_status.trim() : null,
       condition_id: condId,
       conditions: conds,
       description: n.data.description,
       role_id: n.data.role_id || null,
       task_instructions: n.data.task_instructions || null,
       time_limit_hours: n.data.time_limit_hours || null,
+      action_type: n.data.action_type || null,
+      action_target_field: n.data.action_target_field || null,
+      action_value: n.data.action_value || null,
+      action_message: n.data.action_message || null,
+      interaction_app: n.data.interaction_app || null,
+      interaction_tab: n.data.interaction_tab || null,
+      subprocess_id: n.data.subprocess_id || null,
+      subprocess_entity_type: n.data.subprocess_entity_type || null,
+      autocreate_child: n.data.autocreate_child ?? true,
+      resume_event: n.data.resume_event || null,
+      on_child_terminal_states: n.data.on_child_terminal_states || [],
     };
   });
 
@@ -241,17 +220,27 @@ export function flowToDefinition(
     .map((e) => {
       const fromLabel = idToLabel.get(e.source) || e.source;
       const toLabel = e.target ? (idToLabel.get(e.target) || e.target) : null;
+      const srcKind = nodeKindByIdOrLabel.get(e.source) || nodeKindByIdOrLabel.get(fromLabel);
+      const isAutoKind = srcKind === 'start' || isActionKind(srcKind) || srcKind === 'wait' || isConditionKind(srcKind);
 
       const rawConditions = e.data?.conditions ?? [];
       const cleanConditions = Array.isArray(rawConditions)
         ? rawConditions.filter((c): c is string => Boolean(c && typeof c === 'string' && c.trim())).map((c) => c.trim())
         : [];
 
+      const eventKey = e.data?.event || (e.data?.label ? e.data.label.toUpperCase().replace(/\s+/g, '_') : 'EVENT');
+      const isSystemTransition = e.data?.is_system !== undefined ? Boolean(e.data.is_system) : isAutoKind;
+
       const transition: WorkflowTransition = {
         from: fromLabel,
-        event: e.data?.event || 'EVENT',
+        event: eventKey,
         to: e.data?.choices?.length ? null : toLabel,
         conditions: cleanConditions,
+        label: e.data?.label || e.data?.button_label || undefined,
+        button_label: e.data?.button_label || e.data?.label || undefined,
+        button_style: e.data?.button_style || undefined,
+        is_system: isSystemTransition ? true : undefined,
+        description: e.data?.description || undefined,
       };
       if (e.data?.choices?.length) {
         transition.choices = e.data.choices.map((c) => ({
@@ -265,38 +254,49 @@ export function flowToDefinition(
     })
     .filter((t) => stateSet.has(t.from) && (t.choices?.length || (t.to && stateSet.has(t.to))));
 
-  // Preserve non-router auto transitions and generate router auto transitions
+  // Preserve non-auto generated transitions and generate router/action/start auto transitions
   const existingAuto = (extras?.auto_transitions || []).filter(
-    (at) => !nodes.some((n) => n.data.kind === 'router' && (n.data.label === at.from || n.id === at.from))
+    (at) => !nodes.some((n) => (isConditionKind(n.data.kind) || isActionKind(n.data.kind) || n.data.kind === 'start') && (n.data.label === at.from || n.id === at.from))
   );
-  const routerAuto: WorkflowAutoTransition[] = [];
+  const generatedAuto: WorkflowAutoTransition[] = [];
   for (const n of nodes) {
-    if (n.data.kind === 'router') {
-      const nodeLabel = n.data.label?.trim() || n.id;
+    const nodeLabel = n.data.label?.trim() || n.id;
+    const outgoing = edges.filter((e) => e.source === n.data.label || e.source === n.id);
+
+    if (isConditionKind(n.data.kind)) {
       const rawCondId = n.data.condition_id ?? (n.data.conditions && n.data.conditions[0]) ?? null;
       const condId = rawCondId && typeof rawCondId === 'string' && rawCondId.trim() ? rawCondId.trim() : null;
 
-      const outgoing = edges.filter((e) => e.source === n.data.label || e.source === n.id);
       const trueEdge = outgoing.find((e) => e.data?.event === 'TRUE');
       const falseEdge = outgoing.find((e) => e.data?.event === 'FALSE');
       if (trueEdge) {
-        routerAuto.push({
+        generatedAuto.push({
           from: nodeLabel,
           event: 'TRUE',
           when: condId ? [condId] : [],
         });
       }
       if (falseEdge) {
-        routerAuto.push({
+        generatedAuto.push({
           from: nodeLabel,
           event: 'FALSE',
+          when: [],
+        });
+      }
+    } else if (isActionKind(n.data.kind) || n.data.kind === 'start') {
+      if (outgoing.length > 0) {
+        const outEdge = outgoing[0];
+        const eventKey = outEdge.data?.event || (n.data.kind === 'start' ? 'START' : 'NEXT');
+        generatedAuto.push({
+          from: nodeLabel,
+          event: eventKey,
           when: [],
         });
       }
     }
   }
 
-  const combinedAuto = [...existingAuto, ...routerAuto];
+  const combinedAuto = [...existingAuto, ...generatedAuto];
 
   const definition: WorkflowDefinition = {
     entity_type: entityType,
@@ -310,18 +310,6 @@ export function flowToDefinition(
   return definition;
 }
 
-export function nextStateLabel(nodes: WorkflowFlowNode[], kind: NodeKind = 'state'): string {
-  const used = new Set(nodes.map((n) => n.data.label));
-  const base = kindDefaultLabel(kind);
-  let label = base;
-  let i = 2;
-  while (used.has(label)) {
-    label = `${base} ${i}`;
-    i++;
-  }
-  return label;
-}
-
 // ---- Auto arrange (layered left→right layout) -------------------------------
 
 const ARRANGE_COL_GAP = 280;
@@ -330,15 +318,9 @@ const ARRANGE_X0 = 48;
 const ARRANGE_Y0 = 48;
 
 /**
- * Layout the workflow as a left-to-right DAG so it reads like a process flow:
- * entry states in the leftmost column, terminal states furthest right, and a
- * barycenter heuristic within each column to minimise edge crossings.
- *
- * The adjacency is derived from rendered edges plus each edge's choice-branch
- * targets (so a decision node's side branches are placed without needing a
- * visible edge). Cycles (reject/recall/cancel loops) are handled by removing
- * DFS back edges before computing longest-path layers, so they can never
- * inflate the layout.
+ * Layout the workflow as a left-to-right DAG:
+ * entry states in leftmost column, terminal states furthest right,
+ * with barycenter heuristic within each column to minimize edge crossings.
  */
 export function autoArrangePositions(
   nodes: WorkflowFlowNode[],
@@ -363,11 +345,8 @@ export function autoArrangePositions(
   }
   if (ids.length === 0) return {};
 
-  // Root = the entry (kind 'start') node, falling back to the first state.
   const root = (nodes.find((n) => n.data.kind === 'start') ?? nodes[0]).id;
 
-  // Iterative DFS from the root; classify edges terminating on the current
-  // stack as back edges (they only exist in cycles) and drop them.
   const color = new Map<string, 0 | 1 | 2>(ids.map((id) => [id, 0]));
   const idx = new Map<string, number>(ids.map((id) => [id, 0]));
   const backEdges = new Set<string>();
@@ -397,7 +376,6 @@ export function autoArrangePositions(
     }
   }
 
-  // Longest-path layers on the acyclic remainder via Kahn's algorithm.
   const indeg = new Map<string, number>(ids.map((id) => [id, 0]));
   succ.forEach((outs, u) => {
     for (const v of outs) {
@@ -417,11 +395,9 @@ export function autoArrangePositions(
       if (d === 0) queue.push(v);
     }
   }
-  // Safety net: any residual cycle members are parked after the deepest layer.
   const deepest = Math.max(0, ...layer.values());
   for (const id of ids) if (indeg.get(id)! > 0) layer.set(id, deepest + 1);
 
-  // Group into layers, preserving original order within each layer.
   const layers: string[][] = [];
   for (const id of ids) {
     const l = layer.get(id)!;
@@ -443,7 +419,6 @@ export function autoArrangePositions(
     });
   };
 
-  // Barycenter crossings reduction: sweep left→right on predecessors, then right→left on successors.
   for (let i = 1; i < layers.length; i++) {
     const ranks = new Map(layers[i - 1].map((id, idx) => [id, idx]));
     orderBy(layers[i], (id) => bary(pred.get(id) || [], ranks));
@@ -453,10 +428,6 @@ export function autoArrangePositions(
     orderBy(layers[i], (id) => bary(succ.get(id) || [], ranks));
   }
 
-  // Uniform grid: one row per node within a column, tall columns on the global
-  // row origin. Each column is shifted by whole rows so it is centred against
-  // the tallest column — rows therefore stay aligned across columns instead of
-  // zig-zagging, while every gap stays proportional.
   const maxColumnHeight = Math.max(0, ...layers.map((g) => g.length));
   const out: Record<string, { x: number; y: number }> = {};
   layers.forEach((group, depth) => {
@@ -469,4 +440,99 @@ export function autoArrangePositions(
     });
   });
   return out;
+}
+
+/**
+ * Validates the in-memory graph topology and returns errors/warnings.
+ */
+export function validateGraphTopology(
+  nodes: WorkflowFlowNode[],
+  edges: WorkflowFlowEdge[]
+): { valid: boolean; errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (nodes.length === 0) {
+    errors.push('Workflow must contain at least one state');
+    return { valid: false, errors, warnings };
+  }
+
+  const startNodes = nodes.filter((n) => n.data.kind === 'start');
+  if (startNodes.length === 0) {
+    warnings.push('No Start node found. Records will begin at the first state.');
+  } else if (startNodes.length > 1) {
+    errors.push('Workflow cannot have multiple Start nodes (Maximo rule: exactly 1 Start node).');
+  }
+
+  const endNodes = nodes.filter((n) => isStopKind(n.data.kind) || n.data.terminal);
+  if (endNodes.length === 0) {
+    warnings.push('No declared terminal (Stop) states. Process may run indefinitely.');
+  }
+
+  // Check for self-loops (Maximo rule: no direct self-loops)
+  for (const e of edges) {
+    if (e.source && e.target && e.source === e.target) {
+      errors.push(`Invalid connection: self-loop detected on node '${e.source}'`);
+    }
+  }
+
+  // Check Start node constraints (Maximo rule: 0 incoming, strictly 1 outgoing)
+  for (const sNode of startNodes) {
+    const sLabel = sNode.data.label;
+    const incomingToStart = edges.filter((e) => e.target === sNode.id || e.target === sLabel);
+    if (incomingToStart.length > 0) {
+      errors.push(`Start node '${sLabel}' cannot receive incoming connections (Maximo rule: 0 incoming).`);
+    }
+    const outgoingFromStart = edges.filter((e) => e.source === sNode.id || e.source === sLabel);
+    if (outgoingFromStart.length === 0) {
+      warnings.push(`Start node '${sLabel}' has no outgoing connection.`);
+    } else if (outgoingFromStart.length > 1) {
+      errors.push(`Start node '${sLabel}' cannot have more than 1 outgoing connection.`);
+    }
+  }
+
+  // Check Stop / End node constraints (Maximo rule: 0 outgoing)
+  for (const eNode of endNodes) {
+    const eLabel = eNode.data.label;
+    const outgoingFromStop = edges.filter((e) => e.source === eNode.id || e.source === eLabel);
+    if (outgoingFromStop.length > 0) {
+      errors.push(`Stop node '${eLabel}' cannot have outgoing connections (terminal outcome).`);
+    }
+  }
+
+  // Check Condition / Router nodes
+  for (const n of nodes) {
+    const nodeLabel = n.data.label;
+    const outgoing = edges.filter((e) => e.source === n.id || e.source === nodeLabel);
+
+    if (isConditionKind(n.data.kind)) {
+      const hasCond = Boolean(n.data.condition_id || (n.data.conditions && n.data.conditions.length > 0));
+      if (!hasCond) {
+        errors.push(`Condition node '${nodeLabel}' must have a condition assigned.`);
+      }
+      const hasTrue = outgoing.some((e) => e.data?.event === 'TRUE');
+      const hasFalse = outgoing.some((e) => e.data?.event === 'FALSE');
+      if (!hasTrue) errors.push(`Condition node '${nodeLabel}' is missing an outgoing TRUE branch.`);
+      if (!hasFalse) errors.push(`Condition node '${nodeLabel}' is missing an outgoing FALSE branch.`);
+    }
+
+    if (isSingleOutgoingKind(n.data.kind) && n.data.kind !== 'start') {
+      if (outgoing.length === 0) {
+        warnings.push(`${kindDefaultLabel(n.data.kind)} node '${nodeLabel}' has no outgoing connection.`);
+      } else if (outgoing.length > 1) {
+        errors.push(`${kindDefaultLabel(n.data.kind)} node '${nodeLabel}' cannot have more than 1 outgoing connection.`);
+      }
+    }
+
+    if (n.data.kind === 'task') {
+      if (!n.data.role_id) {
+        warnings.push(`Task node '${nodeLabel}' has no dynamic Role assigned.`);
+      }
+      if (outgoing.length === 0) {
+        warnings.push(`Task node '${nodeLabel}' has no outgoing actions.`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
 }

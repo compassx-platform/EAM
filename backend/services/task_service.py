@@ -125,8 +125,30 @@ def create_task_assignments_for_state(
             resolution_trace={"note": "Task node without assigned role"},
             created_at=now,
         )
-        db.add(assignment)
-        created_assignments.append(assignment)
+    db.flush()
+
+    # Dispatch in-app notification for each assignment
+    try:
+        from backend.services.notification_service import dispatch_notification
+        for a in created_assignments:
+            recipient = a.assigned_person_id or a.assigned_email
+            if recipient:
+                instr_text = f" Instructions: {a.instructions}" if a.instructions else ""
+                due_text = f" (Due: {a.due_date.strftime('%Y-%m-%d %H:%M UTC')})" if a.due_date else ""
+                dispatch_notification(
+                    db=db,
+                    recipient_id=recipient,
+                    title=f"Task Assigned: {a.state_name}",
+                    message=f"You have been assigned to task '{a.state_name}' on {entity_type.upper()} '{entity_id}'.{instr_text}{due_text}",
+                    category="task_assigned",
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    link_url=f"/records/{entity_id}?type={entity_type}",
+                    sender_id="system:workflow-engine",
+                    auto_commit=False,
+                )
+    except Exception as notif_err:
+        pass
 
     db.flush()
     return created_assignments

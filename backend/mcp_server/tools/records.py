@@ -310,10 +310,20 @@ def records_get_valid_transitions(entity_type: str, entity_id: str) -> Dict[str,
         valid_transitions = []
         for t in transitions:
             if t.get("from") == entity.status:
+                event_name = t.get("event") or t.get("label") or (f"TO_{t.get('to')}" if t.get("to") else "ACTION")
+                is_sys = bool(
+                    t.get("is_system")
+                    or event_name in ["EXPIRED", "TRUE", "FALSE", "TIMEOUT", "AUTO"]
+                )
                 entry = {
-                    "event_type": t.get("event"),
+                    "event_type": event_name,
                     "to_state": t.get("to"),
                     "conditions": t.get("conditions", []) or [],
+                    "label": t.get("label") or t.get("button_label"),
+                    "button_label": t.get("button_label") or t.get("label"),
+                    "button_style": t.get("button_style") or t.get("style"),
+                    "is_system": is_sys,
+                    "description": t.get("description") or t.get("instructions"),
                 }
                 if t.get("choices"):
                     entry["choices"] = t.get("choices")

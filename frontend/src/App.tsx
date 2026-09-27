@@ -16,11 +16,13 @@ import { GroupsView } from './components/people/GroupsView';
 import { GroupEditor } from './components/people/GroupEditor';
 import { RolesView } from './components/roles/RolesView';
 import { RoleEditor } from './components/roles/RoleEditor';
+import { EscalationsView } from './components/escalations';
+import { NotificationBell } from './components/notifications/NotificationBell';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox, Users, UserCheck } from 'lucide-react';
+import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox, Users, UserCheck, AlarmClock } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
 
-type Tab = 'records' | 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions' | 'people';
+type Tab = 'records' | 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions' | 'people' | 'escalations';
 
 function App() {
   const route = useHashRoute();
@@ -40,7 +42,9 @@ function App() {
             ? 'conditions'
             : route.path.startsWith('/people') || route.path.startsWith('/roles')
               ? 'people'
-              : 'workflows';
+              : route.path.startsWith('/escalations')
+                ? 'escalations'
+                : 'workflows';
 
   const switchTab = (t: Tab) => {
     if (t === 'records') navigate('/records');
@@ -49,6 +53,7 @@ function App() {
     else if (t === 'lists') navigate('/lists');
     else if (t === 'conditions') navigate('/conditions');
     else if (t === 'people') navigate('/people');
+    else if (t === 'escalations') navigate('/escalations');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
@@ -102,6 +107,7 @@ function App() {
             {navBtn('lists', 'Lists', ListChecks)}
             {navBtn('conditions', 'Conditions', ShieldCheck)}
             {navBtn('people', 'People', Users)}
+            {navBtn('escalations', 'Escalations', AlarmClock)}
           </nav>
         </div>
 
@@ -152,6 +158,15 @@ function App() {
                               : 'People Directory'}
             </span>
           )}
+
+          {tab === 'escalations' && (
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              Escalations Engine
+            </span>
+          )}
+
+          {/* Top Header In-App Notification Center */}
+          <NotificationBell />
         </div>
       </header>
 
@@ -203,6 +218,8 @@ function App() {
             )
           ) : tab === 'conditions' ? (
             <ConditionList />
+          ) : tab === 'escalations' ? (
+            <EscalationsView />
           ) : tab === 'people' ? (
             roleId !== undefined ? (
               <RoleEditor

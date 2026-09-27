@@ -13,6 +13,11 @@ export interface WorkflowChoice {
 export interface WorkflowTransition {
   from: string;
   event: string;
+  label?: string | null;
+  button_label?: string | null;
+  button_style?: 'primary' | 'secondary' | 'danger' | 'default' | null;
+  is_system?: boolean | null;
+  description?: string | null;
   /** Absent/null for decision nodes that use `choices`. */
   to?: string | null;
   /** Legacy alias for `conditions` (read for backward compatibility with pre-registry drafts). */
@@ -31,9 +36,26 @@ export interface WorkflowAutoTransition {
   when?: string[];
 }
 
+export type WorkflowNodeKind =
+  | 'start'
+  | 'stop'
+  | 'end'
+  | 'task'
+  | 'condition'
+  | 'router'
+  | 'gate'
+  | 'manual'
+  | 'action'
+  | 'comm'
+  | 'subprocess'
+  | 'sub'
+  | 'wait'
+  | 'interaction'
+  | 'state';
+
 export interface WorkflowNodeMeta {
   name: string;
-  kind: 'start' | 'state' | 'task' | 'gate' | 'router' | 'end' | 'manual' | 'wait' | 'sub' | 'comm';
+  kind: WorkflowNodeKind;
   position: { x: number; y: number };
   condition_id?: string | null;
   conditions?: string[];
@@ -41,18 +63,32 @@ export interface WorkflowNodeMeta {
   role_id?: string | null;
   task_instructions?: string | null;
   time_limit_hours?: number | null;
+  entity_status?: string | null;
+  action_type?: string | null;
+  action_target_field?: string | null;
+  action_value?: string | null;
+  action_message?: string | null;
+  interaction_app?: string | null;
+  interaction_tab?: string | null;
+  subprocess_id?: string | null;
+  subprocess_entity_type?: string | null;
+  autocreate_child?: boolean;
+  resume_event?: string | null;
+  on_child_terminal_states?: string[];
 }
 
 export interface WorkflowDefinition {
-  entity_type: string;
-  version_label: string;
+  entity_type?: string;
+  version_label?: string;
   states: string[];
   transitions: WorkflowTransition[];
   nodes?: WorkflowNodeMeta[];
+  entry_state?: string;
   /** States from which the workflow can no longer advance (terminal outcomes). */
   terminal_states?: string[];
   /** Data-driven routing fired automatically after a transition commits. */
   auto_transitions?: WorkflowAutoTransition[];
+  [key: string]: any;
 }
 
 export interface Workflow {
@@ -64,6 +100,76 @@ export interface Workflow {
   created_by?: string | null;
   created_at?: string | null;
   published_at?: string | null;
+}
+
+export interface WorkflowTemplateManifest {
+  template_id: string;
+  schema_version: string;
+  name: string;
+  description: string;
+  category: string;
+  complexity: 'Beginner' | 'Intermediate' | 'Advanced';
+  entity_type: string;
+  version_label: string;
+  author: string;
+  icon?: string;
+  tags?: string[];
+  state_count: number;
+  transition_count: number;
+  condition_count?: number;
+  role_count?: number;
+}
+
+export interface WorkflowBundle {
+  manifest: {
+    schema_version: string;
+    exported_at?: string;
+    name: string;
+    description?: string;
+    entity_type: string;
+    version_label?: string;
+    author?: string;
+    status?: string;
+    state_count?: number;
+    transition_count?: number;
+    condition_count?: number;
+    role_count?: number;
+    [key: string]: any;
+  };
+  workflow: WorkflowDefinition;
+  conditions?: ConditionDefinition[];
+  roles?: WorkflowRole[];
+  entity_fields?: EntityField[];
+  form_layout?: any;
+  gates?: any[];
+}
+
+export interface WorkflowImportPayload {
+  bundle: WorkflowBundle | Record<string, any>;
+  target_entity_type?: string;
+  conflict_strategy?: 'new_draft' | 'overwrite_draft' | 'create_entity';
+  import_conditions?: boolean;
+  import_roles?: boolean;
+  import_fields_and_forms?: boolean;
+  activate_immediately?: boolean;
+  created_by?: string;
+}
+
+export interface WorkflowImportResult {
+  success: boolean;
+  workflow: Workflow;
+  summary: {
+    entity_type: string;
+    version_label: string;
+    status: string;
+    states_count: number;
+    transitions_count: number;
+    conditions_imported: number;
+    roles_imported: number;
+    fields_imported: number;
+    form_layout_imported: boolean;
+  };
+  warnings?: string[];
 }
 
 // ---- Condition registry (centralized, reusable conditions) ------------------
@@ -229,6 +335,8 @@ export interface EntityRecord {
   id: string;
   entity_type: string;
   status: string;
+  workflow_stage?: string;
+  stage?: string;
   workflow_version: string;
   last_event_id: string;
   custom_fields: Record<string, unknown>;
@@ -251,6 +359,12 @@ export interface EntityEvent {
 export interface ValidTransition {
   event_type: string;
   to_state: string;
+  label?: string | null;
+  button_label?: string | null;
+  button_style?: 'primary' | 'secondary' | 'danger' | 'default' | null;
+  is_system?: boolean | null;
+  description?: string | null;
+  instructions?: string | null;
   conditions: string[];
   choices?: WorkflowChoice[];
   on_after?: WorkflowAction[];
@@ -420,6 +534,14 @@ export interface ListUsage {
   form_item_count: number;
 }
 
+export interface EntityLifecycleStatus {
+  id: string;
+  label: string;
+  category?: 'draft' | 'pending' | 'active' | 'completed' | 'cancelled' | 'expired' | string;
+  color?: string;
+  description?: string;
+}
+
 export interface EntityTypeVersion {
   id: string;
   entity_name: string;
@@ -429,6 +551,7 @@ export interface EntityTypeVersion {
   description?: string | null;
   icon?: string | null;
   fields: EntityFieldInput[];
+  statuses?: EntityLifecycleStatus[];
   created_by?: string | null;
   created_at?: string | null;
 }
@@ -441,6 +564,7 @@ export interface EntityTypeDefinition {
   is_system: boolean;
   version_number?: number;
   version_label?: string;
+  statuses?: EntityLifecycleStatus[];
   field_count?: number;
   workflow_count?: number;
   condition_count?: number;
@@ -583,12 +707,99 @@ export interface TaskAssignment {
   assigned_person_name?: string | null;
   assigned_group_name?: string | null;
   assigned_email?: string | null;
-  status: 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'DELEGATED' | 'REJECTED';
+  status: 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'DELEGATED' | 'ESCALATED' | 'REJECTED';
   instructions?: string | null;
   time_limit_hours?: number | null;
   due_date?: string | null;
   resolution_trace?: any;
+  escalated_to_person_id?: string | null;
+  escalated_to_person_name?: string | null;
+  escalation_count?: number;
+  escalated_at?: string | null;
+  escalation_reason?: string | null;
   completed_by?: string | null;
   completed_at?: string | null;
   created_at: string;
+}
+
+// ---- In-App Notifications (Notification Center) ----------------------------
+
+export type NotificationCategory = 'task_assigned' | 'workflow_action' | 'system_alert' | 'status_changed';
+
+export interface InAppNotification {
+  id: string;
+  recipient_id: string;
+  sender_id: string;
+  title: string;
+  message: string;
+  category: NotificationCategory | string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  link_url?: string | null;
+  is_read: boolean;
+  read_at?: string | null;
+  created_at: string;
+}
+
+// ---- Enterprise Escalations (IBM Maximo Escalation Architecture) -----------
+
+export interface EscalationPointAction {
+  action_type: 'TRANSITION_WORKFLOW' | 'CHANGE_STATUS' | 'SEND_NOTIFICATION' | 'REASSIGN_TASK' | 'UPDATE_FIELD' | string;
+  event?: string;
+  event_type?: string;
+  target_status?: string;
+  status_value?: string;
+  recipient_role?: string;
+  target_role_id?: string;
+  title?: string;
+  message?: string;
+  field_name?: string;
+  field_value?: any;
+  actor_id?: string;
+  reason?: string;
+}
+
+export type EscalationAction = EscalationPointAction;
+
+export interface EscalationPoint {
+  id?: string;
+  elapsed_hours: number;
+  reference_date_field: string;
+  filter_status?: string[];
+  condition_id?: string | null;
+  actions: EscalationPointAction[];
+}
+
+export interface Escalation {
+  id: string;
+  name: string;
+  description?: string;
+  entity_type: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  applies_to: 'entity' | 'task_assignment';
+  condition_id?: string | null;
+  condition_sql?: string | null;
+  schedule_cron?: string;
+  check_interval_seconds?: number;
+  points: EscalationPoint[];
+  is_system?: boolean;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  next_run_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EscalationLog {
+  id: string;
+  escalation_id: string;
+  entity_type?: string;
+  entity_id?: string;
+  action_type?: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'TRIGGERED' | 'ERROR' | string;
+  message?: string;
+  details?: Record<string, any>;
+  point_index?: number;
+  actions_taken?: any[];
+  execution_time: string;
 }

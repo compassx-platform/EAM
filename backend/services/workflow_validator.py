@@ -183,17 +183,70 @@ def validate_workflow_definition(
             if a_event and (a_from, a_event) not in seen_transitions:
                 errors.append(f"{actx}: event '{a_event}' from state '{a_from}' has no matching 'transitions' entry (auto transitions fire real workflow events)")
 
-    # Validate node condition references if nodes metadata is present
+    # Validate node metadata (Maximo rules for Router, Start, Stop, and Task nodes)
     nodes = definition.get("nodes", []) or []
+    start_state_name = states[0] if states else None
+    
     if isinstance(nodes, list):
         for n in nodes:
             if isinstance(n, dict):
+                n_name = n.get("name") or "unnamed"
+                n_kind = n.get("kind") or "state"
+                
+                if n_kind == "start":
+                    start_state_name = n_name
+                
                 cond_id = n.get("condition_id")
                 if cond_id and str(cond_id).strip() and str(cond_id).strip() not in valid_condition_ids:
-                    errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{str(cond_id).strip()}' does not exist for entity type '{entity_type}'")
+                    errors.append(f"Node '{n_name}': Condition ID '{str(cond_id).strip()}' does not exist for entity type '{entity_type}'")
                 for c_id in (n.get("conditions") or []):
                     if c_id and str(c_id).strip() and str(c_id).strip() not in valid_condition_ids:
-                        errors.append(f"Node '{n.get('name', 'unnamed')}': Condition ID '{str(c_id).strip()}' does not exist for entity type '{entity_type}'")
+                        errors.append(f"Node '{n_name}': Condition ID '{str(c_id).strip()}' does not exist for entity type '{entity_type}'")
+                
+                # Maximo Condition / Router Node rules: Condition assigned + both TRUE and FALSE outlets connected
+                if n_kind in ("condition", "router"):
+                    active_conds = (n.get("conditions") or [])
+                    has_cond = bool(cond_id and str(cond_id).strip()) or bool(active_conds and len(active_conds) > 0)
+                    if not has_cond:
+                        errors.append(f"Condition node '{n_name}' must have a condition assigned" if n_kind == "condition" else f"Router '{n_name}' must have a condition assigned")
+                    
+                    # Check outgoing branches
+                    outgoing_events = {t.get("event") for t in transitions if t.get("from") == n_name}
+                    for at in auto_transitions:
+                        if isinstance(at, dict) and at.get("from") == n_name and at.get("event"):
+                            outgoing_events.add(at.get("event"))
+                    
+                    if "TRUE" not in outgoing_events:
+                        errors.append(f"Condition node '{n_name}' is missing an outgoing TRUE branch" if n_kind == "condition" else f"Router '{n_name}' is missing an outgoing TRUE branch")
+                    if "FALSE" not in outgoing_events:
+                        errors.append(f"Condition node '{n_name}' is missing an outgoing FALSE branch" if n_kind == "condition" else f"Router '{n_name}' is missing an outgoing FALSE branch")
+
+                # Stop node warning if outgoing lines exist
+                if n_kind in ("stop", "end"):
+                    if n_name in states_with_outgoing:
+                        warnings.append(f"Stop node '{n_name}' has outgoing transitions")
+
+    # Reachability analysis from initial/start state
+    if start_state_name and start_state_name in state_set:
+        reachable = {start_state_name}
+        queue = [start_state_name]
+        while queue:
+            curr = queue.pop(0)
+            for t in transitions:
+                if t.get("from") == curr:
+                    to_st = t.get("to")
+                    if to_st and to_st in state_set and to_st not in reachable:
+                        reachable.add(to_st)
+                        queue.append(to_st)
+                    for ch in (t.get("choices") or []):
+                        if isinstance(ch, dict):
+                            ch_to = ch.get("to")
+                            if ch_to and ch_to in state_set and ch_to not in reachable:
+                                reachable.add(ch_to)
+                                queue.append(ch_to)
+        unreachable = state_set - reachable
+        for un in sorted(unreachable):
+            warnings.append(f"State '{un}' is unreachable from start state '{start_state_name}'")
 
     # Terminal-state warnings use explicit config; no hardcoded names.
     for s in states:

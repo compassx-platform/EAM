@@ -13,7 +13,10 @@ import { EntityFormView } from './EntityFormView';
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-amber-100 text-amber-800 border-amber-200',
   requested: 'bg-blue-100 text-blue-800 border-blue-200',
+  submitted: 'bg-blue-100 text-blue-800 border-blue-200',
+  pending: 'bg-blue-100 text-blue-800 border-blue-200',
   active: 'bg-blue-100 text-blue-800 border-blue-200',
+  in_progress: 'bg-sky-100 text-sky-800 border-sky-200',
   isolationprecheck: 'bg-purple-100 text-purple-800 border-purple-200',
   riskassessed: 'bg-indigo-100 text-indigo-800 border-indigo-200',
   approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -21,7 +24,9 @@ const STATUS_BADGE: Record<string, string> = {
   published: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   rejected: 'bg-rose-100 text-rose-800 border-rose-200',
   closed: 'bg-gray-100 text-gray-700 border-gray-200',
+  cancelled: 'bg-rose-100 text-rose-800 border-rose-200',
   expired: 'bg-orange-100 text-orange-800 border-orange-200',
+  expire: 'bg-orange-100 text-orange-800 border-orange-200',
 };
 
 function statusBadge(s?: string) {
@@ -163,23 +168,24 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
               <tr className="border-b border-gray-200 bg-gray-50/80 text-[10px] font-bold uppercase tracking-wider text-gray-500">
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Record ID</th>
-                <th className="px-4 py-3">Current State</th>
-                <th className="px-4 py-3">Workflow</th>
-                <th className="px-4 py-3">Fields</th>
+                <th className="px-4 py-3">Lifecycle Status</th>
+                <th className="px-4 py-3">Workflow Step</th>
+                <th className="px-4 py-3">Expiry Date</th>
+                <th className="px-4 py-3">Version</th>
                 <th className="px-4 py-3">Updated</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-600" />
                     Loading {type} records…
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400">
                     No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Click &ldquo;Create {displayName || type}&rdquo; to start.
                   </td>
                 </tr>
@@ -190,17 +196,30 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
                     onClick={() => patchQuery({ record: e.id, selected: undefined })}
                     className="cursor-pointer hover:bg-slate-50/80 transition-colors group"
                   >
-                    <td className="max-w-[240px] truncate px-4 py-3 text-xs font-semibold text-gray-900 group-hover:text-blue-700">
+                    <td className="max-w-[200px] truncate px-4 py-3 text-xs font-semibold text-gray-900 group-hover:text-blue-700">
                       {entityTitle(e) ?? <span className="font-normal text-gray-400">—</span>}
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-gray-600">{truncate(e.id)}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
                         {e.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs text-gray-700 font-medium">
+                        {e.workflow_stage || e.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {e.custom_fields?.expiry_date || e.custom_fields?.valid_until ? (
+                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-gray-700 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
+                          {String(e.custom_fields.expiry_date || e.custom_fields.valid_until)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{e.workflow_version}</td>
-                    <td className="px-4 py-3 text-xs text-gray-600">{Object.keys(e.custom_fields || {}).length}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
                     </td>

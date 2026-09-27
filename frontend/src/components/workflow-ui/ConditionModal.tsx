@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { Loader2, Plus, ShieldPlus, Trash2, GitBranch, X, History, Calendar } from 'lucide-react';
-import { api } from '../../../api/client';
-import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, ConditionVersion, EntityField } from '../../../types';
+import { api } from '../../api/client';
+import type { ConditionAtom, ConditionDefinition, ConditionGroup, ConditionTypeInfo, ConditionVersion, EntityField } from '../../types';
 import { Field, SectionLabel } from './ui';
 
 const OP_LABEL: Record<string, string> = {

@@ -10,8 +10,33 @@ router = APIRouter(prefix="/tasks", tags=["Task Assignments"])
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED'
+    status: str  # 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'DELEGATED' | 'ESCALATED' | 'REJECTED'
     completed_by: Optional[str] = None
+
+
+class TaskEscalateInput(BaseModel):
+    target_person_id: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@router.post("/escalations/check")
+def trigger_escalation_check(db: Session = Depends(get_db)):
+    """Runs the escalation service scan to auto-escalate overdue task assignments."""
+    from backend.services.escalation_service import check_and_escalate_overdue_tasks
+    results = check_and_escalate_overdue_tasks(db)
+    return {"checked": len(results), "escalated_count": len([r for r in results if r.get("success")]), "results": results}
+
+
+@router.post("/assignments/{task_id}/escalate")
+def manual_escalate_task(task_id: str, payload: Optional[TaskEscalateInput] = None, db: Session = Depends(get_db)):
+    """Manually escalates a task assignment to a supervisor or specific person."""
+    from backend.services.escalation_service import escalate_single_task
+    target_pid = payload.target_person_id if payload else None
+    reason = payload.reason if payload else None
+    result = escalate_single_task(db, task_id=task_id, target_person_id=target_pid, reason=reason)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Escalation failed"))
+    return result
 
 
 @router.get("/assignments")

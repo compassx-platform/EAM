@@ -1,5 +1,5 @@
 import { ShieldCheck, Pencil, Minus } from 'lucide-react';
-import type { ConditionDefinition } from '../../../types';
+import type { ConditionDefinition } from '../../types';
 
 export function renderRulePreview(ruleNode: any): string {
   if (!ruleNode) return '';

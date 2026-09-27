@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
     
     # Auto-expiry interval seconds for background worker (if running)
-    EXPIRY_CHECK_INTERVAL_SECONDS: int = 30
+    EXPIRY_CHECK_INTERVAL_SECONDS: int = 5
     
     # CORS
     ALLOWED_ORIGINS: list[str] = ["*"]

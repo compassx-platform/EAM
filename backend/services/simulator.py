@@ -37,6 +37,7 @@ def simulate_transition(
                 "condition_trace": [],
             }
         if entity:
+            current_stage = getattr(entity, "workflow_stage", None)
             if not current_status:
                 current_status = entity.status
             if not workflow_version:
@@ -45,6 +46,8 @@ def simulate_transition(
             merged_fields = dict(entity.custom_fields or {})
             merged_fields.update(custom_fields)
             custom_fields = merged_fields
+    else:
+        current_stage = None
 
     published_wf = (
         db.query(WorkflowDefinition)
@@ -68,14 +71,18 @@ def simulate_transition(
     matching_transition = None
 
     for t in transitions:
-        if t.get("from") == current_status and t.get("event") == event_type:
+        t_from = t.get("from")
+        if (t_from == current_status or (current_stage and t_from == current_stage)) and (
+            (t.get("event") or "").upper() == event_type.upper()
+            or (t.get("label") or "").upper() == event_type.upper()
+        ):
             matching_transition = t
             break
 
     if not matching_transition:
         return {
             "accepted": False,
-            "error": f"Invalid transition: No transition from state '{current_status}' on event '{event_type}'",
+            "error": f"Invalid transition: No transition from state '{current_stage or current_status}' on event '{event_type}'",
             "from_state": current_status,
             "to_state": None,
             "condition_trace": [],

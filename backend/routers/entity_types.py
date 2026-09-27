@@ -43,6 +43,7 @@ class CreateEntityTypeRequest(BaseModel):
     description: Optional[str] = ""
     icon: Optional[str] = "Layers"
     fields: Optional[List[EntityFieldIn]] = None
+    statuses: Optional[List[dict]] = None
     """Optional field schemas defined at creation time. When omitted, baseline
     title and description fields (and matching form) are initialized."""
 
@@ -50,6 +51,7 @@ class UpdateEntityTypeRequest(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
+    statuses: Optional[List[dict]] = None
 
 def _slugify(name: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9_]+', '_', name.strip().lower())
@@ -213,6 +215,7 @@ def get_entity_type(name: str, db: Session = Depends(get_db)):
 
     return item
 
+
 @router.post("")
 def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_db)):
     key = _slugify(req.name)
@@ -223,11 +226,24 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
     if existing:
         raise HTTPException(status_code=400, detail=f"An entity type with identifier '{key}' already exists")
 
+    statuses = req.statuses if req.statuses is not None else [
+        {"id": "DRAFT", "label": "Draft", "category": "draft", "color": "gray"},
+        {"id": "UNDER_REVIEW", "label": "Under Review", "category": "review", "color": "blue"},
+        {"id": "APPROVED", "label": "Approved", "category": "approved", "color": "indigo"},
+        {"id": "ACTIVE", "label": "Active / Live", "category": "in_progress", "color": "emerald"},
+        {"id": "SUSPENDED", "label": "Suspended", "category": "pending", "color": "amber"},
+        {"id": "COMPLETED", "label": "Completed", "category": "completed", "color": "blue"},
+        {"id": "CLOSED", "label": "Closed", "category": "terminal", "color": "slate"},
+        {"id": "EXPIRED", "label": "Expired", "category": "terminal", "color": "rose"},
+        {"id": "CANCELLED", "label": "Cancelled", "category": "terminal", "color": "zinc"},
+    ]
+
     new_et = EntityTypeDefinition(
         name=key,
         display_name=req.display_name.strip(),
         description=req.description.strip() if req.description else "",
         icon=req.icon or "Layers",
+        statuses=statuses,
         is_system=False,
     )
     db.add(new_et)
@@ -291,12 +307,14 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
         description=new_et.description,
         icon=new_et.icon,
         fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
+        statuses=statuses,
         created_at=utc_now(),
     ))
 
     db.commit()
     db.refresh(new_et)
     return new_et.to_dict()
+
 
 @router.put("/{name}")
 def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = Depends(get_db)):
@@ -308,11 +326,13 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     new_display = req.display_name.strip() if req.display_name is not None and req.display_name.strip() else et.display_name
     new_desc = req.description.strip() if req.description is not None else et.description
     new_icon = req.icon.strip() if req.icon is not None else et.icon
+    new_statuses = req.statuses if req.statuses is not None else et.statuses
 
     has_changed = (
         et.display_name != new_display
         or (et.description or "").strip() != (new_desc or "").strip()
         or (et.icon or "").strip() != (new_icon or "").strip()
+        or et.statuses != new_statuses
     )
 
     if has_changed:
@@ -322,6 +342,7 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
         et.display_name = new_display
         et.description = new_desc
         et.icon = new_icon
+        et.statuses = new_statuses
 
         from backend.models.entity_type import EntityTypeVersion
         from backend.models.base import generate_uuid, utc_now
@@ -334,11 +355,13 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
             description=et.description,
             icon=et.icon,
             fields_snapshot=[f.to_dict() for f in db.query(EntityField).filter(EntityField.entity_type == key).all()],
+            statuses=new_statuses,
             created_at=utc_now(),
         ))
         db.commit()
         db.refresh(et)
     return et.to_dict()
+
 
 @router.get("/{name}/history")
 def get_entity_type_history(name: str, db: Session = Depends(get_db)):

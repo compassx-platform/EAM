@@ -8,6 +8,7 @@ import {
   Circle,
   ClipboardList,
   Clock,
+  Compass,
   Copy,
   Database,
   Flag,
@@ -26,25 +27,55 @@ import {
   UserCheck,
   Users2,
   Workflow,
+  Zap,
 } from 'lucide-react';
-import type { ConditionDefinition, WorkflowRole } from '../../../types';
-import { KIND_LABEL, NODE_KINDS, edgeDescription, type NodeKind, type WorkflowFlowEdge, type WorkflowFlowNode } from '../flowModel';
+import type { ConditionDefinition, WorkflowRole, EntityLifecycleStatus } from '../../types';
+import {
+  KIND_LABEL,
+  NODE_KINDS,
+  edgeDescription,
+  isConditionKind,
+  isStopKind,
+  isActionKind,
+  isSubprocessKind,
+  type NodeKind,
+  type StateNodeData,
+  type WorkflowFlowEdge,
+  type WorkflowFlowNode,
+} from './types';
 import { UnderlineTabs } from './ui';
 import { ConditionCard } from './ConditionCard';
-import { navigate } from '../../../lib/router';
+import { navigate } from '../../lib/router';
 
 const KIND_ICONS: Record<NodeKind, typeof Play> = {
   start: Play,
-  state: Circle,
-  router: GitFork,
+  stop: Flag,
+  end: Flag,
   task: ClipboardList,
+  condition: GitFork,
+  router: GitFork,
   gate: ShieldCheck,
   manual: ListChecks,
-  wait: Timer,
-  sub: Workflow,
+  action: Zap,
   comm: Mail,
-  end: Flag,
+  wait: Timer,
+  interaction: Compass,
+  subprocess: Workflow,
+  sub: Workflow,
+  state: Circle,
 };
+
+const STANDARD_LIFECYCLE_STATUSES: EntityLifecycleStatus[] = [
+  { id: 'DRAFT', label: 'Draft', category: 'Initial' },
+  { id: 'SUBMITTED', label: 'Submitted / Under Review', category: 'Active' },
+  { id: 'APPROVED', label: 'Approved', category: 'Active' },
+  { id: 'ACTIVE', label: 'Active / Field Authorized', category: 'Active' },
+  { id: 'IN_PROGRESS', label: 'In Progress', category: 'Active' },
+  { id: 'COMPLETED', label: 'Completed', category: 'Terminal' },
+  { id: 'CLOSED', label: 'Closed', category: 'Terminal' },
+  { id: 'CANCELLED', label: 'Cancelled', category: 'Terminal' },
+  { id: 'EXPIRED', label: 'Expired / Revoked', category: 'Terminal' },
+];
 
 interface NodeInspectorProps {
   node: WorkflowFlowNode;
@@ -53,6 +84,7 @@ interface NodeInspectorProps {
   nodeLabels: string[];
   conditions: ConditionDefinition[];
   roles?: WorkflowRole[];
+  entityStatuses?: EntityLifecycleStatus[];
   onKind: (id: string, kind: NodeKind) => void;
   onRename: (oldLabel: string, newLabel: string) => void;
   onDuplicate: (id: string) => void;
@@ -69,6 +101,7 @@ interface NodeInspectorProps {
       time_limit_hours?: number | null;
     }
   ) => void;
+  onNodeDataChange?: (nodeId: string, updates: Partial<StateNodeData>) => void;
   onSetRouterBranch?: (nodeId: string, branch: 'TRUE' | 'FALSE', targetState: string) => void;
   onEvent: (id: string, event: string) => void;
   onRemoveConnection: (id: string) => void;
@@ -85,6 +118,7 @@ export function NodeInspector({
   nodeLabels,
   conditions,
   roles = [],
+  entityStatuses = [],
   onKind,
   onRename,
   onDuplicate,
@@ -93,6 +127,7 @@ export function NodeInspector({
   onConditions,
   onNodeConditions,
   onNodeTaskAssignment,
+  onNodeDataChange,
   onSetRouterBranch,
   onEvent,
   onRemoveConnection,
@@ -105,7 +140,7 @@ export function NodeInspector({
   const [editingName, setEditingName] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
   const typeRef = useRef<HTMLDivElement>(null);
-  const kind = node.data.kind || 'state';
+  const kind = node.data.kind || 'task';
 
   // Event popup modal state
   const popupRef = useRef<HTMLDivElement>(null);
@@ -233,6 +268,71 @@ export function NodeInspector({
         </div>
       </div>
 
+      {/* Entity Status Mapping (Decoupled Status vs Node Name) */}
+      {!isConditionKind(kind) && (
+        <div className="flex flex-col gap-1 border-t border-gray-100 pt-3">
+          <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            Lifecycle Status Mapping
+            <span className="group relative">
+              <Info className="h-3 w-3 text-gray-400 transition-colors hover:text-gray-600" />
+              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-64 rounded-md bg-slate-900 p-2 text-[11px] font-normal normal-case leading-snug text-white shadow-lg group-hover:block">
+                Sets the high-level business entity status (e.g. APPROVED, ACTIVE, CLOSED) when the workflow enters this node. The workflow stage preserves this specific step name.
+              </span>
+            </span>
+          </label>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={node.data.entity_status || ''}
+              onChange={(e) => onNodeDataChange?.(node.id, { entity_status: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 shadow-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">-- No Status Change (Keep Current Status) --</option>
+
+              {entityStatuses && entityStatuses.length > 0 ? (
+                <optgroup label="Entity Lifecycle Statuses">
+                  {entityStatuses.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.id} {st.label && st.label !== st.id ? `(${st.label})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : (
+                <optgroup label="Standard Lifecycle Statuses">
+                  {STANDARD_LIFECYCLE_STATUSES.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.id} ({st.label})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
+              {node.data.entity_status &&
+                !(entityStatuses && entityStatuses.length > 0
+                  ? entityStatuses.some((s) => s.id === node.data.entity_status)
+                  : STANDARD_LIFECYCLE_STATUSES.some((s) => s.id === node.data.entity_status)) && (
+                  <optgroup label="Current Value">
+                    <option value={node.data.entity_status}>
+                      {node.data.entity_status} (Legacy)
+                    </option>
+                  </optgroup>
+                )}
+            </select>
+
+            {node.data.entity_status && (
+              <button
+                type="button"
+                onClick={() => onNodeDataChange?.(node.id, { entity_status: null })}
+                title="Reset to default (node name)"
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Task-specific Assignment & Role Inspector */}
       {kind === 'task' && (
         <TaskAssignmentSection
@@ -251,6 +351,7 @@ export function NodeInspector({
           edges={edges}
           nodeLabels={nodeLabels}
           onNodeConditions={onNodeConditions}
+          onConditions={onConditions}
           onNodeTaskAssignment={onNodeTaskAssignment}
           onEditCondition={onEditCondition}
           onNewCondition={onNewCondition}
@@ -259,14 +360,69 @@ export function NodeInspector({
         />
       )}
 
-      {/* Router-specific Inspector */}
-      {kind === 'router' ? (
+      {/* Action-specific Configuration Inspector */}
+      {isActionKind(kind) && (
+        <ActionConfigSection
+          node={node}
+          edges={edges}
+          nodeLabels={nodeLabels}
+          onNodeDataChange={onNodeDataChange}
+          onAddRoute={onAddRoute}
+          onRemoveConnection={onRemoveConnection}
+        />
+      )}
+
+      {/* Interaction-specific Configuration Inspector */}
+      {kind === 'interaction' && (
+        <InteractionConfigSection
+          node={node}
+          edges={edges}
+          nodeLabels={nodeLabels}
+          onNodeDataChange={onNodeDataChange}
+          onAddRoute={onAddRoute}
+          onRemoveConnection={onRemoveConnection}
+        />
+      )}
+
+      {/* Subprocess-specific Configuration Inspector */}
+      {isSubprocessKind(kind) && (
+        <SubprocessConfigSection
+          node={node}
+          edges={edges}
+          nodeLabels={nodeLabels}
+          onNodeDataChange={onNodeDataChange}
+          onAddRoute={onAddRoute}
+          onRemoveConnection={onRemoveConnection}
+        />
+      )}
+
+      {/* Start-specific Configuration Inspector */}
+      {kind === 'start' && (
+        <StartConfigSection
+          node={node}
+          edges={edges}
+          nodeLabels={nodeLabels}
+          onAddRoute={onAddRoute}
+          onRemoveConnection={onRemoveConnection}
+        />
+      )}
+
+      {/* Stop-specific Configuration Inspector */}
+      {isStopKind(kind) && (
+        <StopConfigSection
+          incoming={incoming}
+        />
+      )}
+
+      {/* Condition / Router Specific Inspector */}
+      {isConditionKind(kind) ? (
         <>
           {/* Condition Evaluation Block */}
           <RouterConditionSection
             node={node}
             conditions={conditions}
             onNodeConditions={onNodeConditions}
+            onConditions={onConditions}
             onEditCondition={onEditCondition}
             onNewCondition={onNewCondition}
           />
@@ -280,7 +436,7 @@ export function NodeInspector({
             onRemoveConnection={onRemoveConnection}
           />
 
-          {/* Incoming Connections to this Router */}
+          {/* Incoming Connections to this Condition/Router */}
           {incoming.length > 0 && (
             <div className="flex flex-col gap-1.5 border-t border-gray-100 pt-3">
               <div className="flex items-center justify-between">
@@ -693,15 +849,18 @@ function RouterConditionSection({
   node,
   conditions,
   onNodeConditions,
+  onConditions,
   onEditCondition,
   onNewCondition,
 }: {
   node: WorkflowFlowNode;
   conditions: ConditionDefinition[];
   onNodeConditions?: (nodeId: string, conditions: string[]) => void;
+  onConditions?: (id: string, conditions: string[]) => void;
   onEditCondition?: (condition: ConditionDefinition) => void;
   onNewCondition: (edgeId?: string, nodeId?: string) => void;
 }) {
+  const applyConditions = onNodeConditions || onConditions;
   const nodeConditions = node.data.conditions || (node.data.condition_id ? [node.data.condition_id] : []);
   const selectedConditionId = nodeConditions[0] || '';
   const selectedCondition = conditions.find((c) => c.id === selectedConditionId) ?? null;
@@ -712,7 +871,7 @@ function RouterConditionSection({
   useEffect(() => {
     if (!menuOpen) return;
     const onDocDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) {
         setMenuOpen(false);
       }
     };
@@ -721,13 +880,13 @@ function RouterConditionSection({
   }, [menuOpen]);
 
   const selectCondition = (id: string) => {
-    onNodeConditions?.(node.id, id ? [id] : []);
+    applyConditions?.(node.id, id ? [id] : []);
     setMenuOpen(false);
   };
 
   return (
-    <div ref={menuRef} className="relative flex flex-col gap-1.5 border-t border-gray-100 pt-3">
-      {/* Header with Title, Info Tooltip, and Add Button when no condition */}
+    <div ref={menuRef} className="relative flex flex-col gap-2 border-t border-gray-100 pt-3">
+      {/* Header with Title and Info Tooltip */}
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
           Evaluation Condition
@@ -739,42 +898,81 @@ function RouterConditionSection({
           </span>
         </span>
 
-        {!selectedConditionId && (
+        {selectedConditionId && (
           <button
             type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            title="Add condition"
-            className="flex items-center gap-1 rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+            onClick={() => selectCondition('')}
+            title="Remove condition"
+            className="flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-red-600 transition-colors"
           >
-            <Plus className="h-3 w-3" />
-            <span>Add</span>
+            <Minus className="h-3 w-3" />
+            <span>Clear</span>
           </button>
         )}
       </div>
 
-      {/* Selected condition pill */}
-      {selectedConditionId && (
-        <div className="flex items-center justify-between gap-1 rounded-lg border border-gray-200 bg-gray-50/80 p-1.5 transition-colors hover:border-gray-300">
-          {/* Clickable condition button: directly opens edit condition window */}
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedCondition && onEditCondition) {
-                onEditCondition(selectedCondition);
+      {/* When NO condition is selected: 1-Click Dropdown Selector */}
+      {!selectedConditionId ? (
+        <div className="flex flex-col gap-1.5">
+          <select
+            value=""
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === '__new__') {
+                onNewCondition(undefined, node.id);
+              } else if (val) {
+                selectCondition(val);
               }
             }}
-            className="group flex min-w-0 flex-1 items-center gap-1.5 text-left"
-            title="Click to edit condition in condition module"
+            className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-800 hover:border-blue-300 focus:border-blue-500 focus:outline-none cursor-pointer"
           >
-            <ShieldCheck className="h-4 w-4 shrink-0 text-slate-600" />
-            <span className="truncate text-xs font-semibold text-gray-800 group-hover:text-blue-600">
-              {selectedCondition?.label || selectedConditionId}
-            </span>
-            <Pencil className="h-3 w-3 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-blue-600" />
-          </button>
+            <option value="">— Select a condition… —</option>
+            {conditions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label} ({c.id})
+              </option>
+            ))}
+            <option value="__new__">+ Create new condition…</option>
+          </select>
+          {conditions.length === 0 && (
+            <button
+              type="button"
+              onClick={() => onNewCondition(undefined, node.id)}
+              className="flex items-center justify-center gap-1.5 rounded border border-dashed border-gray-300 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Create new condition</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        /* When condition IS selected: Pill with 1-click edit & quick switch dropdown */
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-1 rounded-lg border border-gray-200 bg-gray-50/80 p-1.5 transition-colors hover:border-gray-300">
+            {/* Clickable condition button: directly opens edit condition window */}
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedCondition && onEditCondition) {
+                  onEditCondition(selectedCondition);
+                }
+              }}
+              className="group flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              title="Click to edit condition in condition module"
+            >
+              <ShieldCheck className="h-4 w-4 shrink-0 text-slate-600" />
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate text-xs font-semibold text-gray-800 group-hover:text-blue-600">
+                  {selectedCondition?.label || selectedConditionId}
+                </span>
+                <span className="truncate font-mono text-[10px] text-gray-400">
+                  {selectedConditionId}
+                </span>
+              </div>
+              <Pencil className="ml-auto h-3 w-3 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-blue-600" />
+            </button>
 
-          {/* Action buttons: Change (dropdown arrow) and Remove (-) */}
-          <div className="flex items-center gap-0.5 shrink-0">
+            {/* Change dropdown toggle */}
             <button
               type="button"
               onClick={() => setMenuOpen((o) => !o)}
@@ -785,65 +983,55 @@ function RouterConditionSection({
             >
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
             </button>
-            <button
-              type="button"
-              onClick={() => onNodeConditions?.(node.id, [])}
-              title="Remove condition"
-              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
           </div>
-        </div>
-      )}
 
-      {/* Dropdown Menu (Opens directly on 1st click of Down Arrow or + Add) */}
-      {menuOpen && (
-        <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
-          {selectedConditionId && (
-            <button
-              type="button"
-              onClick={() => selectCondition('')}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
-            >
-              <Minus className="h-3.5 w-3.5 text-gray-400" />
-              <span>— No condition (remove) —</span>
-            </button>
-          )}
-
-          {conditions.map((c) => {
-            const active = c.id === selectedConditionId;
-            return (
+          {/* Quick change dropdown menu */}
+          {menuOpen && (
+            <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
               <button
-                key={c.id}
                 type="button"
-                onClick={() => selectCondition(c.id)}
-                className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                  active ? 'bg-blue-50 font-bold text-blue-700' : 'text-gray-700 hover:bg-gray-50'
-                }`}
+                onClick={() => selectCondition('')}
+                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-50 hover:text-red-600"
               >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate">{c.label}</span>
-                  <span className="truncate font-mono text-[10px] text-gray-400">{c.id}</span>
-                </div>
-                {active && <Check className="h-3.5 w-3.5 shrink-0 text-blue-600" />}
+                <Minus className="h-3.5 w-3.5 text-gray-400" />
+                <span>— No condition (remove) —</span>
               </button>
-            );
-          })}
 
-          <div className="border-t border-gray-100 mt-1 pt-1 px-1">
-            <button
-              type="button"
-              onClick={() => {
-                setMenuOpen(false);
-                onNewCondition(undefined, node.id);
-              }}
-              className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Create new condition…</span>
-            </button>
-          </div>
+              {conditions.map((c) => {
+                const active = c.id === selectedConditionId;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => selectCondition(c.id)}
+                    className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                      active ? 'bg-blue-50 font-bold text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{c.label}</span>
+                      <span className="truncate font-mono text-[10px] text-gray-400">{c.id}</span>
+                    </div>
+                    {active && <Check className="h-3.5 w-3.5 shrink-0 text-blue-600" />}
+                  </button>
+                );
+              })}
+
+              <div className="border-t border-gray-100 mt-1 pt-1 px-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onNewCondition(undefined, node.id);
+                  }}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Create new condition…</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -999,20 +1187,37 @@ function TaskAssignmentSection({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [instructions, setInstructions] = useState(node.data.task_instructions || '');
-  const [timeLimit, setTimeLimit] = useState(node.data.time_limit_hours?.toString() || '');
+  const taskHours = node.data.time_limit_hours;
+  const initialTaskUnit: 'm' | 'h' | 'd' = taskHours !== null && taskHours !== undefined && taskHours < 1 ? 'm' : 'h';
+  const initialTaskVal = taskHours !== null && taskHours !== undefined
+    ? initialTaskUnit === 'm'
+      ? Math.round(taskHours * 60).toString()
+      : taskHours.toString()
+    : '';
+  const [timeLimit, setTimeLimit] = useState(initialTaskVal);
+  const [timeLimitUnit, setTimeLimitUnit] = useState<'m' | 'h' | 'd'>(initialTaskUnit);
 
   useEffect(() => {
     setInstructions(node.data.task_instructions || '');
   }, [node.data.task_instructions]);
 
   useEffect(() => {
-    setTimeLimit(node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : '');
+    const h = node.data.time_limit_hours;
+    if (h === null || h === undefined) {
+      setTimeLimit('');
+    } else if (h < 1) {
+      setTimeLimit(Math.round(h * 60).toString());
+      setTimeLimitUnit('m');
+    } else {
+      setTimeLimit(h.toString());
+      setTimeLimitUnit('h');
+    }
   }, [node.data.time_limit_hours]);
 
   useEffect(() => {
     if (!menuOpen) return;
     const onDocDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) {
         setMenuOpen(false);
       }
     };
@@ -1034,11 +1239,16 @@ function TaskAssignmentSection({
     });
   };
 
-  const commitTimeLimit = () => {
-    const num = timeLimit.trim() ? parseInt(timeLimit.trim(), 10) : null;
-    onNodeTaskAssignment?.(node.id, {
-      time_limit_hours: isNaN(num as number) ? null : num,
-    });
+  const commitTimeLimit = (val?: string, unit: 'm' | 'h' | 'd' = timeLimitUnit) => {
+    const raw = val !== undefined ? val : timeLimit;
+    if (!raw.trim()) {
+      onNodeTaskAssignment?.(node.id, { time_limit_hours: null });
+      return;
+    }
+    const num = parseFloat(raw.trim());
+    if (isNaN(num)) return;
+    const hours = unit === 'm' ? num / 60 : unit === 'd' ? num * 24 : num;
+    onNodeTaskAssignment?.(node.id, { time_limit_hours: hours });
   };
 
   const getRoleIcon = (type?: string) => {
@@ -1214,17 +1424,38 @@ function TaskAssignmentSection({
       <div className="flex flex-col gap-1">
         <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
           <Clock className="h-3 w-3" />
-          Time Limit (Hours)
+          Time Limit / SLA
         </label>
-        <input
-          type="number"
-          min="1"
-          value={timeLimit}
-          onChange={(e) => setTimeLimit(e.target.value)}
-          onBlur={commitTimeLimit}
-          placeholder="e.g. 24"
-          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min="1"
+            step="any"
+            value={timeLimit}
+            onChange={(e) => {
+              const val = e.target.value;
+              setTimeLimit(val);
+              commitTimeLimit(val, timeLimitUnit);
+            }}
+            onBlur={() => commitTimeLimit()}
+            onKeyDown={(e) => e.key === 'Enter' && commitTimeLimit()}
+            placeholder={timeLimitUnit === 'm' ? 'e.g. 15' : 'e.g. 24'}
+            className="w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+          />
+          <select
+            value={timeLimitUnit}
+            onChange={(e) => {
+              const nextUnit = e.target.value as 'm' | 'h' | 'd';
+              setTimeLimitUnit(nextUnit);
+              if (timeLimit) commitTimeLimit(timeLimit, nextUnit);
+            }}
+            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="m">Minutes</option>
+            <option value="h">Hours</option>
+            <option value="d">Days</option>
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -1236,6 +1467,7 @@ function WaitConfigSection({
   edges,
   nodeLabels,
   onNodeConditions,
+  onConditions,
   onNodeTaskAssignment,
   onEditCondition,
   onNewCondition,
@@ -1247,6 +1479,7 @@ function WaitConfigSection({
   edges: WorkflowFlowEdge[];
   nodeLabels: string[];
   onNodeConditions?: (nodeId: string, conditions: string[]) => void;
+  onConditions?: (id: string, conditions: string[]) => void;
   onNodeTaskAssignment?: (
     nodeId: string,
     updates: {
@@ -1265,15 +1498,29 @@ function WaitConfigSection({
   const selectedCondition = conditions.find((c) => c.id === selectedConditionId) ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [durationHours, setDurationHours] = useState(
-    node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : ''
-  );
+  const currentHours = node.data.time_limit_hours;
+  const initialUnit: 'm' | 'h' | 'd' = currentHours !== null && currentHours !== undefined && currentHours < 1 ? 'm' : 'h';
+  const initialValue = currentHours !== null && currentHours !== undefined
+    ? initialUnit === 'm'
+      ? Math.round(currentHours * 60).toString()
+      : currentHours.toString()
+    : '';
+
+  const [durationValue, setDurationValue] = useState(initialValue);
+  const [durationUnit, setDurationUnit] = useState<'m' | 'h' | 'd'>(initialUnit);
   const [instructions, setInstructions] = useState(node.data.task_instructions || '');
 
   useEffect(() => {
-    setDurationHours(
-      node.data.time_limit_hours !== null && node.data.time_limit_hours !== undefined ? node.data.time_limit_hours.toString() : ''
-    );
+    const h = node.data.time_limit_hours;
+    if (h === null || h === undefined) {
+      setDurationValue('');
+    } else if (h < 1) {
+      setDurationValue(Math.round(h * 60).toString());
+      setDurationUnit('m');
+    } else {
+      setDurationValue(h.toString());
+      setDurationUnit('h');
+    }
   }, [node.data.time_limit_hours]);
 
   useEffect(() => {
@@ -1283,7 +1530,7 @@ function WaitConfigSection({
   useEffect(() => {
     if (!menuOpen) return;
     const onDocDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(e.target as globalThis.Node)) {
         setMenuOpen(false);
       }
     };
@@ -1292,22 +1539,36 @@ function WaitConfigSection({
   }, [menuOpen]);
 
   const selectCondition = (id: string) => {
-    onNodeConditions?.(node.id, id ? [id] : []);
+    (onNodeConditions || onConditions)?.(node.id, id ? [id] : []);
     setMenuOpen(false);
   };
 
-  const commitDuration = (val?: string) => {
-    const raw = val !== undefined ? val : durationHours;
-    const num = raw.trim() ? parseInt(raw.trim(), 10) : null;
-    onNodeTaskAssignment?.(node.id, {
-      time_limit_hours: isNaN(num as number) ? null : num,
-    });
+  const commitDuration = (val?: string, unit: 'm' | 'h' | 'd' = durationUnit) => {
+    const raw = val !== undefined ? val : durationValue;
+    if (!raw.trim()) {
+      onNodeTaskAssignment?.(node.id, { time_limit_hours: null });
+      return;
+    }
+    const num = parseFloat(raw.trim());
+    if (isNaN(num)) return;
+    const hours = unit === 'm' ? num / 60 : unit === 'd' ? num * 24 : num;
+    onNodeTaskAssignment?.(node.id, { time_limit_hours: hours });
   };
 
   const setPreset = (hours: number | null) => {
-    const str = hours !== null ? hours.toString() : '';
-    setDurationHours(str);
-    commitDuration(str);
+    if (hours === null) {
+      setDurationValue('');
+      commitDuration('');
+    } else if (hours < 1) {
+      const mins = Math.round(hours * 60);
+      setDurationValue(mins.toString());
+      setDurationUnit('m');
+      commitDuration(mins.toString(), 'm');
+    } else {
+      setDurationValue(hours.toString());
+      setDurationUnit('h');
+      commitDuration(hours.toString(), 'h');
+    }
   };
 
   const commitInstructions = () => {
@@ -1336,14 +1597,14 @@ function WaitConfigSection({
         </span>
       </div>
 
-      {/* Timer Duration / Hours */}
+      {/* Timer Duration / Minutes & Hours */}
       <div className="flex flex-col gap-1.5 rounded-lg border border-gray-200 bg-gray-50/60 p-2.5">
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-1 text-xs font-semibold text-gray-700">
             <Clock className="h-3.5 w-3.5 text-gray-500" />
-            Wait Duration (Hours)
+            Wait Duration
           </label>
-          {durationHours && (
+          {durationValue && (
             <button
               type="button"
               onClick={() => setPreset(null)}
@@ -1355,32 +1616,51 @@ function WaitConfigSection({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <input
             type="number"
             min="1"
-            value={durationHours}
-            onChange={(e) => setDurationHours(e.target.value)}
+            step="any"
+            value={durationValue}
+            onChange={(e) => {
+              const val = e.target.value;
+              setDurationValue(val);
+              commitDuration(val, durationUnit);
+            }}
             onBlur={() => commitDuration()}
             onKeyDown={(e) => e.key === 'Enter' && commitDuration()}
-            placeholder="e.g. 24"
+            placeholder={durationUnit === 'm' ? 'e.g. 1' : 'e.g. 8'}
             className="w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
           />
-          <span className="text-xs text-gray-500">hours</span>
+          <select
+            value={durationUnit}
+            onChange={(e) => {
+              const nextUnit = e.target.value as 'm' | 'h' | 'd';
+              setDurationUnit(nextUnit);
+              if (durationValue) commitDuration(durationValue, nextUnit);
+            }}
+            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="m">Minutes</option>
+            <option value="h">Hours</option>
+            <option value="d">Days</option>
+          </select>
         </div>
 
         {/* Quick presets */}
         <div className="flex flex-wrap items-center gap-1 pt-1">
           {[
+            { label: '1m', hours: 0.0166667 },
+            { label: '5m', hours: 0.0833333 },
+            { label: '15m', hours: 0.25 },
+            { label: '30m', hours: 0.5 },
             { label: '1h', hours: 1 },
             { label: '4h', hours: 4 },
+            { label: '8h', hours: 8 },
             { label: '12h', hours: 12 },
             { label: '24h (1d)', hours: 24 },
-            { label: '48h (2d)', hours: 48 },
-            { label: '72h (3d)', hours: 72 },
-            { label: '168h (1w)', hours: 168 },
           ].map((p) => {
-            const isSelected = durationHours === p.hours.toString();
+            const isSelected = currentHours === p.hours;
             return (
               <button
                 key={p.label}
@@ -1564,6 +1844,450 @@ function WaitConfigSection({
           placeholder="e.g. Wait 24 hours for paint curing and drying before inspection…"
           className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none resize-none"
         />
+      </div>
+    </div>
+  );
+}
+
+function ActionConfigSection({
+  node,
+  edges,
+  nodeLabels,
+  onNodeDataChange,
+  onAddRoute,
+  onRemoveConnection,
+}: {
+  node: WorkflowFlowNode;
+  edges: WorkflowFlowEdge[];
+  nodeLabels: string[];
+  onNodeDataChange?: (nodeId: string, updates: Partial<StateNodeData>) => void;
+  onAddRoute?: (sourceId: string, targetId: string) => string | void;
+  onRemoveConnection: (id: string) => void;
+}) {
+  const actionType = node.data.action_type || 'change_status';
+  const targetField = node.data.action_target_field || '';
+  const actionValue = node.data.action_value || '';
+  const actionMessage = node.data.action_message || '';
+
+  const outgoing = edges.filter((e) => e.source === node.id || e.source === node.data.label);
+  const primaryOutgoing = outgoing[0];
+  const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <Zap className="h-3.5 w-3.5 text-amber-600" />
+          Automated Action Configuration
+          <span className="group relative inline-flex items-center">
+            <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
+              Executes automatically without human pause when the record arrives at this step, then proceeds immediately.
+            </span>
+          </span>
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Action Type</label>
+        <select
+          value={actionType}
+          onChange={(e) => onNodeDataChange?.(node.id, { action_type: e.target.value })}
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+        >
+          <option value="change_status">Change Record Status</option>
+          <option value="set_field_value">Set Field Value</option>
+          <option value="in_app_notification">Send In-App Notification</option>
+          <option value="custom_action">Execute System Action</option>
+        </select>
+      </div>
+
+      {actionType === 'set_field_value' && (
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target Field Name</label>
+          <input
+            type="text"
+            value={targetField}
+            onChange={(e) => onNodeDataChange?.(node.id, { action_target_field: e.target.value })}
+            placeholder="e.g. priority, department, vendor_id"
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+      )}
+
+      {(actionType === 'set_field_value' || actionType === 'change_status') && (
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+            {actionType === 'change_status' ? 'New Status Value' : 'Value To Set'}
+          </label>
+          <input
+            type="text"
+            value={actionValue}
+            onChange={(e) => onNodeDataChange?.(node.id, { action_value: e.target.value })}
+            placeholder={actionType === 'change_status' ? 'e.g. INPRG, APPR, WAPPR' : 'e.g. HIGH, URGENT, 100'}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+      )}
+
+      {actionType === 'in_app_notification' && (
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Notification Message</label>
+          <textarea
+            value={actionMessage}
+            onChange={(e) => onNodeDataChange?.(node.id, { action_message: e.target.value })}
+            rows={2}
+            placeholder="Message displayed in-app to relevant assignees…"
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none resize-none"
+          />
+        </div>
+      )}
+
+      {/* Outgoing Next Step */}
+      <div className="flex flex-col gap-1.5 pt-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Next Destination Step</label>
+        {primaryOutgoing ? (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+            <span className="font-semibold truncate">→ {primaryOutgoing.target}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveConnection(primaryOutgoing.id)}
+              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Disconnect route"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value && onAddRoute) onAddRoute(node.id, e.target.value);
+            }}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="">Select next destination step…</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>
+                → {target}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InteractionConfigSection({
+  node,
+  edges,
+  nodeLabels,
+  onNodeDataChange,
+  onAddRoute,
+  onRemoveConnection,
+}: {
+  node: WorkflowFlowNode;
+  edges: WorkflowFlowEdge[];
+  nodeLabels: string[];
+  onNodeDataChange?: (nodeId: string, updates: Partial<StateNodeData>) => void;
+  onAddRoute?: (sourceId: string, targetId: string) => string | void;
+  onRemoveConnection: (id: string) => void;
+}) {
+  const interactionApp = node.data.interaction_app || 'records';
+  const interactionTab = node.data.interaction_tab || 'details';
+  const instructions = node.data.task_instructions || '';
+
+  const outgoing = edges.filter((e) => e.source === node.id || e.source === node.data.label);
+  const primaryOutgoing = outgoing[0];
+  const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <Compass className="h-3.5 w-3.5 text-sky-600" />
+          Interaction Node Settings
+          <span className="group relative inline-flex items-center">
+            <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
+              Directs the user seamlessly to a target application, form tab, or view with contextual entity state.
+            </span>
+          </span>
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target App</label>
+          <select
+            value={interactionApp}
+            onChange={(e) => onNodeDataChange?.(node.id, { interaction_app: e.target.value })}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+          >
+            <option value="records">Records</option>
+            <option value="forms">Dynamic Forms</option>
+            <option value="conditions">Condition Rules</option>
+            <option value="people">People & Roles</option>
+            <option value="inventory">Assets & Equipment</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Target View / Tab</label>
+          <select
+            value={interactionTab}
+            onChange={(e) => onNodeDataChange?.(node.id, { interaction_tab: e.target.value })}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+          >
+            <option value="details">Details</option>
+            <option value="edit">Edit Form</option>
+            <option value="history">History Log</option>
+            <option value="assignments">Task Assignments</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Guidance Message</label>
+        <textarea
+          value={instructions}
+          onChange={(e) => onNodeDataChange?.(node.id, { task_instructions: e.target.value })}
+          rows={2}
+          placeholder="Guidance shown to user when opening this target tab…"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none resize-none"
+        />
+      </div>
+
+      {/* Outgoing Next Step */}
+      <div className="flex flex-col gap-1.5 pt-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Next Destination Step</label>
+        {primaryOutgoing ? (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+            <span className="font-semibold truncate">→ {primaryOutgoing.target}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveConnection(primaryOutgoing.id)}
+              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Disconnect route"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value && onAddRoute) onAddRoute(node.id, e.target.value);
+            }}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="">Select next destination step…</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>
+                → {target}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SubprocessConfigSection({
+  node,
+  edges,
+  nodeLabels,
+  onNodeDataChange,
+  onAddRoute,
+  onRemoveConnection,
+}: {
+  node: WorkflowFlowNode;
+  edges: WorkflowFlowEdge[];
+  nodeLabels: string[];
+  onNodeDataChange?: (nodeId: string, updates: Partial<StateNodeData>) => void;
+  onAddRoute?: (sourceId: string, targetId: string) => string | void;
+  onRemoveConnection: (id: string) => void;
+}) {
+  const subprocessId = node.data.subprocess_id || '';
+  const subprocessEntityType = node.data.subprocess_entity_type || '';
+  const autocreateChild = node.data.autocreate_child ?? true;
+  const resumeEvent = node.data.resume_event || '';
+  const outgoing = edges.filter((e) => e.source === node.id || e.source === node.data.label);
+  const primaryOutgoing = outgoing[0];
+  const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+          <Workflow className="h-3.5 w-3.5 text-fuchsia-600" />
+          Subprocess Configuration
+          <span className="group relative inline-flex items-center">
+            <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
+            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
+              Launches an independent child workflow process as a sub-routine for the record.
+            </span>
+          </span>
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Child Workflow Process ID</label>
+        <input
+          type="text"
+          value={subprocessId}
+          onChange={(e) => onNodeDataChange?.(node.id, { subprocess_id: e.target.value })}
+          placeholder="e.g. hot_work_permit_sub, po_approval_flow"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none font-mono"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Child Entity Type</label>
+        <input
+          type="text"
+          value={subprocessEntityType}
+          onChange={(e) => onNodeDataChange?.(node.id, { subprocess_entity_type: e.target.value.toLowerCase() })}
+          placeholder="e.g. permit, workorder (defaults to same entity type)"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none font-mono"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2">
+        <div className="flex flex-col">
+          <span className="text-xs font-semibold text-gray-700">Auto-Launch Child Process</span>
+          <span className="text-[11px] text-gray-400">Automatically create child record upon entering this state</span>
+        </div>
+        <input
+          type="checkbox"
+          checked={autocreateChild}
+          onChange={(e) => onNodeDataChange?.(node.id, { autocreate_child: e.target.checked })}
+          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Parent Resume Event</label>
+        <input
+          type="text"
+          value={resumeEvent}
+          onChange={(e) => onNodeDataChange?.(node.id, { resume_event: e.target.value })}
+          placeholder="e.g. NEXT, PERMIT_RESOLVED, CHILD_COMPLETED"
+          className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none font-mono"
+        />
+      </div>
+
+      {/* Outgoing Next Step */}
+      <div className="flex flex-col gap-1.5 pt-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Resume Step on Completion</label>
+        {primaryOutgoing ? (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+            <span className="font-semibold truncate">→ {primaryOutgoing.target}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveConnection(primaryOutgoing.id)}
+              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Disconnect route"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value && onAddRoute) onAddRoute(node.id, e.target.value);
+            }}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="">Select step to resume parent workflow…</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>
+                → {target}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StartConfigSection({
+  node,
+  edges,
+  nodeLabels,
+  onAddRoute,
+  onRemoveConnection,
+}: {
+  node: WorkflowFlowNode;
+  edges: WorkflowFlowEdge[];
+  nodeLabels: string[];
+  onAddRoute?: (sourceId: string, targetId: string) => string | void;
+  onRemoveConnection: (id: string) => void;
+}) {
+  const outgoing = edges.filter((e) => e.source === node.id || e.source === node.data.label);
+  const primaryOutgoing = outgoing[0];
+  const availableTargets = nodeLabels.filter((l) => l !== node.data.label && l !== node.id);
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-2 text-xs text-emerald-800">
+        <p className="font-semibold">Start Node (Maximo Standard)</p>
+        <p className="mt-0.5 text-[11px] text-emerald-700">
+          Represents the single entry point where new records begin process execution.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 pt-1">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Initial Process State</label>
+        {primaryOutgoing ? (
+          <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+            <span className="font-semibold truncate">→ {primaryOutgoing.target}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveConnection(primaryOutgoing.id)}
+              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Disconnect initial route"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value && onAddRoute) onAddRoute(node.id, e.target.value);
+            }}
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800 hover:border-gray-400 focus:border-blue-500 focus:outline-none cursor-pointer"
+          >
+            <option value="">Select initial destination state…</option>
+            {availableTargets.map((target) => (
+              <option key={target} value={target}>
+                → {target}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StopConfigSection({
+  incoming,
+}: {
+  incoming: WorkflowFlowEdge[];
+}) {
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
+      <div className="rounded-md border border-rose-200 bg-rose-50/50 p-2 text-xs text-rose-800">
+        <p className="font-semibold">Stop Node (Terminal State)</p>
+        <p className="mt-0.5 text-[11px] text-rose-700">
+          Marks the completion of this workflow process. Records reaching this point cannot advance further.
+        </p>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { ConditionDefinition, ConditionTypeInfo, EntityField } from '../../types';
-import { ConditionModal } from '../builder/studio/ConditionModal';
+import { ConditionModal } from '../workflow-ui/ConditionModal';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';

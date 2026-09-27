@@ -23,6 +23,12 @@ import {
   Zap,
   Info,
   Users,
+  AlertTriangle,
+  TrendingUp,
+  ExternalLink,
+  Play,
+  Compass,
+  Timer,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { isItemVisible, withWorkflowStatus } from '../../lib/conditions';
@@ -39,8 +45,11 @@ import type {
   Person,
   PersonGroup,
   TaskAssignment,
+  WorkflowDefinition,
+  Workflow as WorkflowType,
 } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
+import { WorkflowInstanceVisualizer, useLiveCountdown } from './WorkflowInstanceVisualizer';
 import type { AttachedFile } from './EntityCreateForm';
 
 export interface EntityFormViewProps {
@@ -71,7 +80,10 @@ interface ResolvedField {
 const STATUS_BADGE: Record<string, string> = {
   draft: 'bg-amber-100 text-amber-800 border-amber-200',
   requested: 'bg-blue-100 text-blue-800 border-blue-200',
+  submitted: 'bg-blue-100 text-blue-800 border-blue-200',
+  pending: 'bg-blue-100 text-blue-800 border-blue-200',
   active: 'bg-blue-100 text-blue-800 border-blue-200',
+  in_progress: 'bg-sky-100 text-sky-800 border-sky-200',
   isolationprecheck: 'bg-purple-100 text-purple-800 border-purple-200',
   riskassessed: 'bg-indigo-100 text-indigo-800 border-indigo-200',
   approved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -81,6 +93,7 @@ const STATUS_BADGE: Record<string, string> = {
   closed: 'bg-gray-100 text-gray-700 border-gray-200',
   cancelled: 'bg-rose-100 text-rose-800 border-rose-200',
   expired: 'bg-orange-100 text-orange-800 border-orange-200',
+  expire: 'bg-orange-100 text-orange-800 border-orange-200',
 };
 
 function statusBadge(s?: string) {
@@ -129,6 +142,48 @@ function getEntityTitle(e: { custom_fields?: Record<string, unknown> } | null | 
   return null;
 }
 
+function formatActionTitle(t: ValidTransition): string {
+  if (t.button_label && t.button_label.trim()) return t.button_label.trim();
+  if (t.label && t.label.trim()) return t.label.trim();
+  const raw = t.event_type || 'Action';
+  if (raw === raw.toUpperCase() && raw.includes('_')) {
+    return raw
+      .split('_')
+      .map((w, idx) => {
+        const lower = w.toLowerCase();
+        if (idx > 0 && ['for', 'to', 'in', 'on', 'and', 'by', 'of', 'with'].includes(lower)) return lower;
+        if (w === 'JSA' || w === 'PTW' || w === 'LOTO' || w === 'EAM' || w === 'QA' || w === 'EHS') return w;
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
+  }
+  return raw;
+}
+
+function getActionButtonClass(t: ValidTransition): string {
+  const isDanger =
+    t.button_style === 'danger' ||
+    ['REJECT', 'CANCEL', 'FAIL', 'ABORT', 'TERMINATE'].some((k) =>
+      t.event_type.toUpperCase().includes(k)
+    );
+
+  const isSecondary =
+    t.button_style === 'secondary' ||
+    ['SUSPEND', 'HOLD', 'PAUSE', 'RETURN', 'CLOSE'].some((k) =>
+      t.event_type.toUpperCase().includes(k)
+    );
+
+  if (isDanger) {
+    return 'inline-flex items-center gap-2 rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 active:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+  }
+
+  if (isSecondary) {
+    return 'inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 hover:text-gray-900 active:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+  }
+
+  return 'inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 active:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+}
+
 export function EntityFormView({
   entity: initialEntity,
   recordId: initialRecordId,
@@ -140,6 +195,14 @@ export function EntityFormView({
   const [entityRecord, setEntityRecord] = useState<EntityRecord | null>(initialEntity || null);
   const [events, setEvents] = useState<EntityEvent[]>([]);
   const [validTransitions, setValidTransitions] = useState<ValidTransition[]>([]);
+  const displayTransitions = useMemo(() => {
+    return validTransitions.filter((t) => {
+      const eventUpper = (t.event_type || '').toUpperCase();
+      const isInternalAutomatedEvent = ['START', 'TRUE', 'FALSE', 'AUTO', 'EXPIRED', 'TIMEOUT'].includes(eventUpper);
+      if (isInternalAutomatedEvent) return false;
+      return true;
+    });
+  }, [validTransitions]);
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
   const [conditions, setConditions] = useState<ConditionDefinition[]>([]);
@@ -149,16 +212,24 @@ export function EntityFormView({
   const [personGroups, setPersonGroups] = useState<PersonGroup[]>([]);
   const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [escalatingTaskId, setEscalatingTaskId] = useState<string | null>(null);
+  const [scanningEscalations, setScanningEscalations] = useState(false);
   const [cols, setCols] = useState(12);
   const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [auditLogOpen, setAuditLogOpen] = useState(false);
+  const [visualizerOpen, setVisualizerOpen] = useState(false);
   const [firingEvent, setFiringEvent] = useState<string | null>(null);
   const [transitionError, setTransitionError] = useState<string | null>(null);
   const [hasPublishedWorkflow, setHasPublishedWorkflow] = useState<boolean>(true);
   const [noWorkflowMessage, setNoWorkflowMessage] = useState<string | null>(null);
+  const [subprocessData, setSubprocessData] = useState<any>(null);
+  const [launchingSubprocess, setLaunchingSubprocess] = useState(false);
+  const [linkedModalRecord, setLinkedModalRecord] = useState<{ entityType: string; id: string } | null>(null);
+  const [workflowDef, setWorkflowDef] = useState<WorkflowDefinition | null>(null);
+  const [interactionNavFeedback, setInteractionNavFeedback] = useState<string | null>(null);
 
   const activeId = initialRecordId || initialEntity?.id || '';
   const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || '';
@@ -171,13 +242,19 @@ export function EntityFormView({
     setErr(null);
 
     try {
-      const [formRes, condList, fieldsRes, personsRes, groupsRes] = await Promise.all([
+      const [formRes, condList, fieldsRes, personsRes, groupsRes, wfListRes] = await Promise.all([
         api.getForm(entityType).catch(() => ({ layout: [], fields: [], cols: 12, row_height: 40 })),
         api.listConditions(entityType).catch(() => [] as ConditionDefinition[]),
         api.listFields(entityType).catch(() => [] as EntityField[]),
         api.listPersons({ limit: 200 }).catch(() => ({ items: [] })),
         api.listPersonGroups().catch(() => ({ items: [] })),
+        api.listWorkflows(entityType).catch(() => [] as WorkflowType[]),
       ]);
+
+      const pubWf = (wfListRes || []).find((w) => w.status === 'published') || wfListRes[0];
+      if (pubWf && pubWf.definition) {
+        setWorkflowDef(pubWf.definition);
+      }
 
       const cMap: Record<string, { label: string; type: string }> = {};
       for (const g of condList) cMap[g.id] = { label: g.label, type: g.type };
@@ -228,28 +305,32 @@ export function EntityFormView({
         setResolved(r.resolved || {});
       }
 
-      // Fetch Entity, Valid Transitions, and Task Assignments
+      // Fetch Entity, Valid Transitions, Task Assignments, and Subprocess Status
       if (activeId) {
-        const [entityDetail, validRes, taskRes] = await Promise.all([
+        const [entityDetail, validRes, taskRes, subRes] = await Promise.all([
           api.getEntity(entityType, activeId),
           api.listValidTransitions(entityType, activeId).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
           api.listTaskAssignments({ entity_type: entityType, entity_id: activeId }).catch(() => ({ items: [], total: 0 })),
+          api.getSubprocess(entityType, activeId).catch(() => null),
         ]);
         setEntityRecord(entityDetail.entity);
         setEvents(entityDetail.events || []);
         setValidTransitions(validRes.valid_transitions || []);
         setTaskAssignments(taskRes.items || []);
+        setSubprocessData(subRes);
         const hasPub = (validRes as any).has_published_workflow !== false;
         setHasPublishedWorkflow(hasPub);
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       } else if (initialEntity) {
         setEntityRecord(initialEntity);
-        const [validRes, taskRes] = await Promise.all([
+        const [validRes, taskRes, subRes] = await Promise.all([
           api.listValidTransitions(entityType, initialEntity.id).catch(() => ({ valid_transitions: [], has_published_workflow: false })),
           api.listTaskAssignments({ entity_type: entityType, entity_id: initialEntity.id }).catch(() => ({ items: [], total: 0 })),
+          api.getSubprocess(entityType, initialEntity.id).catch(() => null),
         ]);
         setValidTransitions(validRes.valid_transitions || []);
         setTaskAssignments(taskRes.items || []);
+        setSubprocessData(subRes);
         const hasPub = (validRes as any).has_published_workflow !== false;
         setHasPublishedWorkflow(hasPub);
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
@@ -280,6 +361,48 @@ export function EntityFormView({
     }
   }
   const valuesForCondition = withWorkflowStatus(baseConditionValues, currentEntity?.status);
+
+  // Workflow Stage Timer / Expiry calculation
+  const currentNodeMeta = useMemo(() => {
+    if (!workflowDef || !currentEntity?.status) return null;
+    return (workflowDef.nodes || []).find((n) => n.name === currentEntity.status) || null;
+  }, [workflowDef, currentEntity?.status]);
+
+  const timeLimitHours = currentNodeMeta?.time_limit_hours ?? null;
+
+  const targetDueTime = useMemo(() => {
+    if (!currentEntity?.status) return null;
+    const entryEvent = events.filter((e) => e.to_state === currentEntity.status).slice(-1)[0];
+    const enteredTime = entryEvent?.transaction_time || currentEntity.updated_at || currentEntity.created_at || new Date().toISOString();
+
+    if (timeLimitHours && Number(timeLimitHours) > 0) {
+      const enteredMs = new Date(enteredTime).getTime();
+      return new Date(enteredMs + Number(timeLimitHours) * 3600 * 1000).toISOString();
+    }
+    const cf = currentEntity.custom_fields || (currentEntity as any).data || {};
+    const expiryField = cf.valid_to || cf.expires_at || cf.due_date;
+    if (expiryField) {
+      return new Date(expiryField).toISOString();
+    }
+    return null;
+  }, [currentEntity, events, timeLimitHours]);
+
+  const enteredTime = useMemo(() => {
+    if (!currentEntity?.status) return null;
+    const entryEvent = events.filter((e) => e.to_state === currentEntity.status).slice(-1)[0];
+    return entryEvent?.transaction_time || currentEntity.updated_at || currentEntity.created_at || null;
+  }, [currentEntity, events]);
+
+  const stageCountdown = useLiveCountdown(targetDueTime, enteredTime);
+
+  useEffect(() => {
+    if (stageCountdown.isExpired && stageCountdown.hasTimer) {
+      const timer = setTimeout(() => {
+        loadData(true);
+      }, 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [stageCountdown.isExpired, stageCountdown.hasTimer, loadData]);
 
   const byName = useMemo(() => new Map(fields.map((f) => [f.field_name, f])), [fields]);
 
@@ -380,8 +503,112 @@ export function EntityFormView({
     }
   };
 
+  const handleEscalateTask = async (taskId: string) => {
+    setEscalatingTaskId(taskId);
+    try {
+      await api.escalateTask(taskId);
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (err: any) {
+      setTransitionError(err.message || 'Failed to escalate task assignment');
+    } finally {
+      setEscalatingTaskId(null);
+    }
+  };
+
+  const handleScanEscalations = async () => {
+    setScanningEscalations(true);
+    try {
+      await api.triggerEscalationCheck();
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (err: any) {
+      setTransitionError(err.message || 'Failed to scan task escalations');
+    } finally {
+      setScanningEscalations(false);
+    }
+  };
+
+  const handleLaunchSubprocess = async () => {
+    if (!activeId) return;
+    setLaunchingSubprocess(true);
+    try {
+      await api.launchSubprocess(entityType, activeId);
+      await loadData(true);
+      onRecordUpdated?.();
+    } catch (err: any) {
+      setTransitionError(err.message || 'Failed to launch child subprocess');
+    } finally {
+      setLaunchingSubprocess(false);
+    }
+  };
+
+  const currentStateNode = useMemo(() => {
+    if (!workflowDef || !currentEntity?.status) return null;
+    const nodes = workflowDef.nodes || [];
+    return nodes.find((n) => n.name === currentEntity.status) || null;
+  }, [workflowDef, currentEntity?.status]);
+
+  const isInteractionState = currentStateNode?.kind === 'interaction';
+
+  const handleJumpToInteractionTarget = () => {
+    if (!currentStateNode) return;
+    const targetApp = (currentStateNode.interaction_app || 'records').toLowerCase();
+    const targetTab = (currentStateNode.interaction_tab || 'details').toLowerCase();
+
+    if (targetTab === 'history' || targetApp === 'history') {
+      setAuditLogOpen(true);
+      setInteractionNavFeedback('Opened Audit Timeline history log');
+    } else if (targetTab === 'assignments' || targetTab === 'tasks') {
+      const el = document.getElementById('workflow-tasks-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      setInteractionNavFeedback('Focused Workflow Task Assignments section');
+    } else if (targetTab === 'files' || targetTab === 'attachments') {
+      const el = document.getElementById('attachments-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      setInteractionNavFeedback('Focused Attached Files & Media section');
+    } else if (targetTab === 'edit' || targetApp === 'forms') {
+      const el = document.getElementById('record-form-grid');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      setInteractionNavFeedback('Focused Form Fields editor');
+    } else {
+      setInteractionNavFeedback(`Navigated to ${targetApp} / ${targetTab}`);
+    }
+
+    setTimeout(() => {
+      setInteractionNavFeedback(null);
+    }, 4000);
+  };
+
+  const handleCompleteInteraction = async () => {
+    if (validTransitions.length === 0) {
+      setTransitionError('No outgoing transition configured from this interaction step');
+      return;
+    }
+    const resumeEvent = currentStateNode?.resume_event || 'NEXT';
+    const targetTrans =
+      validTransitions.find((t) => t.event_type === resumeEvent) ||
+      validTransitions.find((t) => t.event_type === 'NEXT' || t.event_type === 'CONTINUE' || t.event_type === 'DONE') ||
+      validTransitions[0];
+    if (targetTrans) {
+      handleFireTransition(targetTrans);
+    }
+  };
+
   const hasLayout = items.length > 0;
   const entityTitleStr = getEntityTitle(currentEntity);
+
+  const expiryValue = currentEntity?.custom_fields?.expiry_date;
+  const isExpiredStatus = currentEntity?.status?.toLowerCase() === 'expired';
+  const isPastExpiryDate = useMemo(() => {
+    if (!expiryValue) return false;
+    try {
+      const exp = new Date(String(expiryValue).replace('Z', '+00:00'));
+      return !isNaN(exp.getTime()) && exp.getTime() < Date.now();
+    } catch {
+      return false;
+    }
+  }, [expiryValue]);
 
   const content = (
     <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-slate-50/50">
@@ -395,6 +622,11 @@ export function EntityFormView({
             {currentEntity?.status && (
               <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusBadge(currentEntity.status)}`}>
                 {currentEntity.status}
+              </span>
+            )}
+            {currentEntity?.workflow_stage && currentEntity.workflow_stage !== currentEntity.status && (
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 font-mono text-[11px] font-medium text-gray-700">
+                Step: {currentEntity.workflow_stage}
               </span>
             )}
           </div>
@@ -425,6 +657,17 @@ export function EntityFormView({
 
         {/* Right Header Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Workflow Trace & Visualizer Button */}
+          <button
+            type="button"
+            onClick={() => setVisualizerOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-2xs transition-colors"
+            title="View runtime workflow step trace and execution visualizer"
+          >
+            <Workflow className="h-3.5 w-3.5 text-blue-600" />
+            <span>Workflow Trace</span>
+          </button>
+
           {/* Audit Timeline Sidebar Toggle Button */}
           <button
             type="button"
@@ -462,6 +705,29 @@ export function EntityFormView({
         </div>
       </header>
 
+      {/* Expiry Status Notice Banners */}
+      {isExpiredStatus && (
+        <div className="flex items-center justify-between gap-3 border-b border-orange-200 bg-orange-50/90 px-6 py-2.5 text-xs text-orange-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
+            <span>
+              <strong>Permit Expired:</strong> This permit has exceeded its validity limit{expiryValue ? ` (${new Date(String(expiryValue)).toLocaleString()})` : ''}. Hazardous work on site is suspended until re-validated with updated atmospheric gas tests or closed.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {!isExpiredStatus && isPastExpiryDate && (currentEntity?.status === 'Active' || currentEntity?.status === 'Suspended') && (
+        <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/90 px-6 py-2.5 text-xs text-amber-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-amber-600 shrink-0" />
+            <span>
+              <strong>Validity Limit Exceeded:</strong> Scheduled expiry limit ({new Date(String(expiryValue)).toLocaleString()}) has passed. This record is queued for automated system expiry.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main Form Body Surface */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-8 min-h-0 bg-slate-100/60">
         {!loaded ? (
@@ -482,23 +748,49 @@ export function EntityFormView({
           <div className="mx-auto max-w-4xl space-y-6">
             {/* Top Workflow Actions Banner: Drive workflow directly from full-page form */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Workflow className="h-4 w-4 text-blue-600" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
-                    Current Stage: <span className="text-blue-700">{currentEntity.status}</span>
-                  </span>
+              <div className="flex flex-wrap items-center gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Workflow className="h-4 w-4 text-blue-600" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                      Current Stage: <span className="text-blue-700">{currentEntity.status}</span>
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {validTransitions.length > 0
+                      ? `Click an action to transition this ${entityType} record to the next workflow stage.`
+                      : `This record is currently in state "${currentEntity.status}".`}
+                  </p>
                 </div>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  {validTransitions.length > 0
-                    ? `Click an action to transition this ${entityType} record to the next workflow stage.`
-                    : `This record is currently in state "${currentEntity.status}".`}
-                </p>
+
+                {/* Live Active Countdown Timer Badge */}
+                {stageCountdown.hasTimer && (
+                  <div className="flex items-center gap-2.5 rounded-lg border border-teal-200 bg-teal-50/90 px-3 py-1.5 text-teal-950 shadow-2xs">
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <Timer className={`h-4 w-4 text-teal-600 ${stageCountdown.isExpired ? '' : 'animate-spin'}`} />
+                      <span className="text-teal-900">
+                        {stageCountdown.isExpired ? 'Timer Elapsed' : 'Timer Running:'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 font-mono text-xs font-bold text-teal-950">
+                      <span>{stageCountdown.isExpired ? '00:00' : stageCountdown.formattedDigital}</span>
+                      <span className="font-sans text-[11px] font-normal text-teal-700">
+                        ({stageCountdown.isExpired ? 'Auto-advancing…' : `${stageCountdown.formatted} left`})
+                      </span>
+                    </div>
+                    <div className="w-16 h-1.5 bg-teal-200/80 rounded-full overflow-hidden hidden sm:block">
+                      <div
+                        className="h-full bg-teal-600 rounded-full transition-all duration-1000 ease-linear"
+                        style={{ width: `${stageCountdown.progressPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons: Directly fire the event on 1 click */}
               <div className="flex flex-wrap items-center gap-2">
-                {validTransitions.length === 0 ? (
+                {displayTransitions.length === 0 ? (
                   <div className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium border ${
                     !hasPublishedWorkflow
                       ? 'bg-amber-50 text-amber-800 border-amber-200'
@@ -508,34 +800,43 @@ export function EntityFormView({
                     <span>
                       {!hasPublishedWorkflow
                         ? (noWorkflowMessage || `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.`)
-                        : 'No actions available from this state'}
+                        : 'No manual user actions available from this state'}
                     </span>
                   </div>
                 ) : (
-                  validTransitions.map((t) => {
+                  displayTransitions.map((t) => {
                     const isFiring = firingEvent === t.event_type;
                     const isAnyFiring = firingEvent !== null;
                     const condCount = (t.conditions || []).length;
+                    const buttonTitle = formatActionTitle(t);
+                    const buttonClass = getActionButtonClass(t);
+                    const tooltipText = t.instructions || t.description || undefined;
                     return (
                       <button
                         key={t.event_type}
                         type="button"
                         disabled={isAnyFiring}
                         onClick={() => handleFireTransition(t)}
-                        className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 active:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title={tooltipText}
+                        className={buttonClass}
                       >
                         {isFiring ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
                         ) : (
-                          <Zap className="h-3.5 w-3.5 text-blue-200" />
+                          <Zap className="h-3.5 w-3.5 opacity-80" />
                         )}
-                        <span>{t.event_type}</span>
+                        <span>{buttonTitle}</span>
                         {condCount > 0 && (
                           <span
                             title={(t.conditions || []).map((c) => conditionMap[c]?.label || c).join(', ')}
-                            className="flex items-center gap-0.5 rounded bg-blue-800/80 px-1.5 py-0.2 text-[10px] font-mono text-blue-100"
+                            className="flex items-center gap-0.5 rounded bg-black/15 px-1.5 py-0.2 text-[10px] font-mono"
                           >
                             <ShieldCheck className="h-2.5 w-2.5 text-amber-300" /> {condCount}
+                          </span>
+                        )}
+                        {tooltipText && (
+                          <span title={tooltipText} className="opacity-70">
+                            <Info className="h-3 w-3" />
                           </span>
                         )}
                         <ArrowRight className="h-3 w-3 opacity-60" />
@@ -563,9 +864,187 @@ export function EntityFormView({
               </div>
             )}
 
+            {/* Interaction Node Action Directive Banner */}
+            {isInteractionState && currentStateNode && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4 sm:p-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-sky-100 pb-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Compass className="h-4 w-4 text-sky-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-sky-950">
+                      Required User Interaction
+                    </h3>
+                    <span className="rounded-full bg-sky-100 border border-sky-200 px-2.5 py-0.5 text-[10px] font-semibold text-sky-800">
+                      Target: {currentStateNode.interaction_app || 'Records'} / {currentStateNode.interaction_tab || 'Details'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-sky-600/90 font-medium hidden sm:inline">
+                    Maximo Interaction Dialog Step
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1 max-w-xl">
+                    <p className="font-semibold text-gray-900">
+                      {currentStateNode.task_instructions || currentStateNode.description || `Please navigate to the ${currentStateNode.interaction_tab || 'details'} view and complete the required inputs.`}
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Stage: <span className="font-mono font-medium text-gray-700">{currentEntity?.status}</span> · Once your inputs are verified, click complete to proceed.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleJumpToInteractionTarget}
+                      className="flex items-center gap-1.5 rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50 hover:text-sky-900 shadow-2xs transition-colors"
+                      title="Navigate directly to the interaction target tab or workspace"
+                    >
+                      <Compass className="h-3.5 w-3.5 text-sky-600" />
+                      <span>Jump to View</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCompleteInteraction}
+                      disabled={Boolean(firingEvent)}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 shadow-2xs transition-colors disabled:opacity-50"
+                      title="Advance to the next workflow stage"
+                    >
+                      {firingEvent ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>Complete Interaction</span>
+                    </button>
+                  </div>
+                </div>
+
+                {interactionNavFeedback && (
+                  <div className="mt-2.5 rounded-md bg-sky-100/70 px-2.5 py-1 text-[11px] font-medium text-sky-800 animate-in fade-in flex items-center gap-1.5">
+                    <Check className="h-3 w-3 text-sky-700" />
+                    <span>{interactionNavFeedback}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Subprocess Status / Relationship Banner */}
+            {subprocessData && (subprocessData.is_subprocess_state || subprocessData.child_subprocess || subprocessData.is_child_record) && (
+              <div className="rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Workflow className="h-4 w-4 text-fuchsia-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                      {subprocessData.is_child_record ? 'Parent Workflow Relationship' : 'Child Subprocess Execution'}
+                    </h3>
+                  </div>
+                  {subprocessData.is_subprocess_state && (
+                    <span className="rounded-full bg-fuchsia-50 border border-fuchsia-200 px-2.5 py-0.5 text-[10px] font-semibold text-fuchsia-700">
+                      Subprocess Stage Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Case 1: Active Subprocess State / Linked Child Subprocess */}
+                {(subprocessData.is_subprocess_state || subprocessData.child_subprocess) && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-fuchsia-100 bg-fuchsia-50/30 p-3.5 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900">
+                          {subprocessData.subprocess_node?.subprocess_id || 'Subprocess Flow'}
+                        </span>
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-gray-600 uppercase">
+                          {subprocessData.child_subprocess?.child_entity_type || subprocessData.subprocess_node?.target_entity_type || entityType}
+                        </span>
+                        {subprocessData.child_subprocess ? (
+                          <span className={`rounded-full border px-2 py-0.2 text-[11px] font-semibold ${statusBadge(subprocessData.child_subprocess.child_status)}`}>
+                            {subprocessData.child_subprocess.child_status}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.2 text-[11px] font-semibold text-amber-700">
+                            Awaiting Initiation
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500">
+                        {subprocessData.child_subprocess
+                          ? `Child record ID: ${subprocessData.child_subprocess.child_id}. Completing child workflow will automatically advance parent step.`
+                          : `Current state '${currentEntity?.status}' is configured as a child sub-routine.`}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {subprocessData.child_subprocess ? (
+                        <button
+                          type="button"
+                          onClick={() => setLinkedModalRecord({
+                            entityType: subprocessData.child_subprocess.child_entity_type,
+                            id: subprocessData.child_subprocess.child_id,
+                          })}
+                          className="flex items-center gap-1.5 rounded-lg border border-fuchsia-200 bg-white px-3 py-1.5 text-xs font-semibold text-fuchsia-700 hover:bg-fuchsia-50 shadow-2xs transition-colors"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Open Child Record</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleLaunchSubprocess}
+                          disabled={launchingSubprocess}
+                          className="flex items-center gap-1.5 rounded-lg bg-fuchsia-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-fuchsia-700 shadow-2xs transition-colors disabled:opacity-50"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          <span>{launchingSubprocess ? 'Launching...' : 'Launch Subprocess'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Case 2: This Record is a Child Subprocess */}
+                {subprocessData.is_child_record && subprocessData.parent_workflow && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/30 p-3.5 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900">
+                          Parent Process: {subprocessData.parent_workflow.parent_entity_type.toUpperCase()}
+                        </span>
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+                          ID: {subprocessData.parent_workflow.parent_entity_id?.slice(0, 8)}
+                        </span>
+                        {subprocessData.parent_workflow.parent_status && (
+                          <span className={`rounded-full border px-2 py-0.2 text-[11px] font-semibold ${statusBadge(subprocessData.parent_workflow.parent_status)}`}>
+                            {subprocessData.parent_workflow.parent_status}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500">
+                        This record is a sub-routine spawned from stage '{subprocessData.parent_workflow.parent_state}'.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setLinkedModalRecord({
+                          entityType: subprocessData.parent_workflow.parent_entity_type,
+                          id: subprocessData.parent_workflow.parent_entity_id,
+                        })}
+                        className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 shadow-2xs transition-colors"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span>View Parent Record</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Workflow Task Assignments: Active assignments created by workflow task states */}
             {taskAssignments.length > 0 && (
-              <div className="rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
+              <div id="workflow-tasks-section" className="rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-3">
                   <div className="flex items-center gap-2">
                     <ListTodo className="h-4 w-4 text-gray-700" />
@@ -573,18 +1052,35 @@ export function EntityFormView({
                       Workflow Task Assignments
                     </h3>
                     <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                      {taskAssignments.filter((t) => t.status === 'ASSIGNED').length} active
+                      {taskAssignments.filter((t) => t.status === 'ASSIGNED' || t.status === 'IN_PROGRESS').length} active
                     </span>
                   </div>
-                  <span className="text-[11px] text-gray-400">
-                    Maximo-aligned role routing with dynamic delegation & availability
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleScanEscalations}
+                      disabled={scanningEscalations}
+                      title="Run escalation check for overdue tasks"
+                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${scanningEscalations ? 'animate-spin text-blue-600' : 'text-gray-500'}`} />
+                      <span>Check Escalations</span>
+                    </button>
+                    <span className="text-[11px] text-gray-400 hidden sm:inline">
+                      Maximo-aligned escalation & delegation engine
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2.5">
                   {taskAssignments.map((task) => {
                     const isCurrentState = task.state_name === currentEntity?.status;
-                    const isAssigned = task.status === 'ASSIGNED';
+                    const isPending = task.status === 'ASSIGNED' || task.status === 'IN_PROGRESS';
+                    const isOverdue = Boolean(
+                      isPending &&
+                      task.due_date &&
+                      new Date(task.due_date).getTime() < Date.now()
+                    );
                     const assignedPerson = task.assigned_person_id
                       ? persons.find((p) => p.person_id === task.assigned_person_id)
                       : null;
@@ -602,34 +1098,68 @@ export function EntityFormView({
                       <div
                         key={task.id}
                         className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border p-3 text-xs transition-colors ${
-                          isAssigned
+                          isPending
                             ? isCurrentState
-                              ? 'border-blue-200 bg-blue-50/40 shadow-2xs'
-                              : 'border-gray-200 bg-white'
+                              ? isOverdue
+                                ? 'border-amber-300 bg-amber-50/40 shadow-2xs'
+                                : 'border-blue-200 bg-blue-50/40 shadow-2xs'
+                              : isOverdue
+                                ? 'border-amber-200 bg-amber-50/20'
+                                : 'border-gray-200 bg-white'
                             : 'border-gray-200/60 bg-gray-50/60 text-gray-500'
                         }`}
                       >
                         <div className="space-y-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            {/* Status Badge */}
                             <span
                               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                isAssigned
-                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                task.status === 'COMPLETED'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : task.status === 'ESCALATED'
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : task.status === 'DELEGATED'
+                                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                      : task.status === 'REJECTED'
+                                        ? 'bg-red-100 text-red-800 border border-red-200'
+                                        : 'bg-blue-100 text-blue-800 border border-blue-200'
                               }`}
                             >
-                              {isAssigned ? (
-                                <>
-                                  <Clock className="h-2.5 w-2.5 text-blue-600" />
-                                  <span>Pending</span>
-                                </>
-                              ) : (
+                              {task.status === 'COMPLETED' ? (
                                 <>
                                   <CheckCircle2 className="h-2.5 w-2.5 text-emerald-600" />
                                   <span>Completed</span>
                                 </>
+                              ) : task.status === 'ESCALATED' ? (
+                                <>
+                                  <TrendingUp className="h-2.5 w-2.5 text-amber-600" />
+                                  <span>Escalated</span>
+                                </>
+                              ) : task.status === 'DELEGATED' ? (
+                                <>
+                                  <Users className="h-2.5 w-2.5 text-purple-600" />
+                                  <span>Delegated</span>
+                                </>
+                              ) : task.status === 'REJECTED' ? (
+                                <>
+                                  <X className="h-2.5 w-2.5 text-red-600" />
+                                  <span>Rejected</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="h-2.5 w-2.5 text-blue-600" />
+                                  <span>Pending</span>
+                                </>
                               )}
                             </span>
+
+                            {/* Overdue Alert Badge */}
+                            {isOverdue && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-700 border border-red-200 animate-pulse">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                <span>Overdue</span>
+                              </span>
+                            )}
 
                             <span className="font-semibold text-gray-900">
                               Stage: {task.state_name}
@@ -643,7 +1173,7 @@ export function EntityFormView({
                             )}
 
                             {task.resolution_trace && (
-                              <InfoTooltip text={`Role Resolution Trace: ${task.resolution_trace}`} />
+                              <InfoTooltip text={`Role Resolution Trace: ${JSON.stringify(task.resolution_trace)}`} />
                             )}
                           </div>
 
@@ -657,7 +1187,7 @@ export function EntityFormView({
                               <div className="flex items-center gap-1">
                                 <Clock className="h-3 w-3 text-gray-400" />
                                 <span className="text-gray-400">Due:</span>
-                                <span className="font-medium text-gray-700">
+                                <span className={`font-medium ${isOverdue ? 'text-red-700 font-bold' : 'text-gray-700'}`}>
                                   {new Date(task.due_date).toLocaleString(undefined, {
                                     month: 'short',
                                     day: 'numeric',
@@ -675,6 +1205,15 @@ export function EntityFormView({
                                 <span className="font-medium text-gray-700">{task.time_limit_hours}h limit</span>
                               </div>
                             )}
+
+                            {task.escalated_to_person_id && (
+                              <div className="flex items-center gap-1 text-amber-800">
+                                <TrendingUp className="h-3 w-3 text-amber-600" />
+                                <span className="text-amber-700 font-medium">
+                                  Escalated to: {task.escalated_to_person_name || task.escalated_to_person_id}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           {task.instructions && (
@@ -684,27 +1223,44 @@ export function EntityFormView({
                           )}
                         </div>
 
-                        {/* Task Action */}
+                        {/* Task Action Buttons */}
                         <div className="shrink-0 flex items-center gap-2">
-                          {isAssigned ? (
-                            <button
-                              type="button"
-                              disabled={completingTaskId === task.id}
-                              onClick={() => handleCompleteTask(task.id)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-white hover:bg-gray-50 border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:border-gray-300 transition-colors disabled:opacity-50"
-                            >
-                              {completingTaskId === task.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-600" />
-                              ) : (
-                                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                              )}
-                              <span>Mark Task Complete</span>
-                            </button>
+                          {isPending ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={completingTaskId === task.id || escalatingTaskId === task.id}
+                                onClick={() => handleCompleteTask(task.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-white hover:bg-gray-50 border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-2xs hover:border-gray-300 transition-colors disabled:opacity-50"
+                              >
+                                {completingTaskId === task.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-600" />
+                                ) : (
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                )}
+                                <span>Complete</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={completingTaskId === task.id || escalatingTaskId === task.id}
+                                onClick={() => handleEscalateTask(task.id)}
+                                title="Escalate task to supervisor or delegate"
+                                className="inline-flex items-center gap-1 rounded-lg bg-white hover:bg-amber-50 border border-gray-200 hover:border-amber-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:text-amber-800 shadow-2xs transition-colors disabled:opacity-50"
+                              >
+                                {escalatingTaskId === task.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                                ) : (
+                                  <TrendingUp className="h-3.5 w-3.5 text-amber-600" />
+                                )}
+                                <span>Escalate</span>
+                              </button>
+                            </>
                           ) : (
                             <span className="text-[11px] text-gray-400">
                               {task.completed_at
                                 ? `Completed ${new Date(task.completed_at).toLocaleDateString()}`
-                                : 'Completed'}
+                                : task.status}
                             </span>
                           )}
                         </div>
@@ -716,7 +1272,7 @@ export function EntityFormView({
             )}
 
             {/* Document Sheet Container */}
-            <div className="rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-10 shadow-xs mb-8">
+            <div id="record-form-grid" className="rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-10 shadow-xs mb-8">
               {/* Document Sheet Heading */}
               <div className="mb-6 border-b border-gray-100 pb-4">
                 <div className="flex items-center justify-between">
@@ -896,6 +1452,35 @@ export function EntityFormView({
             </div>
           </aside>
         </div>
+      )}
+
+      {/* Runtime Workflow Step Visualizer Modal */}
+      {currentEntity && (
+        <WorkflowInstanceVisualizer
+          isOpen={visualizerOpen}
+          onClose={() => setVisualizerOpen(false)}
+          entity={currentEntity}
+          entityType={entityType}
+          events={events}
+          taskAssignments={taskAssignments}
+        />
+      )}
+
+      {/* Linked Child or Parent Entity Modal */}
+      {linkedModalRecord && (
+        <EntityFormView
+          isModal={true}
+          entityType={linkedModalRecord.entityType}
+          recordId={linkedModalRecord.id}
+          onClose={() => {
+            setLinkedModalRecord(null);
+            loadData(true);
+          }}
+          onRecordUpdated={() => {
+            loadData(true);
+            onRecordUpdated?.();
+          }}
+        />
       )}
     </div>
   );

@@ -30,7 +30,7 @@ import { FormCanvasItem } from './FormCanvasItem';
 import { FormInspector } from './FormInspector';
 import { FormPreviewModal } from './FormPreviewModal';
 import { FormJsonModal } from './FormJsonModal';
-import { ConditionModal } from '../builder/studio/ConditionModal';
+import { ConditionModal } from '../workflow-ui/ConditionModal';
 import { ConditionList } from '../conditions/ConditionList';
 
 interface FormBuilderProps {

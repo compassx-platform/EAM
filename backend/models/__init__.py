@@ -22,6 +22,8 @@ from backend.models.person import (
 from backend.models.workflow_role import WorkflowRole
 from backend.models.task_assignment import TaskAssignment
 from backend.models.conditions import ConditionDefinition, ConditionVersion
+from backend.models.notification import InAppNotification
+from backend.models.escalation import EscalationDefinition, EscalationLog
 
 __all__ = [
     "EntityBaseMixin",
@@ -51,4 +53,7 @@ __all__ = [
     "TaskAssignment",
     "ConditionDefinition",
     "ConditionVersion",
+    "InAppNotification",
+    "EscalationDefinition",
+    "EscalationLog",
 ]

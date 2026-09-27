@@ -1,16 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, GitFork, Info, Minus, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import type { ConditionDefinition, WorkflowAction } from '../../../types';
-import { edgeDescription, type WorkflowFlowEdge } from '../flowModel';
+import { Check, ChevronDown, Compass, GitFork, Info, Mail, Minus, Pencil, Play, Plus, ShieldCheck, Timer, Trash2, Workflow, Zap } from 'lucide-react';
+import type { ConditionDefinition, WorkflowAction } from '../../types';
+import {
+  edgeDescription,
+  isConditionKind,
+  isActionKind,
+  isSubprocessKind,
+  kindDefaultLabel,
+  type WorkflowFlowEdge,
+  type WorkflowFlowNode,
+  type EventEdgeData,
+  type NodeKind,
+} from './types';
 import { DashedButton, Disclosure, SectionLabel } from './ui';
 
 interface ActionInspectorProps {
   edge: WorkflowFlowEdge;
+  sourceNode?: WorkflowFlowNode | null;
   nodeLabels: string[];
   conditions: ConditionDefinition[];
   actionTypes: Array<{ type: string; name: string; description: string }>;
   isRouterSource?: boolean;
   onEvent: (id: string, event: string) => void;
+  onEdgeDataChange?: (id: string, updates: Partial<EventEdgeData>) => void;
   onTarget?: (id: string, to: string) => void;
   onConditions: (id: string, conditions: string[]) => void;
   onOnAfter: (id: string, actions: WorkflowAction[]) => void;
@@ -20,14 +32,35 @@ interface ActionInspectorProps {
 }
 
 export function ActionInspector(p: ActionInspectorProps) {
-  const { edge, conditions, onEditCondition, onNewCondition, onConditions, actionTypes, isRouterSource, onTarget, nodeLabels } = p;
+  const {
+    edge,
+    sourceNode,
+    conditions,
+    onEditCondition,
+    onNewCondition,
+    onConditions,
+    actionTypes,
+    isRouterSource,
+    onTarget,
+    onEdgeDataChange,
+    nodeLabels,
+  } = p;
+
   const [eventValue, setEventValue] = useState(edge.data?.event ?? 'EVENT');
+  const [labelValue, setLabelValue] = useState(edge.data?.button_label || edge.data?.label || '');
+  const [buttonStyle, setButtonStyle] = useState<'primary' | 'secondary' | 'danger' | 'default'>(edge.data?.button_style || 'primary');
+  const [isSystemEvent, setIsSystemEvent] = useState<boolean>(Boolean(edge.data?.is_system));
+  const [descriptionValue, setDescriptionValue] = useState(edge.data?.description || '');
   const [editingEvent, setEditingEvent] = useState(false);
   const desc = edgeDescription(edge);
 
   useEffect(() => {
     setEventValue(edge.data?.event ?? 'EVENT');
-  }, [edge.data?.event]);
+    setLabelValue(edge.data?.button_label || edge.data?.label || '');
+    setButtonStyle(edge.data?.button_style || 'primary');
+    setIsSystemEvent(Boolean(edge.data?.is_system));
+    setDescriptionValue(edge.data?.description || '');
+  }, [edge.data?.event, edge.data?.button_label, edge.data?.label, edge.data?.button_style, edge.data?.is_system, edge.data?.description]);
 
   const commitEvent = () => {
     setEditingEvent(false);
@@ -36,64 +69,275 @@ export function ActionInspector(p: ActionInspectorProps) {
     if (next && next !== edge.data?.event) p.onEvent(edge.id, next);
   };
 
+  const commitLabel = (newLabel: string) => {
+    setLabelValue(newLabel);
+    onEdgeDataChange?.(edge.id, {
+      label: newLabel.trim() || undefined,
+      button_label: newLabel.trim() || undefined,
+    });
+  };
+
+  const commitButtonStyle = (style: 'primary' | 'secondary' | 'danger' | 'default') => {
+    setButtonStyle(style);
+    onEdgeDataChange?.(edge.id, { button_style: style });
+  };
+
+  const commitIsSystem = (systemVal: boolean) => {
+    setIsSystemEvent(systemVal);
+    onEdgeDataChange?.(edge.id, { is_system: systemVal });
+  };
+
+  const commitDescription = (descVal: string) => {
+    setDescriptionValue(descVal);
+    onEdgeDataChange?.(edge.id, { description: descVal.trim() || undefined });
+  };
+
   const startEdit = () => {
     setEventValue(edge.data?.event ?? 'EVENT');
     setEditingEvent(true);
   };
 
+  // Determine source node kind and classification
+  const sourceNodeKind: NodeKind = sourceNode?.data?.kind || edge.data?.sourceNodeKind || (isRouterSource ? 'condition' : 'task');
+  const sourceNodeLabel = sourceNode?.data?.label || edge.source;
+
   const isTrueBranch = edge.data?.event === 'TRUE';
   const isFalseBranch = edge.data?.event === 'FALSE';
-  const isRouterBranch = Boolean(isRouterSource || edge.data?.isRouterSource);
+  const isRouterBranch = Boolean(isRouterSource || edge.data?.isRouterSource || isConditionKind(sourceNodeKind));
+  const isStartSource = sourceNodeKind === 'start';
+  const isActionSource = isActionKind(sourceNodeKind);
+  const isWaitSource = sourceNodeKind === 'wait';
+  const isInteractionSource = sourceNodeKind === 'interaction';
+  const isSubprocessSource = isSubprocessKind(sourceNodeKind);
+  const isAutoProgression = isStartSource || isActionSource || isWaitSource || isInteractionSource || isSubprocessSource;
+
+  // IBM Maximo Action Line Classification
+  const curEventUpper = (edge.data?.event || 'EVENT').toUpperCase();
+  const isPositiveAction = ['APPROVE', 'COMPLETE', 'SUBMIT', 'ACCEPT', 'YES', 'PASS', 'START', 'ISSUE'].includes(curEventUpper);
+  const isNegativeAction = ['REJECT', 'REROUTE', 'RETURN', 'CANCEL', 'NO', 'FAIL', 'ABORT'].includes(curEventUpper);
+  const isOptionAction = curEventUpper.startsWith('OPTION');
+
+  let lineClassification = 'Action Button / Transition';
+  if (isRouterBranch) {
+    lineClassification = isTrueBranch
+      ? 'Positive Condition Branch (TRUE)'
+      : isFalseBranch
+      ? 'Negative Condition Branch (FALSE)'
+      : 'Router Condition Branch';
+  } else if (isStartSource) {
+    lineClassification = 'Process Entry Line (START)';
+  } else if (isActionSource) {
+    lineClassification = 'Automated Action Follow-Through (NEXT)';
+  } else if (isWaitSource) {
+    lineClassification = 'Timer / Wait Follow-Through (NEXT)';
+  } else if (isInteractionSource) {
+    lineClassification = 'Interaction Follow-Through (NEXT)';
+  } else if (isSubprocessSource) {
+    lineClassification = 'Subprocess Resume Line (NEXT)';
+  } else if (isSystemEvent) {
+    lineClassification = 'Automated System Trigger';
+  } else if (isPositiveAction) {
+    lineClassification = 'Positive Action Button';
+  } else if (isNegativeAction) {
+    lineClassification = 'Negative / Rejection Action';
+  } else if (isOptionAction) {
+    lineClassification = 'Interactive Option Action';
+  }
+
+  const quickPresets = isRouterBranch || isAutoProgression
+    ? []
+    : [
+        { label: 'Submit for JSA', event: 'SUBMIT_FOR_JSA', style: 'primary' as const },
+        { label: 'Approve Safety', event: 'APPROVE_SAFETY', style: 'primary' as const },
+        { label: 'Issue Permit', event: 'ISSUE_PERMIT', style: 'primary' as const },
+        { label: 'Suspend Work', event: 'SUSPEND_WORK', style: 'secondary' as const },
+        { label: 'Resume Work', event: 'RESUME_WORK', style: 'primary' as const },
+        { label: 'Handback Permit', event: 'HANDBACK_PERMIT', style: 'primary' as const },
+        { label: 'Revalidate Permit', event: 'REVALIDATE_PERMIT', style: 'primary' as const },
+        { label: 'Close Permit', event: 'CLOSE_PERMIT', style: 'secondary' as const },
+        { label: 'Reject', event: 'REJECT', style: 'danger' as const },
+      ];
 
   return (
     <div className="flex flex-col gap-3 p-4">
+      {/* Mode A: Condition / Router Branch */}
       {isRouterBranch ? (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <span className="rounded border border-gray-200 bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold uppercase tracking-wider text-gray-800">
+            <GitFork className="h-4 w-4 text-slate-500 shrink-0" />
+            <span className="rounded border border-gray-200 bg-white px-2 py-0.5 font-mono text-xs font-bold uppercase tracking-wider text-gray-800">
               {isTrueBranch ? 'TRUE Branch' : isFalseBranch ? 'FALSE Branch' : edge.data?.event || 'BRANCH'}
             </span>
             <span className="text-xs font-medium text-gray-500">Router outlet</span>
           </div>
-          <p className="text-xs text-gray-500">
-            From router <span className="font-semibold text-gray-700">{edge.source}</span>
-          </p>
         </div>
-      ) : editingEvent ? (
-        <input
-          autoFocus
-          value={eventValue}
-          onChange={(e) => setEventValue(e.target.value.toUpperCase())}
-          onBlur={commitEvent}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          onFocus={(e) => e.target.select()}
-          className="-mx-1 w-[calc(100%+0.5rem)] rounded border border-blue-300 bg-blue-50/50 px-1 py-0 font-mono text-base font-bold text-gray-800 outline-none"
-        />
+      ) : isAutoProgression ? (
+        /* Mode B: Automatic Follow-Through Line (Start, Action, Wait, Interaction, Subprocess) */
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {isStartSource ? (
+              <Play className="h-4 w-4 text-emerald-600 shrink-0" />
+            ) : isActionSource ? (
+              <Zap className="h-4 w-4 text-amber-600 shrink-0" />
+            ) : isWaitSource ? (
+              <Timer className="h-4 w-4 text-teal-600 shrink-0" />
+            ) : isInteractionSource ? (
+              <Compass className="h-4 w-4 text-sky-600 shrink-0" />
+            ) : (
+              <Workflow className="h-4 w-4 text-indigo-600 shrink-0" />
+            )}
+            <span className="font-mono text-xs font-bold text-gray-800 uppercase tracking-wide">
+              {isStartSource ? 'START' : 'NEXT'}
+            </span>
+            <span className="rounded bg-gray-100 border border-gray-200 px-1.5 py-0.2 font-mono text-[9px] font-semibold text-gray-600 uppercase">
+              Auto-Progression
+            </span>
+          </div>
+
+          {/* Optional Action Description / Tooltip */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Description / Tooltip
+            </label>
+            <input
+              type="text"
+              value={descriptionValue}
+              placeholder="e.g. Automatically cascaded upon node completion"
+              onChange={(e) => commitDescription(e.target.value)}
+              className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none placeholder:text-gray-400"
+            />
+          </div>
+        </div>
       ) : (
-        <button
-          type="button"
-          onClick={startEdit}
-          className="group flex w-full items-center gap-2 text-left"
-        >
-          <span className="truncate font-mono text-base font-bold text-gray-800">
-            {edge.data?.event || 'EVENT'}
-          </span>
-          <Pencil className="h-3.5 w-3.5 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
+        /* Mode C: Interactive User Action Line (Task / Manual Input) */
+        <div className="flex flex-col gap-3">
+          {/* 1. Action / Button Label */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Button / Action Label
+            </label>
+            <input
+              type="text"
+              value={labelValue}
+              placeholder={edge.data?.event ? edge.data.event.replace(/_/g, ' ') : 'e.g. Approve Safety Sign-off'}
+              onChange={(e) => commitLabel(e.target.value)}
+              className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 focus:border-blue-500 focus:outline-none placeholder:font-normal placeholder:text-gray-400"
+            />
+          </div>
+
+          {/* 2. Button Visual Style & Execution Mode */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                Button Variant
+              </label>
+              <select
+                value={buttonStyle}
+                onChange={(e) => commitButtonStyle(e.target.value as any)}
+                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none cursor-pointer"
+              >
+                <option value="primary">Primary (Blue)</option>
+                <option value="secondary">Secondary (Neutral)</option>
+                <option value="danger">Destructive (Red)</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                Trigger Type
+              </label>
+              <select
+                value={isSystemEvent ? 'system' : 'manual'}
+                onChange={(e) => commitIsSystem(e.target.value === 'system')}
+                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-800 focus:border-blue-500 focus:outline-none cursor-pointer"
+              >
+                <option value="manual">Manual User Action</option>
+                <option value="system">System / Automated</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 3. Action Description / Tooltip Prompt */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              Instructions / Hover Tooltip
+            </label>
+            <input
+              type="text"
+              value={descriptionValue}
+              placeholder="e.g. Requires atmospheric gas testing before approval"
+              onChange={(e) => commitDescription(e.target.value)}
+              className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:outline-none placeholder:text-gray-400"
+            />
+          </div>
+
+          {/* 4. Internal Technical Event Code */}
+          <div className="flex flex-col gap-1 border-t border-gray-100 pt-2">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Internal Event Code (Optional)
+            </label>
+            {editingEvent ? (
+              <input
+                autoFocus
+                value={eventValue}
+                onChange={(e) => setEventValue(e.target.value.toUpperCase())}
+                onBlur={commitEvent}
+                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                onFocus={(e) => e.target.select()}
+                className="w-full rounded border border-blue-300 bg-blue-50/50 px-2 py-1 font-mono text-xs font-bold text-gray-800 outline-none"
+              />
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-semibold text-gray-600 truncate">
+                  {edge.data?.event || 'EVENT'}
+                </span>
+                <button
+                  type="button"
+                  onClick={startEdit}
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                  title="Rename technical event identifier"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Quick Action Presets */}
+            {quickPresets.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {quickPresets.map((preset) => (
+                  <button
+                    key={preset.event}
+                    type="button"
+                    onClick={() => {
+                      setLabelValue(preset.label);
+                      setEventValue(preset.event);
+                      setButtonStyle(preset.style);
+                      p.onEvent(edge.id, preset.event);
+                      onEdgeDataChange?.(edge.id, {
+                        label: preset.label,
+                        button_label: preset.label,
+                        button_style: preset.style,
+                        is_system: false,
+                      });
+                    }}
+                    className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold transition-colors ${
+                      curEventUpper === preset.event
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* For Router outgoing branches: show router connection info; for standard transitions (including upstream into router): show condition selector */}
-      {isRouterBranch ? (
-        <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-2.5">
-          <div className="flex items-center gap-1.5">
-            <GitFork className="h-4 w-4 text-slate-500 shrink-0" />
-            <span className="text-xs font-semibold text-gray-800">Automatic Router Connection</span>
-          </div>
-          <p className="mt-1 text-[11px] leading-relaxed text-gray-600">
-            Condition evaluation is performed automatically at the <strong>{edge.source}</strong> router state. This branch executes when the router evaluates to {isTrueBranch ? 'TRUE' : isFalseBranch ? 'FALSE' : 'this path'} and does not require an event or edge condition.
-          </p>
-        </div>
-      ) : (
+      {/* Condition Selector: Only shown for Interactive Action Lines (not router or auto lines) */}
+      {!isRouterBranch && !isAutoProgression && (
         <ConditionSection
           edge={edge}
           conditions={conditions}
@@ -127,10 +371,6 @@ export function ActionInspector(p: ActionInspectorProps) {
       )}
 
       <div className="flex flex-col gap-3 border-t border-gray-100 pt-3">
-        <SectionLabel right={<span className="font-mono text-[10px] text-gray-400">action</span>}>
-          Connection · {edge.source} → {desc.to ?? '?'}
-        </SectionLabel>
-
         <Disclosure title="Side effects on arrival">
           <OnAfterEditor
             key={edge.id}

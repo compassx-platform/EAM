@@ -11,6 +11,7 @@ import {
   Cpu,
   Tag,
   Box,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
@@ -20,6 +21,7 @@ import { EntityConsole } from './EntityConsole';
 const ICON_MAP: Record<string, typeof Layers> = {
   ClipboardList,
   ShieldCheck,
+  ShieldAlert,
   Calendar,
   AlertTriangle,
   FileText,

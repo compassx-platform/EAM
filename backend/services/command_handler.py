@@ -214,12 +214,17 @@ def create_entity(
     new_event_id = generate_uuid()
     now = utc_now()
 
+    nodes_meta = {n.get("name"): n for n in definition.get("nodes", []) or []}
+    initial_node = nodes_meta.get(initial_state)
+    initial_entity_status = (initial_node.get("entity_status") if initial_node else None) or initial_state
+
     # 4. Single atomic transaction: write entity + append event
     try:
         new_entity = EntityModel(
             id=entity_id,
             entity_type=entity_type.lower(),
-            status=initial_state,
+            status=initial_entity_status,
+            workflow_stage=initial_state,
             workflow_version=workflow_version,
             last_event_id=new_event_id,
             custom_fields=cleaned_fields,
@@ -255,6 +260,18 @@ def create_entity(
         db.commit()
         db.refresh(new_entity)
 
+        # Handle subprocess entry if initial_state is a subprocess node
+        from backend.services.subprocess_service import handle_subprocess_state_entry
+        sub_res = handle_subprocess_state_entry(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            state_name=initial_state,
+            definition=definition,
+            custom_fields=cleaned_fields,
+            workflow_version=workflow_version,
+        )
+
         result = {
             "accepted": True,
             "entity_id": new_entity.id,
@@ -263,6 +280,8 @@ def create_entity(
             "event_id": new_event_id,
             "entity": new_entity.to_dict(),
         }
+        if sub_res:
+            result["subprocess"] = sub_res
 
         # 5. Automatic conditional routing may immediately advance the entity
         settled = _settle_workflow(db, entity_type, entity_id, definition, workflow_version)
@@ -305,6 +324,7 @@ def propose_transition(
         raise CommandError("entity_not_found", f"{entity_type} with ID '{entity_id}' not found")
 
     current_status = entity.status
+    current_stage = getattr(entity, "workflow_stage", None) or current_status
     workflow_version = entity.workflow_version
     current_last_event_id = entity.last_event_id
     current_custom_fields = dict(entity.custom_fields or {})
@@ -327,12 +347,23 @@ def propose_transition(
     wf = _load_workflow(db, entity_type, workflow_version)
     definition = wf.definition or {}
 
-    # Step 3: Look up (from_state=status, event_type) in definition.transitions
+    # Step 3: Look up (from_state=stage/status, event_type) in definition.transitions
     matching_transition = None
     for t in definition.get("transitions", []):
-        if t.get("from") == current_status and t.get("event") == event_type:
-            matching_transition = t
-            break
+        t_from = t.get("from")
+        if t_from in (current_stage, current_status):
+            t_event = t.get("event")
+            t_label = t.get("label") or t.get("button_label")
+            t_to = t.get("to")
+            if t_event and t_event.upper() == event_type.upper():
+                matching_transition = t
+                break
+            elif t_label and (t_label.upper() == event_type.upper() or t_label.upper().replace(" ", "_") == event_type.upper()):
+                matching_transition = t
+                break
+            elif t_to and (t_to.upper() == event_type.upper() or f"TO_{t_to}".upper() == event_type.upper()):
+                matching_transition = t
+                break
 
     if not matching_transition:
         raise InvalidTransitionError(from_state=current_status, event_type=event_type)
@@ -381,6 +412,10 @@ def propose_transition(
     if custom_fields_delta:
         event_payload["custom_fields_delta"] = custom_fields_delta
 
+    nodes_meta = {n.get("name"): n for n in definition.get("nodes", []) or []}
+    target_node = nodes_meta.get(to_state)
+    target_entity_status = (target_node.get("entity_status") if target_node else None) or to_state
+
     try:
         # Optimistic concurrency check: UPDATE ... WHERE id = entity_id AND last_event_id = current_last_event_id
         stmt = (
@@ -388,7 +423,8 @@ def propose_transition(
             .where(EntityModel.id == entity_id)
             .where(EntityModel.last_event_id == current_last_event_id)
             .values(
-                status=to_state,
+                status=target_entity_status,
+                workflow_stage=to_state,
                 last_event_id=new_event_id,
                 custom_fields=current_custom_fields,
                 updated_at=now,
@@ -434,14 +470,29 @@ def propose_transition(
 
         db.commit()
 
+        # Handle subprocess entry if destination state is a subprocess node
+        from backend.services.subprocess_service import handle_subprocess_state_entry
+        sub_res = handle_subprocess_state_entry(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            state_name=to_state,
+            definition=definition,
+            custom_fields=current_custom_fields,
+            workflow_version=workflow_version,
+        )
+
         response: Dict[str, Any] = {
             "accepted": True,
             "entity_id": entity_id,
             "from_state": current_status,
-            "new_status": to_state,
+            "new_status": target_entity_status,
+            "workflow_stage": to_state,
             "event_id": new_event_id,
             "condition_trace": [r.model_dump() for r in results],
         }
+        if sub_res:
+            response["subprocess"] = sub_res
         if choice_index is not None:
             response["routing"] = {
                 "choice_index": choice_index,
@@ -477,7 +528,7 @@ def _run_post_pipeline(
     workflow_version: str,
     on_after: Optional[List[Dict[str, Any]]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Post-commit: execute declarative side effects, then settle auto routing."""
+    """Post-commit: execute declarative side effects, settle auto routing, and sync parent workflows."""
     side_effects: List[Dict[str, Any]] = []
     if on_after:
         from backend.services.actions import execute_actions
@@ -486,6 +537,23 @@ def _run_post_pipeline(
         custom_fields = dict(entity.custom_fields or {}) if entity else {}
         side_effects = execute_actions(db, entity_type, entity_id, custom_fields, on_after)
     settled = _settle_workflow(db, entity_type, entity_id, definition, workflow_version)
+
+    # Check if this transition completed a child subprocess and can resume its parent
+    try:
+        from backend.services.subprocess_service import sync_parent_on_child_terminal_state
+        EntityModel, _ = get_entity_models(entity_type)
+        entity = db.query(EntityModel).filter(EntityModel.id == entity_id).first()
+        if entity and entity.custom_fields:
+            sync_parent_on_child_terminal_state(
+                db=db,
+                child_entity_type=entity_type,
+                child_id=entity_id,
+                child_status=entity.status,
+                child_custom_fields=entity.custom_fields,
+            )
+    except Exception:
+        pass
+
     return side_effects, settled
 
 
@@ -511,12 +579,13 @@ def _settle_workflow(
         if not entity:
             break
         status = entity.status
+        stage = getattr(entity, "workflow_stage", None) or status
 
         matched = None
         for auto in definition.get("auto_transitions", []) or []:
             a_from = auto.get("from")
             a_event = auto.get("event")
-            if a_from != status or not a_event:
+            if (a_from != status and a_from != stage) or not a_event:
                 continue
             key = (a_from, a_event)
             if key in used_keys:
@@ -538,6 +607,24 @@ def _settle_workflow(
                     "event": a_event,
                 }
                 break
+
+        if not matched:
+            # Fallback for start/action nodes with automatic follow-through transitions
+            nodes_meta = {n.get("name"): n for n in definition.get("nodes", []) or []}
+            curr_node = nodes_meta.get(stage) or nodes_meta.get(status)
+            if curr_node and curr_node.get("kind") in ["start", "action", "comm"]:
+                for t in definition.get("transitions", []) or []:
+                    if t.get("from") in (stage, status):
+                        t_event = t.get("event") or ( "START" if curr_node.get("kind") == "start" else "NEXT" )
+                        key = (t.get("from"), t_event)
+                        if key not in used_keys and not (t.get("conditions") or t.get("gates")):
+                            matched = {
+                                "auto": {"from": t.get("from"), "event": t_event},
+                                "key": key,
+                                "condition_trace": [],
+                                "event": t_event,
+                            }
+                            break
 
         if not matched:
             break

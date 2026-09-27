@@ -15,6 +15,7 @@ class EntityBaseMixin:
     entity_type = Column(String(50), nullable=False, index=True)
     status = Column(String(100), nullable=False, index=True)
     workflow_version = Column(String(100), nullable=False)
+    workflow_stage = Column(String(100), nullable=True)  # Granular active workflow node (e.g. 'Upload isolation evidence')
     last_event_id = Column(String(36), nullable=True)
     custom_fields = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -25,6 +26,8 @@ class EntityBaseMixin:
             "id": self.id,
             "entity_type": self.entity_type,
             "status": self.status,
+            "workflow_stage": self.workflow_stage or self.status,
+            "stage": self.workflow_stage or self.status,
             "workflow_version": self.workflow_version,
             "last_event_id": self.last_event_id,
             "custom_fields": self.custom_fields or {},

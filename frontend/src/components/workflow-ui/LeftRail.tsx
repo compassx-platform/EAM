@@ -14,33 +14,45 @@ import {
   GitFork,
   Search,
   ChevronDown,
+  Zap,
+  Compass,
 } from 'lucide-react';
-import { NODE_KINDS, type NodeKind } from '../flowModel';
+import { NODE_KINDS, type NodeKind } from './types';
 
 const KIND_ICONS: Record<NodeKind, typeof Play> = {
   start: Play,
-  state: Circle,
-  router: GitFork,
+  stop: Flag,
+  end: Flag,
   task: ClipboardList,
+  condition: GitFork,
+  router: GitFork,
   gate: ShieldCheck,
   manual: ListChecks,
-  wait: Timer,
-  sub: Workflow,
+  action: Zap,
   comm: Mail,
-  end: Flag,
+  wait: Timer,
+  interaction: Compass,
+  subprocess: Workflow,
+  sub: Workflow,
+  state: Circle,
 };
 
 const KIND_ICON_COLORS: Record<NodeKind, string> = {
   start: 'text-emerald-600',
-  state: 'text-blue-600',
-  router: 'text-purple-600',
+  stop: 'text-rose-600',
+  end: 'text-rose-600',
   task: 'text-indigo-600',
+  condition: 'text-purple-600',
+  router: 'text-purple-600',
   gate: 'text-amber-600',
   manual: 'text-violet-600',
-  wait: 'text-teal-600',
-  sub: 'text-fuchsia-600',
+  action: 'text-amber-600',
   comm: 'text-sky-600',
-  end: 'text-rose-600',
+  wait: 'text-teal-600',
+  interaction: 'text-sky-600',
+  subprocess: 'text-fuchsia-600',
+  sub: 'text-fuchsia-600',
+  state: 'text-blue-600',
 };
 
 interface CategoryGroup {
@@ -51,19 +63,24 @@ interface CategoryGroup {
 
 const CATEGORIES: CategoryGroup[] = [
   {
-    id: 'states',
-    label: 'Workflow States',
-    kinds: ['start', 'state', 'end'],
+    id: 'endpoints',
+    label: 'Process Flow & Endpoints',
+    kinds: ['start', 'stop'],
   },
   {
     id: 'logic',
-    label: 'Logic & Branching',
-    kinds: ['router', 'gate', 'wait'],
+    label: 'Logic & Routing',
+    kinds: ['condition', 'wait'],
   },
   {
     id: 'tasks',
-    label: 'Tasks & Execution',
-    kinds: ['task', 'manual', 'sub', 'comm'],
+    label: 'Tasks & Decisions',
+    kinds: ['task', 'manual'],
+  },
+  {
+    id: 'automation',
+    label: 'Automation & Integration',
+    kinds: ['action', 'interaction', 'subprocess'],
   },
 ];
 
@@ -82,7 +99,6 @@ export function LeftRail({ onAdd, onAutoArrange, onOpenSettings }: LeftRailProps
   };
 
   const q = search.trim().toLowerCase();
-
   const kindDefs = new Map(NODE_KINDS.map((k) => [k.kind, k]));
 
   return (

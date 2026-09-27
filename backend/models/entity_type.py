@@ -17,6 +17,7 @@ class EntityTypeDefinition(Base):
     is_system = Column(Boolean, default=False, nullable=False)
     version_number = Column(Integer, nullable=False, default=1)
     version_label = Column(String(50), nullable=False, default="v1")
+    statuses = Column(JSON, nullable=False, default=list)  # Lifecycle Status Domain e.g. [{'id': 'DRAFT', 'label': 'Draft', 'category': 'draft'}]
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -29,6 +30,7 @@ class EntityTypeDefinition(Base):
             "is_system": self.is_system,
             "version_number": self.version_number or 1,
             "version_label": self.version_label or f"v{self.version_number or 1}",
+            "statuses": self.statuses or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -45,6 +47,7 @@ class EntityTypeVersion(Base):
     description = Column(Text, nullable=True)
     icon = Column(String(50), nullable=True)
     fields_snapshot = Column(JSON, nullable=False, default=list)
+    statuses = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     created_by = Column(String(255), nullable=True)
 
@@ -58,6 +61,7 @@ class EntityTypeVersion(Base):
             "description": self.description or "",
             "icon": self.icon or "Layers",
             "fields_snapshot": self.fields_snapshot or [],
+            "statuses": self.statuses or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "created_by": self.created_by,
         }

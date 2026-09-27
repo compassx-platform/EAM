@@ -12,6 +12,7 @@ from backend.config import settings
 from backend.database import SessionLocal, engine, Base, ensure_schema_compatibility
 import backend.models
 from backend.services.expiry_worker import check_and_expire_permits
+from backend.services.escalation_service import check_and_escalate_overdue_tasks
 from backend.routers import (
     auth_router,
     fields_router,
@@ -27,7 +28,10 @@ from backend.routers import (
     groups_router,
     roles_router,
     tasks_router,
+    notifications_router,
+    escalations_router,
 )
+from backend.services.escalation_engine import seed_default_escalations
 
 async def periodic_expiry_checker():
     """Background task to automatically expire permits past their expiry_date (Section 7.4)"""
@@ -42,6 +46,20 @@ async def periodic_expiry_checker():
             pass
         await asyncio.sleep(settings.EXPIRY_CHECK_INTERVAL_SECONDS)
 
+
+async def periodic_escalation_checker():
+    """Background task to automatically escalate overdue task assignments (IBM Maximo Escalation engine)"""
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                check_and_escalate_overdue_tasks(db)
+            finally:
+                db.close()
+        except Exception:
+            pass
+        await asyncio.sleep(settings.EXPIRY_CHECK_INTERVAL_SECONDS)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Ensure database schema tables exist non-destructively without altering or deleting existing data
@@ -50,17 +68,20 @@ async def lifespan(app: FastAPI):
         db = SessionLocal()
         try:
             ensure_schema_compatibility(db)
+            seed_default_escalations(db)
         finally:
             db.close()
     except Exception as exc:
         print(f"[CompassX] Database startup initialization notice: {exc}")
 
 
-    # Start background expiry task
+    # Start background expiry and escalation tasks
     expiry_task = asyncio.create_task(periodic_expiry_checker())
+    escalation_task = asyncio.create_task(periodic_escalation_checker())
     yield
     # Shutdown
     expiry_task.cancel()
+    escalation_task.cancel()
 
 app = FastAPI(
     title="CompassX Workflow Engine & Manager",
@@ -91,6 +112,8 @@ app.include_router(persons_router, prefix=settings.API_PREFIX)
 app.include_router(groups_router, prefix=settings.API_PREFIX)
 app.include_router(roles_router, prefix=settings.API_PREFIX)
 app.include_router(tasks_router, prefix=settings.API_PREFIX)
+app.include_router(notifications_router, prefix=settings.API_PREFIX)
+app.include_router(escalations_router, prefix=settings.API_PREFIX)
 app.include_router(system_router, prefix=settings.API_PREFIX)
 app.include_router(entities_router)  # Includes /api/{entity_type}/...
 

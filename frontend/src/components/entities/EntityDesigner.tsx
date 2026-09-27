@@ -25,7 +25,18 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
-import type { EntityTypeDefinition, EntityTypeVersion, EntityField, EntityFieldInput } from '../../types';
+import type { EntityTypeDefinition, EntityTypeVersion, EntityField, EntityFieldInput, EntityLifecycleStatus } from '../../types';
+
+const DEFAULT_LIFECYCLE_STATUSES: EntityLifecycleStatus[] = [
+  { id: 'DRAFT', label: 'Draft', category: 'draft' },
+  { id: 'SUBMITTED', label: 'Submitted / Pending', category: 'pending' },
+  { id: 'APPROVED', label: 'Approved', category: 'active' },
+  { id: 'IN_PROGRESS', label: 'In Progress', category: 'active' },
+  { id: 'COMPLETED', label: 'Completed', category: 'completed' },
+  { id: 'CLOSED', label: 'Closed', category: 'completed' },
+  { id: 'CANCELLED', label: 'Cancelled', category: 'cancelled' },
+  { id: 'EXPIRED', label: 'Expired', category: 'expired' },
+];
 
 const ICONS: Array<{ key: string; label: string; Icon: typeof Layers }> = [
   { key: 'ClipboardList', label: 'Work / Task', Icon: ClipboardList },
@@ -185,6 +196,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const [description, setDescription] = useState('');
   const [icon, setIcon] = useState('Layers');
   const [autoSlug, setAutoSlug] = useState(!isEdit);
+  const [statuses, setStatuses] = useState<EntityLifecycleStatus[]>(DEFAULT_LIFECYCLE_STATUSES);
 
   // ---- fields ----
   const [rows, setRows] = useState<DesignerRow[]>(baselineRows);
@@ -220,6 +232,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
     if (snap.display_name) setDisplayName(snap.display_name);
     if (snap.description) setDescription(snap.description);
     if (snap.icon) setIcon(snap.icon);
+    if (snap.statuses && snap.statuses.length > 0) setStatuses(snap.statuses);
     if (snap.fields && snap.fields.length > 0) {
       setRows(
         snap.fields.map((f) => ({
@@ -261,6 +274,11 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           setDescription(et.description || '');
           setIcon(et.icon || 'Layers');
           setVersionLabel(et.version_label || (et.version_number ? `v${et.version_number}` : 'v1'));
+          if (et.statuses && et.statuses.length > 0) {
+            setStatuses(et.statuses);
+          } else {
+            setStatuses(DEFAULT_LIFECYCLE_STATUSES);
+          }
           setOriginalFields(fields);
           setRows(fields.length > 0 ? fields.map(fieldFromRegistry) : baselineRows());
         }
@@ -386,6 +404,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           display_name: displayName.trim(),
           description: description.trim(),
           icon,
+          statuses,
         });
         const original = [...originalFields];
         for (const inp of fieldInputs) {
@@ -411,6 +430,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           description: description.trim(),
           icon,
           fields: fieldInputs,
+          statuses,
         });
         setCreated(createdEntity);
         if (createdEntity.version_label) setVersionLabel(createdEntity.version_label);
@@ -549,6 +569,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             icon={icon}
             onIcon={setIcon}
             isEdit={isEdit}
+            statuses={statuses}
+            onStatuses={setStatuses}
           />
         ) : step === 2 ? (
           <Step2
@@ -567,6 +589,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             description={description}
             icon={icon}
             rows={rows}
+            statuses={statuses}
             isEdit={isEdit}
           />
         )}
@@ -727,6 +750,8 @@ function Step1(p: {
   icon: string;
   onIcon: (v: string) => void;
   isEdit: boolean;
+  statuses: EntityLifecycleStatus[];
+  onStatuses: (st: EntityLifecycleStatus[]) => void;
 }) {
   return (
     <div className="mx-auto max-w-2xl">
@@ -808,6 +833,89 @@ function Step1(p: {
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Lifecycle Status Domain */}
+          <div className="flex flex-col gap-2 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-700">Lifecycle Statuses (Entity State Domain)</label>
+                <p className="text-[10px] text-gray-400">
+                  Standard high-level business statuses. Workflow nodes map to these statuses independently of node step names.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = `STATUS_${p.statuses.length + 1}`;
+                  p.onStatuses([
+                    ...p.statuses,
+                    { id, label: humanize(id), category: 'active' },
+                  ]);
+                }}
+                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                <Plus className="h-3 w-3" />
+                <span>Add Status</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5 mt-1">
+              {p.statuses.map((st, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50/50 px-2.5 py-1.5">
+                  <input
+                    type="text"
+                    value={st.id}
+                    onChange={(e) => {
+                      const newId = cleanFieldSlug(e.target.value).toUpperCase();
+                      const updated = [...p.statuses];
+                      updated[idx] = { ...st, id: newId };
+                      p.onStatuses(updated);
+                    }}
+                    placeholder="STATUS_ID"
+                    className="w-28 rounded border border-gray-200 bg-white px-2 py-1 font-mono text-[11px] text-gray-800 uppercase focus:border-blue-500 focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={st.label}
+                    onChange={(e) => {
+                      const updated = [...p.statuses];
+                      updated[idx] = { ...st, label: e.target.value };
+                      p.onStatuses(updated);
+                    }}
+                    placeholder="Display Label"
+                    className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-800 focus:border-blue-500 focus:outline-none"
+                  />
+                  <select
+                    value={st.category || 'active'}
+                    onChange={(e) => {
+                      const updated = [...p.statuses];
+                      updated[idx] = { ...st, category: e.target.value };
+                      p.onStatuses(updated);
+                    }}
+                    className="rounded border border-gray-200 bg-white px-2 py-1 text-[10px] text-gray-700 focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="draft">draft</option>
+                    <option value="pending">pending</option>
+                    <option value="active">active</option>
+                    <option value="completed">completed</option>
+                    <option value="cancelled">cancelled</option>
+                    <option value="expired">expired</option>
+                  </select>
+                  {p.statuses.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        p.onStatuses(p.statuses.filter((_, i) => i !== idx));
+                      }}
+                      className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -996,6 +1104,7 @@ function Step3(p: {
   description: string;
   icon: string;
   rows: DesignerRow[];
+  statuses: EntityLifecycleStatus[];
   isEdit: boolean;
 }) {
   const Icon = ICONS.find((i) => i.key === p.icon)?.Icon || Layers;
@@ -1025,7 +1134,7 @@ function Step3(p: {
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
+        <div className="mt-4 grid grid-cols-4 gap-2 border-t border-gray-100 pt-3">
           <div className="rounded-lg bg-gray-50/80 p-2 text-center">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Fields</span>
             <span className="block font-mono text-xs font-bold text-gray-800">{p.rows.length}</span>
@@ -1035,10 +1144,29 @@ function Step3(p: {
             <span className="block font-mono text-xs font-bold text-gray-800">{requiredCount}</span>
           </div>
           <div className="rounded-lg bg-gray-50/80 p-2 text-center">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Statuses</span>
+            <span className="block font-mono text-xs font-bold text-gray-800">{p.statuses.length}</span>
+          </div>
+          <div className="rounded-lg bg-gray-50/80 p-2 text-center">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Form</span>
             <span className="block font-mono text-xs font-bold text-gray-800">Auto</span>
           </div>
         </div>
+
+        {p.statuses && p.statuses.length > 0 && (
+          <div className="mt-3 border-t border-gray-100 pt-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Lifecycle Status Domain</span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {p.statuses.map((st) => (
+                <span key={st.id} className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                  <span className="font-mono text-[10px] text-gray-500">{st.id}:</span>
+                  <span>{st.label}</span>
+                  <span className="text-[9px] text-gray-400">({st.category || 'active'})</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xs">

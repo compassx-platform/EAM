@@ -11,6 +11,8 @@ from backend.routers.entity_types import router as entity_types_router
 from backend.routers.persons import router as persons_router, groups_router
 from backend.routers.roles import router as roles_router
 from backend.routers.tasks import router as tasks_router
+from backend.routers.notifications import router as notifications_router
+from backend.routers.escalations import router as escalations_router
 
 __all__ = [
     "auth_router",
@@ -27,4 +29,6 @@ __all__ = [
     "groups_router",
     "roles_router",
     "tasks_router",
+    "notifications_router",
+    "escalations_router",
 ]

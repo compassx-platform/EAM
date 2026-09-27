@@ -9,10 +9,14 @@ import {
   ChevronRight,
   ChevronDown,
   X,
+  Sparkles,
+  Download,
+  Package,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { navigate } from '../lib/router';
 import type { Workflow, EntityTypeDefinition } from '../types';
+import { TemplateImportModal } from './workflow-ui/TemplateImportModal';
 
 interface WorkflowListProps {
   onEdit: (workflow: Workflow) => void;
@@ -31,9 +35,19 @@ function versionDate(wf: Workflow): string {
 }
 
 function statusText(cur: Workflow, liveVersionLabel?: string): string {
-  if (cur.status === 'published') return 'live';
-  if (cur.status === 'deprecated') return 'deprecated';
-  return liveVersionLabel ? `draft · live ${liveVersionLabel}` : 'draft';
+  if (cur.status === 'published') return 'Active (Routing Live Records)';
+  if (cur.status === 'deprecated') return 'Inactive (Deactivated)';
+  return liveVersionLabel ? `Draft · Active: ${liveVersionLabel}` : 'Draft (Unpublished)';
+}
+
+function statusBadge(status: Workflow['status']): { label: string; style: string } {
+  if (status === 'published') {
+    return { label: 'ACTIVE', style: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+  }
+  if (status === 'deprecated') {
+    return { label: 'INACTIVE', style: 'bg-gray-100 text-gray-700 border-gray-200' };
+  }
+  return { label: 'DRAFT', style: 'bg-amber-50 text-amber-800 border-amber-200' };
 }
 
 interface EntityRow {
@@ -53,6 +67,7 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [selectedNewType, setSelectedNewType] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -116,6 +131,21 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
       return next;
     });
 
+  const handleExportWorkflow = async (wf: Workflow) => {
+    try {
+      const bundle = await api.exportWorkflow(wf.id);
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bundle, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `workflow-${wf.entity_type}-${wf.version_label}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err: any) {
+      setError(err.message || 'Failed to export workflow package');
+    }
+  };
+
   const handleDelete = async (wf: Workflow) => {
     if (!window.confirm(`Delete workflow "${wf.version_label}" (${wf.status})? This cannot be undone.`)) return;
     setDeleting(wf.id);
@@ -162,6 +192,16 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
             title="Refresh"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTemplateModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            title="Deploy industry templates or import JSON packages"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+            <span>Templates & Import</span>
           </button>
 
           <button
@@ -255,17 +295,17 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-400">
-            No workflows yet. Click{' '}
-            <span className="font-medium text-gray-600">New Workflow</span> to build one.
+            No workflow processes configured. Click{' '}
+            <span className="font-medium text-gray-600">New Workflow</span> to design one.
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                  <th className="px-4 py-2.5">Workflow</th>
-                  <th className="px-3 py-2.5">Version</th>
-                  <th className="px-3 py-2.5">Last updated</th>
+                  <th className="px-4 py-2.5">Process (Entity)</th>
+                  <th className="px-3 py-2.5">Revision & Lifecycle</th>
+                  <th className="px-3 py-2.5">Last Activated / Updated</th>
                   <th className="w-36 px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
@@ -275,6 +315,8 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                   const isLive = row.live?.id === cur.id;
                   const hasHistory = row.history.length > 0;
                   const isExpanded = expanded.has(row.entityType);
+                  const badge = statusBadge(cur.status);
+
                   return [
                     <tr
                       key={cur.id}
@@ -289,9 +331,14 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                         <div className="mt-0.5 font-mono text-[11px] text-gray-500">{row.entityType}</div>
                       </td>
 
-                      {/* Version */}
+                      {/* Version & Lifecycle */}
                       <td className="px-3 py-3">
-                        <div className="font-mono text-[12px] font-medium text-gray-800">{cur.version_label}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[12px] font-bold text-gray-800">{cur.version_label}</span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${badge.style}`}>
+                            {badge.label}
+                          </span>
+                        </div>
                         <div className="mt-0.5 text-[11px] text-gray-500">{statusText(cur, row.live?.version_label)}</div>
                       </td>
 
@@ -301,6 +348,17 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                       {/* Actions */}
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExportWorkflow(cur);
+                            }}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+                            title="Export process as portable workflow package (.json)"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </button>
                           {hasHistory && (
                             <button
                               type="button"
@@ -309,7 +367,7 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                                 toggleExpand(row.entityType);
                               }}
                               className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-                              title={isExpanded ? 'Hide version history' : 'View version history'}
+                              title={isExpanded ? 'Hide process revision history' : 'View all process revisions'}
                             >
                               {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                               <History className="h-3.5 w-3.5" />
@@ -323,7 +381,7 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                             }}
                             disabled={isLive}
                             className="flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
-                            title={isLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
+                            title={isLive ? 'Active processes cannot be deleted; deactivate or revise instead.' : 'Delete draft revision'}
                           >
                             {deleting === cur.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </button>
@@ -336,15 +394,19 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                           <div className="divide-y divide-gray-100">
                             {row.history.map((v) => {
                               const vLive = row.live?.id === v.id;
+                              const vBadge = statusBadge(v.status);
                               return (
                                 <div
                                   key={v.id}
                                   onClick={() => onEdit(v)}
                                   className="flex flex-wrap items-center gap-3 py-2 px-2 rounded-lg hover:bg-white/80 cursor-pointer transition-colors group/hist"
                                 >
-                                  <span className="flex items-center gap-2 font-mono text-[12px] font-medium text-gray-700 group-hover/hist:text-blue-700 transition-colors">
+                                  <span className="flex items-center gap-1.5 font-mono text-[12px] font-bold text-gray-700 group-hover/hist:text-blue-700 transition-colors">
                                     <GitBranch className="h-3.5 w-3.5 text-gray-400" />
                                     {v.version_label}
+                                  </span>
+                                  <span className={`rounded-full border px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider ${vBadge.style}`}>
+                                    {vBadge.label}
                                   </span>
                                   <span className="text-[11px] text-gray-500">{statusText(v)}</span>
                                   <span className="text-[11px] text-gray-500">{versionDate(v)}</span>
@@ -353,11 +415,22 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        handleExportWorkflow(v);
+                                      }}
+                                      className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+                                      title="Export process as portable workflow package (.json)"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         handleDelete(v);
                                       }}
                                       disabled={vLive}
                                       className="rounded-md border border-gray-200 bg-white p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-400 transition-colors"
-                                      title={vLive ? 'Live workflows cannot be deleted' : 'Delete workflow'}
+                                      title={vLive ? 'Active processes cannot be deleted; deactivate or revise instead.' : 'Delete revision'}
                                     >
                                       {deleting === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                     </button>
@@ -376,6 +449,17 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
           </div>
         )}
       </div>
+
+      {/* Template Packages & Import Modal */}
+      <TemplateImportModal
+        isOpen={templateModalOpen}
+        onClose={() => setTemplateModalOpen(false)}
+        onImportSuccess={(res) => {
+          refresh();
+          setTemplateModalOpen(false);
+          onEdit(res.workflow);
+        }}
+      />
     </div>
   );
 }

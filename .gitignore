@@ -57,6 +57,8 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+.gemini/
+scratch/
 
 # Probe/test artifacts
 mtime-test-*/

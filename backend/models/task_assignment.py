@@ -23,12 +23,17 @@ class TaskAssignment(Base):
     time_limit_hours = Column(Integer, nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
     resolution_trace = Column(JSON, nullable=True)
+    escalated_to_person_id = Column(String(50), ForeignKey("person.person_id", ondelete="SET NULL"), nullable=True, index=True)
+    escalation_count = Column(Integer, nullable=False, default=0)
+    escalated_at = Column(DateTime(timezone=True), nullable=True)
+    escalation_reason = Column(String(255), nullable=True)
     completed_by = Column(String(255), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     role = relationship("WorkflowRole", foreign_keys=[role_id])
     person = relationship("Person", foreign_keys=[assigned_person_id])
+    escalated_to_person = relationship("Person", foreign_keys=[escalated_to_person_id])
     group = relationship("PersonGroup", foreign_keys=[assigned_group_name])
 
     def to_dict(self):
@@ -51,6 +56,11 @@ class TaskAssignment(Base):
             "time_limit_hours": self.time_limit_hours,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "resolution_trace": self.resolution_trace,
+            "escalated_to_person_id": self.escalated_to_person_id,
+            "escalated_to_person_name": self.escalated_to_person.display_name if self.escalated_to_person else None,
+            "escalation_count": self.escalation_count,
+            "escalated_at": self.escalated_at.isoformat() if self.escalated_at else None,
+            "escalation_reason": self.escalation_reason,
             "completed_by": self.completed_by,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

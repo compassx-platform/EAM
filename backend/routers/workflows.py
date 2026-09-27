@@ -55,6 +55,69 @@ def get_workflow_history(entity_type: str, db: Session = Depends(get_db)):
     )
     return [w.to_dict() for w in workflows]
 
+class WorkflowImportRequest(BaseModel):
+    bundle: Dict[str, Any]
+    target_entity_type: Optional[str] = None
+    conflict_strategy: Optional[str] = "new_draft"  # 'new_draft' | 'overwrite_draft' | 'create_entity'
+    import_conditions: Optional[bool] = True
+    import_roles: Optional[bool] = True
+    import_fields_and_forms: Optional[bool] = True
+    activate_immediately: Optional[bool] = False
+    created_by: Optional[str] = "admin@compassx.io"
+
+@router.get("/templates")
+def list_templates():
+    """List curated built-in workflow template packages."""
+    from backend.services.workflow_template_service import list_workflow_templates
+    return list_workflow_templates()
+
+@router.get("/templates/{template_id}")
+def get_template(template_id: str):
+    """Fetch a complete built-in workflow template package bundle."""
+    from backend.services.workflow_template_service import get_workflow_template
+    tmpl = get_workflow_template(template_id)
+    if not tmpl:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    return tmpl
+
+@router.post("/import")
+def import_workflow(req: WorkflowImportRequest, db: Session = Depends(get_db)):
+    """
+    Imports a portable workflow bundle package with validation, entity resolution, and condition auto-merge.
+    """
+    from backend.services.workflow_template_service import import_workflow_bundle
+    try:
+        res = import_workflow_bundle(
+            db=db,
+            bundle=req.bundle,
+            target_entity_type=req.target_entity_type,
+            conflict_strategy=req.conflict_strategy or "new_draft",
+            import_conditions=req.import_conditions if req.import_conditions is not None else True,
+            import_roles=req.import_roles if req.import_roles is not None else True,
+            import_fields_and_forms=req.import_fields_and_forms if req.import_fields_and_forms is not None else True,
+            activate_immediately=bool(req.activate_immediately),
+            created_by=req.created_by or "admin@compassx.io",
+        )
+        return res
+    except WorkflowValidationError as ve:
+        raise HTTPException(status_code=400, detail={"message": "Invalid workflow topology in bundle", "errors": ve.errors, "warnings": ve.warnings})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+@router.get("/{id}/export")
+def export_workflow(id: str, db: Session = Depends(get_db)):
+    """
+    Exports a workflow definition as a complete, self-contained portable bundle
+    with referenced conditions, roles, entity schema fields, and form layouts.
+    """
+    from backend.services.workflow_template_service import export_workflow_bundle
+    try:
+        return export_workflow_bundle(db=db, workflow_id=id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 @router.get("/active/{entity_type}")
 def get_active_workflow(entity_type: str, db: Session = Depends(get_db)):
     wf = db.query(WorkflowDefinition).filter(
@@ -183,9 +246,34 @@ def deprecate_workflow(id: str, db: Session = Depends(get_db)):
 
 @router.delete("/{id}")
 def delete_workflow(id: str, db: Session = Depends(get_db)):
+    """
+    Deletes a workflow definition draft (Maximo governance: only unreferenced drafts can be hard deleted).
+    Published workflows or workflows with active bound entity records must be deprecated instead.
+    """
     wf = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == id).first()
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    if wf.status == "published":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete active published workflow '{wf.version_label}'. Deprecate the workflow to deactivate it while preserving audit trails."
+        )
+
+    # Check for bound entity records across this entity type
+    try:
+        from backend.models.entities import get_entity_models
+        EntityModel, _ = get_entity_models(wf.entity_type)
+        bound_count = db.query(EntityModel).filter(EntityModel.workflow_version == wf.version_label).count()
+        if bound_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete workflow version '{wf.version_label}' because {bound_count} existing '{wf.entity_type}' record(s) are bound to it. Deprecate the workflow instead."
+            )
+    except ValueError:
+        # Entity type not in fixed registry (custom dynamic entity); proceed with deletion check
+        pass
+
     db.delete(wf)
     db.commit()
     return {"deleted": True, "id": id}
