@@ -64,7 +64,7 @@ def test_node_condition_validation(test_db):
     assert any("Node 'CheckCondition': Condition ID 'non_existent_cond' does not exist" in e for e in errors)
 
 
-def test_maximo_router_validation_rules(test_db):
+def test_enterprise_router_validation_rules(test_db):
     # Router missing condition
     no_cond_def = {
         "entity_type": "workorder",

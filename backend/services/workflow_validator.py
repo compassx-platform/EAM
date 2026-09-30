@@ -183,7 +183,7 @@ def validate_workflow_definition(
             if a_event and (a_from, a_event) not in seen_transitions:
                 errors.append(f"{actx}: event '{a_event}' from state '{a_from}' has no matching 'transitions' entry (auto transitions fire real workflow events)")
 
-    # Validate node metadata (Maximo rules for Router, Start, Stop, and Task nodes)
+    # Validate node metadata (Enterprise rules for Router, Start, Stop, and Task nodes)
     nodes = definition.get("nodes", []) or []
     start_state_name = states[0] if states else None
     
@@ -203,7 +203,7 @@ def validate_workflow_definition(
                     if c_id and str(c_id).strip() and str(c_id).strip() not in valid_condition_ids:
                         errors.append(f"Node '{n_name}': Condition ID '{str(c_id).strip()}' does not exist for entity type '{entity_type}'")
                 
-                # Maximo Condition / Router Node rules: Condition assigned + both TRUE and FALSE outlets connected
+                # Enterprise Condition / Router Node rules: Condition assigned + both TRUE and FALSE outlets connected
                 if n_kind in ("condition", "router"):
                     active_conds = (n.get("conditions") or [])
                     has_cond = bool(cond_id and str(cond_id).strip()) or bool(active_conds and len(active_conds) > 0)

@@ -5,7 +5,7 @@ from backend.models.base import generate_uuid, utc_now
 
 class ConditionDefinition(Base):
     """
-    A reusable, centrally-authored condition (Maximo Conditional Expression
+    A reusable, centrally-authored condition (Enterprise Conditional Expression
     Manager analogue).
 
     Consumers (workflow transitions/branches, form visibility, future modules)

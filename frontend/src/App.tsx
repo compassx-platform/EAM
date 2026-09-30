@@ -17,12 +17,12 @@ import { GroupEditor } from './components/people/GroupEditor';
 import { RolesView } from './components/roles/RolesView';
 import { RoleEditor } from './components/roles/RoleEditor';
 import { EscalationsView } from './components/escalations';
-import { NotificationBell } from './components/notifications/NotificationBell';
+import { OrganizationsModule } from './components/organizations';
+import { DocumentsModule } from './components/documents';
+import { SystemSettingsPage } from './components/settings/SystemSettingsPage';
+import { MainSidebar, type MainNavTab } from './components/navigation/MainSidebar';
 import type { Workflow } from './types';
-import { GitBranch, Layers, PenTool, ListChecks, ShieldCheck, Inbox, Users, UserCheck, AlarmClock } from 'lucide-react';
 import { useHashRoute, navigate } from './lib/router';
-
-type Tab = 'records' | 'workflows' | 'entities' | 'forms' | 'lists' | 'conditions' | 'people' | 'escalations';
 
 function App() {
   const route = useHashRoute();
@@ -30,30 +30,39 @@ function App() {
 
   const refreshList = useCallback(() => setListTick((t) => t + 1), []);
 
-  const tab: Tab = route.path.startsWith('/records') || route.path.startsWith('/create')
+  const tab: MainNavTab = route.path.startsWith('/settings')
+    ? 'settings'
+    : route.path.startsWith('/records') || route.path.startsWith('/create')
     ? 'records'
-    : route.path.startsWith('/entities')
-      ? 'entities'
-      : route.path.startsWith('/forms')
-        ? 'forms'
-        : route.path.startsWith('/lists')
-          ? 'lists'
-          : route.path.startsWith('/conditions')
-            ? 'conditions'
-            : route.path.startsWith('/people') || route.path.startsWith('/roles')
-              ? 'people'
-              : route.path.startsWith('/escalations')
-                ? 'escalations'
-                : 'workflows';
+    : route.path.startsWith('/documents')
+      ? 'documents'
+      : route.path.startsWith('/entities')
+        ? 'entities'
+        : route.path.startsWith('/forms')
+          ? 'forms'
+          : route.path.startsWith('/lists')
+            ? 'lists'
+            : route.path.startsWith('/conditions')
+              ? 'conditions'
+              : route.path.startsWith('/people') || route.path.startsWith('/roles')
+                ? 'people'
+                : route.path.startsWith('/escalations')
+                  ? 'escalations'
+                  : route.path.startsWith('/organizations')
+                    ? 'organizations'
+                    : 'workflows';
 
-  const switchTab = (t: Tab) => {
-    if (t === 'records') navigate('/records');
+  const switchTab = (t: MainNavTab) => {
+    if (t === 'settings') navigate('/settings');
+    else if (t === 'records') navigate('/records');
+    else if (t === 'documents') navigate('/documents');
     else if (t === 'entities') navigate('/entities');
     else if (t === 'forms') navigate('/forms');
     else if (t === 'lists') navigate('/lists');
     else if (t === 'conditions') navigate('/conditions');
     else if (t === 'people') navigate('/people');
     else if (t === 'escalations') navigate('/escalations');
+    else if (t === 'organizations') navigate('/organizations');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
@@ -72,119 +81,32 @@ function App() {
 
   const createType = route.path === '/create' ? route.query.get('type') : null;
 
-  const navBtn = (t: Tab, label: string, Icon: typeof GitBranch) => (
-    <button
-      onClick={() => switchTab(t)}
-      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-all ${
-        tab === t
-          ? 'bg-white font-semibold text-gray-900 shadow-xs border border-gray-200/80'
-          : 'font-medium text-gray-600 hover:bg-white/60 hover:text-gray-900'
-      }`}
-    >
-      <Icon className={`h-3.5 w-3.5 ${tab === t ? 'text-gray-800' : 'text-gray-500'}`} />
-      <span>{label}</span>
-    </button>
-  );
-
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-slate-100/75">
-      {/* Top Surface Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200/80 bg-white px-5 shadow-xs">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-900 text-white shadow-xs">
-              <GitBranch className="h-4 w-4" />
-            </div>
-            <span className="text-sm font-bold tracking-tight text-gray-900">CompassX EAM</span>
-          </div>
+    <div className="flex h-screen w-screen flex-row overflow-hidden bg-[#F7F7F7] text-gray-900">
+      {/* 1. Main Primary Sidebar (Full Height on Left, bg-[#F7F7F7]) */}
+      <MainSidebar activeTab={tab} onNavigate={switchTab} />
 
-          {/* Segmented Surface Navigation Bar */}
-          <nav className="flex items-center gap-1 rounded-xl border border-gray-200/60 bg-gray-100/90 p-1">
-            {navBtn('records', 'Records', Inbox)}
-            {navBtn('workflows', 'Workflows', GitBranch)}
-            {navBtn('entities', 'Entities', Layers)}
-            {navBtn('forms', 'Forms', PenTool)}
-            {navBtn('lists', 'Lists', ListChecks)}
-            {navBtn('conditions', 'Conditions', ShieldCheck)}
-            {navBtn('people', 'People', Users)}
-            {navBtn('escalations', 'Escalations', AlarmClock)}
-          </nav>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {createType && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              New {createType}
-            </span>
-          )}
-          {tab === 'entities' && designerEntity !== undefined && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              Entity Designer
-            </span>
-          )}
-          {tab === 'workflows' && builderId !== undefined && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              Workflow Builder
-            </span>
-          )}
-          {tab === 'forms' && formType !== null && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              Form Builder · {formType}
-            </span>
-          )}
-          {tab === 'lists' && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              {listKey === 'new' ? 'New List' : listKey ? `List · ${listKey}` : 'Central Lists'}
-            </span>
-          )}
-          {tab === 'people' && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              {roleId === 'new'
-                ? 'New Role'
-                : roleId
-                  ? `Role · ${roleId}`
-                  : isPeopleRoles
-                    ? 'Workflow Roles'
-                    : peopleGroupId === 'new'
-                      ? 'New Group'
-                      : peopleGroupId
-                        ? `Group · ${peopleGroupId}`
-                        : isPeopleGroups
-                          ? 'Person Groups'
-                          : personId === 'new'
-                            ? 'New Person'
-                            : personId
-                              ? `Person · ${personId}`
-                              : 'People Directory'}
-            </span>
-          )}
-
-          {tab === 'escalations' && (
-            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-gray-600">
-              Escalations Engine
-            </span>
-          )}
-
-          {/* Top Header In-App Notification Center */}
-          <NotificationBell />
-        </div>
-      </header>
-
-      {/* Main Shell Viewport hosting the WorkspaceSurface */}
-      <main className="min-h-0 flex-1 overflow-hidden p-3 sm:p-4 bg-slate-100/75">
-        {/* WorkspaceSurface: The unified primary surface card covering the entire main area */}
-        <div
+      {/* 2. Main Surface Container: bit of gap/padding around the rounded surface card */}
+      <div className="flex-1 min-w-0 h-full p-2 sm:p-2.5 flex flex-col overflow-hidden bg-[#F7F7F7]">
+        {/* The Single Unified Rounded Surface Card (Hosts secondary sidebars & content directly) */}
+        <main
           id="workspace-surface"
           data-testid="workspace-surface"
-          className="h-full w-full overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-xs flex flex-col min-h-0"
+          className="h-full w-full overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-2xs flex flex-col min-h-0"
         >
           {createType !== null ? (
             <EntityCreateForm
               entityType={createType}
               onBack={() => navigate('/records', { type: createType })}
             />
+          ) : tab === 'settings' ? (
+            <SystemSettingsPage />
+          ) : tab === 'organizations' ? (
+            <OrganizationsModule />
           ) : tab === 'records' ? (
             <RuntimeWorkspace />
+          ) : tab === 'documents' ? (
+            <DocumentsModule />
           ) : tab === 'entities' ? (
             designerEntity !== undefined ? (
               <EntityDesigner entityName={designerEntity} />
@@ -260,8 +182,8 @@ function App() {
               onEdit={(wf: Workflow) => navigate(`/workflows/${wf.id}`)}
             />
           )}
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

@@ -11,10 +11,17 @@ from backend.models.entities import DynamicEntity
 from backend.models.person import Person, PersonGroup, PersonGroupMember, PersonAvailability, PersonAudit
 from backend.models.lists import ListDefinition
 from backend.models.entity_type import EntityTypeDefinition
+from backend.models.organization import CompanySet, CompanyMaster, Organization, Site, CompanyOrg
 from backend.models.base import generate_uuid, utc_now
 from backend.services.command_handler import create_entity, propose_transition
 
-from backend.database import ensure_schema_compatibility
+from backend.database import (
+    ensure_schema_compatibility,
+    seed_default_asset_hierarchy,
+    seed_default_classifications,
+    seed_default_meters,
+    seed_default_document_folders,
+)
 
 def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dict:
     """
@@ -57,7 +64,7 @@ def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dic
             db.refresh(role)
         role_objs[r_name] = role
 
-    # 2. Seed Persons and Users (IBM Maximo alignment: PERSONID = User ID in capital letters)
+    # 2. Seed Persons and Users (Enterprise EAM alignment: PERSONID = User ID in capital letters)
     persons_data = [
         {
             "person_id": "ADMIN",
@@ -669,7 +676,7 @@ def load_test_fixtures(db: Session, include_sample_entities: bool = True) -> dic
         ]
     }, created_at=utc_now() - timedelta(minutes=10))
 
-    # 5b. WorkOrder standard_v2 — the realistic Maximo-style flow (all configurable)
+    # 5b. WorkOrder standard_v2 — the realistic Enterprise-style flow (all configurable)
     seed_legacy_workflow_if_absent(db, "workorder", "standard_v2", {
         "entity_type": "workorder",
         "version_label": "standard_v2",
@@ -1125,7 +1132,111 @@ def seed_sample_entities(db: Session):
         payload={"comment": "Hazardous work — will require approved permit before INPRG"}
     )
 
+    # --- 10. Seed Enterprise EAM Company Sets, Organizations, Sites, and Companies ---
+    # 10.1 Company Sets
+    sets_data = [
+        ("GLOBAL_SET", "Global Enterprise Vendor Master", False),
+        ("COMMERCIAL_SET", "Commercial & Facilities Suppliers", True),
+    ]
+    for s_id, desc, auto_add in sets_data:
+        cs = db.query(CompanySet).filter(CompanySet.set_id == s_id).first()
+        if not cs:
+            cs = CompanySet(set_id=s_id, description=desc, auto_add_companies=auto_add, status="ACTIVE")
+            db.add(cs)
     db.commit()
+
+    # 10.2 Company Masters (Set Level)
+    masters_data = [
+        ("GRAINGER", "GLOBAL_SET", "W.W. Grainger, Inc.", "V", "USD", "Lake Forest", "USA", "https://www.grainger.com"),
+        ("CATERPILLAR", "GLOBAL_SET", "Caterpillar Inc.", "M", "USD", "Deerfield", "USA", "https://www.caterpillar.com"),
+        ("ABB", "GLOBAL_SET", "ABB Ltd", "V", "EUR", "Zurich", "Switzerland", "https://global.abb"),
+        ("FASTENAL", "GLOBAL_SET", "Fastenal Company", "V", "USD", "Winona", "USA", "https://www.fastenal.com"),
+    ]
+    for comp, s_id, name, c_type, curr, city, country, hp in masters_data:
+        cm = db.query(CompanyMaster).filter(CompanyMaster.company == comp, CompanyMaster.company_set_id == s_id).first()
+        if not cm:
+            cm = CompanyMaster(
+                company=comp,
+                company_set_id=s_id,
+                name=name,
+                type=c_type,
+                currency_code=curr,
+                city=city,
+                country=country,
+                homepage=hp,
+                status="ACTIVE",
+            )
+            db.add(cm)
+    db.commit()
+
+    # 10.3 Organizations
+    orgs_data = [
+        ("EAGLENA", "Eagle North America", "North American Operations & Facilities", "GLOBAL_SET", "USD", "1990-000-00"),
+        ("EAGLEEU", "Eagle European Operations", "European Industrial Facilities", "GLOBAL_SET", "EUR", "1990-EU-00"),
+    ]
+    for o_id, name, desc, cs_id, curr, clr in orgs_data:
+        org = db.query(Organization).filter(Organization.org_id == o_id).first()
+        if not org:
+            org = Organization(
+                org_id=o_id,
+                name=name,
+                description=desc,
+                company_set_id=cs_id,
+                item_set_id="ITEMSET1",
+                base_currency_1=curr,
+                clearing_account=clr,
+                status="ACTIVE",
+                purchasing_options={"po_autonumber_prefix": "PO-", "receiving_tolerance_percent": 10.0, "auto_close_po": True},
+                inventory_options={"costing_method": "AVERAGE", "allow_negative_balance": False},
+                work_order_options={"wo_autonumber_prefix": "WO-", "allow_history_editing": True},
+            )
+            db.add(org)
+    db.commit()
+
+    # 10.4 Sites
+    sites_data = [
+        ("BEDFORD", "EAGLENA", "Bedford Manufacturing Plant"),
+        ("NASHUA", "EAGLENA", "Nashua Distribution Center"),
+        ("HQ", "EAGLENA", "Corporate Headquarters"),
+        ("BERLIN", "EAGLEEU", "Berlin Tech Facility"),
+    ]
+    for s_id, o_id, s_name in sites_data:
+        st = db.query(Site).filter(Site.site_id == s_id).first()
+        if not st:
+            st = Site(site_id=s_id, org_id=o_id, name=s_name, status="ACTIVE")
+            db.add(st)
+    db.commit()
+
+    # 10.5 Companies at Organization Level (Enterprise COMPANIES table)
+    org_comps_data = [
+        ("EAGLENA", "GRAINGER", "W.W. Grainger, Inc.", "V", "USD", "NET30", "PREPAID", "DESTINATION", False, "ACT-GRA-9901"),
+        ("EAGLENA", "CATERPILLAR", "Caterpillar Inc.", "M", "USD", "NET60", "COLLECT", "ORIGIN", False, None),
+        ("EAGLENA", "FASTENAL", "Fastenal Company", "V", "USD", "2/10 NET 30", "PREPAID", "DESTINATION", False, None),
+        ("EAGLEEU", "ABB", "ABB Ltd", "V", "EUR", "NET45", "PREPAID", "DESTINATION", False, None),
+        ("EAGLEEU", "GRAINGER", "W.W. Grainger, Inc.", "V", "EUR", "NET60", "THIRD_PARTY", "DESTINATION", True, None),
+    ]
+    for o_id, comp, name, c_type, curr, pterms, fterms, fob, disabled, acct in org_comps_data:
+        co = db.query(CompanyOrg).filter(CompanyOrg.org_id == o_id, CompanyOrg.company == comp).first()
+        if not co:
+            co = CompanyOrg(
+                org_id=o_id,
+                company=comp,
+                name=name,
+                type=c_type,
+                currency_code=curr,
+                payment_terms=pterms,
+                freight_terms=fterms,
+                fob=fob,
+                disabled=disabled,
+                customer_account_num=acct,
+            )
+            db.add(co)
+    db.commit()
+
+    seed_default_asset_hierarchy(db)
+    seed_default_classifications(db)
+    seed_default_meters(db)
+    seed_default_document_folders(db)
 
 
 seed_all = load_test_fixtures

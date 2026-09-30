@@ -1279,7 +1279,7 @@ function TaskAssignmentSection({
           <span className="group relative inline-flex items-center">
             <Info className="h-3.5 w-3.5 cursor-default text-gray-400 transition-colors hover:text-gray-600" />
             <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-md bg-black px-2.5 py-1.5 text-[11px] font-medium normal-case leading-snug text-white shadow-2xl group-hover:block border border-gray-700">
-              Link dynamic workflow roles modeled after IBM Maximo MAXROLE to dynamically route this task to a Person, Person Group, or Dataset Attribute with active availability & delegation awareness.
+              Link dynamic workflow roles modeled after Dynamic Role to dynamically route this task to a Person, Person Group, or Dataset Attribute with active availability & delegation awareness.
             </span>
           </span>
         </span>
@@ -1346,7 +1346,7 @@ function TaskAssignmentSection({
         <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/50 p-2.5 text-center">
           <p className="text-xs font-medium text-gray-500">No role assigned</p>
           <p className="mt-0.5 text-[10px] text-gray-400">
-            Click '+ Assign' to bind a Maximo dynamic routing role.
+            Click '+ Assign' to bind a dynamic routing role.
           </p>
         </div>
       )}
@@ -2238,7 +2238,7 @@ function StartConfigSection({
   return (
     <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-3">
       <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-2 text-xs text-emerald-800">
-        <p className="font-semibold">Start Node (Maximo Standard)</p>
+        <p className="font-semibold">Start Node</p>
         <p className="mt-0.5 text-[11px] text-emerald-700">
           Represents the single entry point where new records begin process execution.
         </p>

@@ -755,7 +755,7 @@ function Step1(p: {
 }) {
   return (
     <div className="mx-auto max-w-2xl">
-      <StepHeader step={1} icon={Layers} title="Define the entity" desc="This is the Maximo-equivalent of a business object — the record type forms and workflows will operate on." />
+      <StepHeader step={1} icon={Layers} title="Define the entity" desc="This is the core business object — the record type forms and workflows will operate on." />
 
       <div className="mb-4 rounded-xl border border-gray-200 bg-white p-5 shadow-2xs">
         <div className="flex flex-col gap-4">

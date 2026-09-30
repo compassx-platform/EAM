@@ -78,7 +78,7 @@ export function toConditionMap(
 }
 
 // -----------------------------------------------------------------------------
-// Centralized AST Evaluator (Maximo Conditional Expression analogue)
+// Centralized AST Evaluator (Enterprise Conditional Expression analogue)
 // -----------------------------------------------------------------------------
 
 function getFieldValue(values: Record<string, unknown>, fieldName: string): unknown {

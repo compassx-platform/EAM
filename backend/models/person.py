@@ -5,16 +5,16 @@ from backend.models.base import generate_uuid, utc_now
 
 
 class Person(Base):
-    """Master identity record (IBM Maximo PERSON analogue).
+    """Master identity record (Enterprise EAM PERSON analogue).
 
     System-level master data — NOT a generic workflow entity. Lifecycle is a
-    simple ACTIVE/INACTIVE status flag (Maximo), NOT event-sourced. Topics like
+    simple ACTIVE/INACTIVE status flag (Enterprise), NOT event-sourced. Topics like
     contact/shift, supervisor, workflow delegate, and group membership map
-    directly to the Maximo People/Person Groups semantics.
+    directly to the Enterprise People/Person Groups semantics.
     """
     __tablename__ = "person"
 
-    person_id = Column(String(50), primary_key=True)  # Maximo PERSONID: User ID in capital letters
+    person_id = Column(String(50), primary_key=True)  # Enterprise PERSONID: User ID in capital letters
     display_name = Column(String(255), nullable=False)
     first_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=True)
@@ -56,7 +56,7 @@ class Person(Base):
 
 
 class PersonGroup(Base):
-    """Named team (IBM Maximo PERSONGROUP analogue).
+    """Named team (Enterprise EAM PERSONGROUP analogue).
 
     Used as workorder.owner_group, workflow routing target, and (via the crew
     work group flag) the labor pool for future Crews.
@@ -94,7 +94,7 @@ class PersonGroup(Base):
 
 
 class PersonGroupMember(Base):
-    """Membership row with workflow routing order (Maximo sequence + defaults)."""
+    """Membership row with workflow routing order (Enterprise sequence + defaults)."""
     __tablename__ = "person_group_member"
 
     group_name = Column(String(50), ForeignKey("person_group.group_name"), primary_key=True)
@@ -121,7 +121,7 @@ class PersonGroupMember(Base):
 
 
 class PersonAvailability(Base):
-    """Availability overlay (Maximo `Modify Person Availability` analogue). Phase 1-lite."""
+    """Availability overlay (Enterprise `Modify Person Availability` analogue). Phase 1-lite."""
     __tablename__ = "person_availability"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)

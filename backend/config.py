@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     # Auto-expiry interval seconds for background worker (if running)
     EXPIRY_CHECK_INTERVAL_SECONDS: int = 5
     
+    # CompassX Volume & Storage Catalog Configuration (Dynamic per Browser/Request Origin)
+    COMPASSX_CATALOG_URL: str = ""
+    COMPASSX_CATALOG_TOKEN: str = "compassx-default-token-2026"
+    COMPASSX_DEFAULT_CATALOG: str = "eam_catalog"
+    COMPASSX_DEFAULT_SCHEMA: str = "documents_schema"
+    COMPASSX_DEFAULT_VOLUME_NAME: str = "eam_documents_volume"
+    COMPASSX_STORAGE_MODE: str = "live"
+    
     # CORS
     ALLOWED_ORIGINS: list[str] = ["*"]
 

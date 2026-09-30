@@ -461,7 +461,7 @@ export function validateGraphTopology(
   if (startNodes.length === 0) {
     warnings.push('No Start node found. Records will begin at the first state.');
   } else if (startNodes.length > 1) {
-    errors.push('Workflow cannot have multiple Start nodes (Maximo rule: exactly 1 Start node).');
+    errors.push('Workflow cannot have multiple Start nodes (Rule: exactly 1 Start node).');
   }
 
   const endNodes = nodes.filter((n) => isStopKind(n.data.kind) || n.data.terminal);
@@ -469,19 +469,19 @@ export function validateGraphTopology(
     warnings.push('No declared terminal (Stop) states. Process may run indefinitely.');
   }
 
-  // Check for self-loops (Maximo rule: no direct self-loops)
+  // Check for self-loops (Rule: no direct self-loops)
   for (const e of edges) {
     if (e.source && e.target && e.source === e.target) {
       errors.push(`Invalid connection: self-loop detected on node '${e.source}'`);
     }
   }
 
-  // Check Start node constraints (Maximo rule: 0 incoming, strictly 1 outgoing)
+  // Check Start node constraints (Rule: 0 incoming, strictly 1 outgoing)
   for (const sNode of startNodes) {
     const sLabel = sNode.data.label;
     const incomingToStart = edges.filter((e) => e.target === sNode.id || e.target === sLabel);
     if (incomingToStart.length > 0) {
-      errors.push(`Start node '${sLabel}' cannot receive incoming connections (Maximo rule: 0 incoming).`);
+      errors.push(`Start node '${sLabel}' cannot receive incoming connections (Rule: 0 incoming).`);
     }
     const outgoingFromStart = edges.filter((e) => e.source === sNode.id || e.source === sLabel);
     if (outgoingFromStart.length === 0) {
@@ -491,7 +491,7 @@ export function validateGraphTopology(
     }
   }
 
-  // Check Stop / End node constraints (Maximo rule: 0 outgoing)
+  // Check Stop / End node constraints (Rule: 0 outgoing)
   for (const eNode of endNodes) {
     const eLabel = eNode.data.label;
     const outgoingFromStop = edges.filter((e) => e.source === eNode.id || e.source === eLabel);

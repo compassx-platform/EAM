@@ -1,8 +1,8 @@
 # CompassX Person & Person Group Module — Phase 1 Spec
 
 **Status:** Draft for build
-**Scope:** Person identity + Person Groups (teams), modeled on IBM Maximo `People` / `Person Groups`
-**Design lineage note (§3.3 of `compassx-workflow-engine-spec.md`):** Person is **master data, NOT a generic workflow entity**. It ships alongside `app_user / app_role` as app-native registry data (like Maximo `PERSON`), it does NOT get `workflow_definition`, `states/transitions`, `valid-transitions`, or a replayable event projector. Lifecycle is a status flag + validation rules, matching IBM. Workflows/conditions *reference* Person/Groups; they never drive them.
+**Scope:** Person identity + Person Groups (teams), modeled on Enterprise EAM `People` / `Person Groups`
+**Design lineage note (§3.3 of `compassx-workflow-engine-spec.md`):** Person is **master data, NOT a generic workflow entity**. It ships alongside `app_user / app_role` as app-native registry data (like Enterprise `PERSON`), it does NOT get `workflow_definition`, `states/transitions`, `valid-transitions`, or a replayable event projector. Lifecycle is a status flag + validation rules, matching Enterprise. Workflows/conditions *reference* Person/Groups; they never drive them.
 
 ---
 
@@ -12,8 +12,8 @@
 |---|---|
 | Scope | Person + Person Groups only (Labor/Craft/Availability deferred) |
 | `workorder.assigned_to` | Migrate in place: `text` → `entity_reference → person` |
-| Person lifecycle | Master-data CRUD + `ACTIVE/INACTIVE` flag with IBM-style inactivation blockers (no event sourcing) |
-| Person ↔ User | 1:1 optional (a Person may exist with no login; a User must have a Person) — Maximo rule |
+| Person lifecycle | Master-data CRUD + `ACTIVE/INACTIVE` flag with Enterprise-style inactivation blockers (no event sourcing) |
+| Person ↔ User | 1:1 optional (a Person may exist with no login; a User must have a Person) — Enterprise rule |
 
 ---
 
@@ -21,11 +21,11 @@
 
 ### 2.1 `person`
 
-System-level master identity, mirroring `PERSON`. `person_id` is the stable identifier **and** the accepted `actor_id` everywhere in the platform (like Maximo `PERSONID`).
+System-level master identity, mirroring `PERSON`. `person_id` is the stable identifier **and** the accepted `actor_id` everywhere in the platform (like Enterprise `PERSONID`).
 
 ```sql
 CREATE TABLE person (
-  person_id             VARCHAR(50)  PRIMARY KEY,          -- UPPER by default (email local-part upcased), Maximo PERSONID analogue
+  person_id             VARCHAR(50)  PRIMARY KEY,          -- UPPER by default (email local-part upcased), Enterprise PERSONID analogue
   display_name          VARCHAR(255) NOT NULL,
   first_name            VARCHAR(100) NULL,
   last_name             VARCHAR(100) NULL,
@@ -36,7 +36,7 @@ CREATE TABLE person (
   primary_calendar      VARCHAR(50)  NULL,                 -- free key; availability stub uses it later
   primary_shift         VARCHAR(50)  NULL,
   workflow_delegate_id  VARCHAR(50)  NULL REFERENCES person(person_id),
-  delegate_from         TIMESTAMPTZ  NULL,                 -- workflow routing to delegate window (Maximo)
+  delegate_from         TIMESTAMPTZ  NULL,                 -- workflow routing to delegate window (Enterprise)
   delegate_to           TIMESTAMPTZ  NULL,
   status                VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
   created_by            VARCHAR(255) NULL,
@@ -50,13 +50,13 @@ CREATE INDEX idx_person_email     ON person(primary_email);
 
 ### 2.2 `person_group`
 
-Named team — Maximo `PERSONGROUP`. Used for `workorder.owner_group`, workflow routing, and (future) crew work groups.
+Named team — Enterprise `PERSONGROUP`. Used for `workorder.owner_group`, workflow routing, and (future) crew work groups.
 
 ```sql
 CREATE TABLE person_group (
   group_name        VARCHAR(50)  PRIMARY KEY,              -- e.g. 'SHIFT_CREW_A'
   description       VARCHAR(255) NULL,
-  is_crew_work_group BOOLEAN     NOT NULL DEFAULT FALSE,   -- Maximo Crew Work Group flag (stub for Crews)
+  is_crew_work_group BOOLEAN     NOT NULL DEFAULT FALSE,   -- Enterprise Crew Work Group flag (stub for Crews)
   use_for_org       VARCHAR(50)  NULL,                     -- optional org scope
   use_for_site      VARCHAR(50)  NULL,                     -- optional site scope
   created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -70,7 +70,7 @@ CREATE TABLE person_group (
 CREATE TABLE person_group_member (
   group_name        VARCHAR(50)  NOT NULL REFERENCES person_group(group_name),
   person_id         VARCHAR(50)  NOT NULL REFERENCES person(person_id),
-  sequence          INTEGER      NOT NULL DEFAULT 1,       -- workflow routing order (Maximo)
+  sequence          INTEGER      NOT NULL DEFAULT 1,       -- workflow routing order (Enterprise)
   is_group_default  BOOLEAN      NOT NULL DEFAULT FALSE,
   is_org_default    BOOLEAN      NOT NULL DEFAULT FALSE,
   is_site_default   BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -83,7 +83,7 @@ CREATE TABLE person_group_member (
 
 ### 2.4 `person_availability` (table stub — schema now, endpoints Phase 1-lite)
 
-Maximo `Modify Person Availability` analogue. Seeded empty; only create/list endpoints in Phase 1.
+Enterprise `Modify Person Availability` analogue. Seeded empty; only create/list endpoints in Phase 1.
 
 ```sql
 CREATE TABLE person_availability (
@@ -99,7 +99,7 @@ CREATE INDEX idx_person_avail_person ON person_availability(person_id);
 
 ### 2.5 `person_audit` (optional, Phase 1-lite — append-only changed-field log)
 
-Maximo has only `CHANGEBY/CHANGEDATE`; we add a light audit without event-sourcing a projector.
+Enterprise has only `CHANGEBY/CHANGEDATE`; we add a light audit without event-sourcing a projector.
 
 ```sql
 CREATE TABLE person_audit (
@@ -123,7 +123,7 @@ CREATE INDEX idx_person_audit_person ON person_audit(person_id, occurred_at);
 
 ### 2.7 Seeding / backfill rules (run in `seed_all`, idempotent)
 
-1. For every `app_user`, ensure a `Person` exists: `person_id = UPPER(local part of email)` (e.g. `alice.safety@compassx.io` → `ALICE.SAFETY`), `display_name` copied, `primary_email = email`, `status = 'ACTIVE'`. Maximo aligns PERSONID=USERID.
+1. For every `app_user`, ensure a `Person` exists: `person_id = UPPER(local part of email)` (e.g. `alice.safety@compassx.io` → `ALICE.SAFETY`), `display_name` copied, `primary_email = email`, `status = 'ACTIVE'`. Enterprise aligns PERSONID=USERID.
 2. For every `Person` with `primary_email` matching an `app_user.email`, nothing extra needed (already 1:1).
 3. Seed two sample groups referencing seeded persons: `SHIFT_CREW_A`, `MAINT_CREW_B`.
 4. Backfill `workorder.custom_fields.assigned_to` string values → `person_id` (see §4.3).
@@ -172,12 +172,12 @@ Partial update (PATCH semantics). Body = any mutable fields above. Supervisor/de
 Attempting supervisor set to self → `400 self_reference`.
 
 #### `DELETE /api/persons/{person_id}`
-Maximo rule mirrored: **hard delete only when no transactional history**.
+Enterprise rule mirrored: **hard delete only when no transactional history**.
 - OK if zero references: not linked to `app_user`, not `assigned_to`/owner on any workorder/permit, not a group member, not superior/delegate of anyone, no availability rows.
 - Else `409` with `{error_code:"delete_blocked", blockers:[...]}` — instruct caller to **inactivate** instead.
 
 #### `POST /api/persons/{person_id}/inactivate`
-Mirrors Maximo inactivation validations; `200` success:
+Mirrors Enterprise inactivation validations; `200` success:
 ```json
 { "inactivated": true, "person_id": "CHUCK.STONE", "inactivated_user_id": "charlie.tech@compassx.io", "blocks_ignored": [] }
 ```
@@ -187,14 +187,14 @@ Mirrors Maximo inactivation validations; `200` success:
 3. `supervisor_of` — active direct reports reference this `supervisor_id`.
 4. `workflow_delegate_of` — someone has this person as `workflow_delegate_id` (inside delegate window).
 5. `group_member` — any `person_group_member` row (must remove first).
-6. `linked_user_system` — explicit flag override only (matches Maximo "System User" carve-out).
+6. `linked_user_system` — explicit flag override only (matches Enterprise "System User" carve-out).
 Then side effects (atomic): cascade `app_user.active = False`; soft-remove from lookups. Person remains queryable historically.
 
 #### `POST /api/persons/{person_id}/activate`
 Reverse. Reactivates linked user (if any). `200`.
 
 #### `GET /api/persons/{person_id}/related`
-Read-only reference scan (Maximo `View Related Assets and Locations` analogue):
+Read-only reference scan (Enterprise `View Related Assets and Locations` analogue):
 ```json
 { "person_id": "ALICE.SAFETY",
   "workorders": [{"id","status","title"}],
@@ -283,7 +283,7 @@ So `assigned_to`/`owner_group` reject unknown IDs at create/transition time, and
 
 ### 4.4 Condition registry (optional but recommended in Phase 1)
 
-New atom type `person_group` in `condition_evaluator.py` (mirrors Maximo `owner_group` routing):
+New atom type `person_group` in `condition_evaluator.py` (mirrors Enterprise `owner_group` routing):
 ```json
 { "type": "person_group", "relationship_field": "assigned_to", "group": "SHIFT_CREW_A" }
 ```
@@ -312,4 +312,4 @@ New atom type `person_group` in `condition_evaluator.py` (mirrors Maximo `owner_
 
 ## 6. Explicitly deferred (Phase 2+)
 
-Labor records + crafts/rates, Crews/Crew Types, full availability-driven scheduling, Maximo-style Person deletion archival, multi-org `COMPANY` integration, notification/delegate auto-rotation on delegate window end.
+Labor records + crafts/rates, Crews/Crew Types, full availability-driven scheduling, Enterprise-style Person deletion archival, multi-org `COMPANY` integration, notification/delegate auto-rotation on delegate window end.

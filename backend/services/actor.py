@@ -6,7 +6,7 @@ from backend.models.users import AppUser
 def resolve_actor_roles(db: Session, actor_id: str, actor_roles: Optional[List[str]]) -> List[str]:
     """Resolves an actor to its role list.
 
-    IBM Maximo alignment: an actor may be identified either by its app-native
+    Enterprise EAM alignment: an actor may be identified either by its app-native
     ``AppUser`` identity (email or id) or by its ``PERSONID`` (the User ID in
     capital letters, e.g. ``ALICE.SAFETY@COMPASSX.IO``). PERSONID resolves back
     to the linked app user via ``Person.primary_email``.

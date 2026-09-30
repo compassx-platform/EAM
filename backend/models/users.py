@@ -19,7 +19,7 @@ class AppUser(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     display_name = Column(String(255), nullable=False)
     password_hash = Column(String(255), nullable=True)
-    # IBM Maximo alignment: every user is backed by a Person (PERSONID = User ID
+    # Enterprise EAM alignment: every user is backed by a Person (PERSONID = User ID
     # in capital letters). 1:1 — a person record can exist without a user.
     person_id = Column(String(50), ForeignKey("person.person_id"), nullable=True, unique=True)
     active = Column(Boolean, default=True, nullable=False)

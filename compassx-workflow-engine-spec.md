@@ -12,7 +12,7 @@ This app is a general-purpose workflow engine, not a work-order tool that happen
 
 It is deployed as a **standalone CompassX app** via the App Module pipeline. It has no dependency on CompassX's catalog, ontology, or Nova — it owns its own database, its own user/auth model, and its own UI end to end.
 
-**Design lineage:** built on the classic EAM/Maximo design philosophy (generic object model + configuration-over-customization) re-expressed as an event-sourced, CQRS-structured engine with a hard-separated deterministic gate layer, so business logic stays user-configurable while safety/compliance-relevant enforcement never can be bypassed by workflow design alone.
+**Design lineage:** built on the classic EAM/Enterprise design philosophy (generic object model + configuration-over-customization) re-expressed as an event-sourced, CQRS-structured engine with a hard-separated deterministic gate layer, so business logic stays user-configurable while safety/compliance-relevant enforcement never can be bypassed by workflow design alone.
 
 ---
 

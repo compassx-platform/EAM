@@ -26,11 +26,11 @@ class UserResponse(BaseModel):
     roles: List[str]
 
 def _default_person_id(email: str) -> str:
-    """Maximo PERSONID = the User ID (the login id) in capital letters."""
+    """Enterprise PERSONID = the User ID (the login id) in capital letters."""
     return email.strip().upper()
 
 def _ensure_person_for_user(db: Session, email: str, display_name: str) -> Person:
-    """Creates/returns the backing Person for an app user (1:1, Maximo suite sync)."""
+    """Creates/returns the backing Person for an app user (1:1, Enterprise suite sync)."""
     pid = _default_person_id(email)
     person = db.query(Person).filter(Person.person_id == pid).first()
     if not person:
@@ -95,7 +95,7 @@ def create_user(req: UserCreateRequest, db: Session = Depends(get_db)):
         roles = db.query(AppRole).filter(AppRole.name.in_(req.roles)).all()
         user.roles = roles
 
-    # Every user is backed by a Person (IBM Maximo: PERSONID = User ID in caps)
+    # Every user is backed by a Person (Enterprise EAM: PERSONID = User ID in caps)
     person = _ensure_person_for_user(db, user.email, user.display_name)
     user.person_id = person.person_id
 

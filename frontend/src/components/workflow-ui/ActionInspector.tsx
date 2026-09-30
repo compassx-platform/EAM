@@ -111,7 +111,7 @@ export function ActionInspector(p: ActionInspectorProps) {
   const isSubprocessSource = isSubprocessKind(sourceNodeKind);
   const isAutoProgression = isStartSource || isActionSource || isWaitSource || isInteractionSource || isSubprocessSource;
 
-  // IBM Maximo Action Line Classification
+  // Action Line Classification
   const curEventUpper = (edge.data?.event || 'EVENT').toUpperCase();
   const isPositiveAction = ['APPROVE', 'COMPLETE', 'SUBMIT', 'ACCEPT', 'YES', 'PASS', 'START', 'ISSUE'].includes(curEventUpper);
   const isNegativeAction = ['REJECT', 'REROUTE', 'RETURN', 'CANCEL', 'NO', 'FAIL', 'ABORT'].includes(curEventUpper);

@@ -13,6 +13,11 @@ from backend.routers.roles import router as roles_router
 from backend.routers.tasks import router as tasks_router
 from backend.routers.notifications import router as notifications_router
 from backend.routers.escalations import router as escalations_router
+from backend.routers.organizations import router as organizations_router
+from backend.routers.asset_hierarchy import router as asset_hierarchy_router
+from backend.routers.classifications import router as classifications_router
+from backend.routers.meters import router as meters_router
+from backend.routers.documents import router as documents_router
 
 __all__ = [
     "auth_router",
@@ -31,4 +36,10 @@ __all__ = [
     "tasks_router",
     "notifications_router",
     "escalations_router",
+    "organizations_router",
+    "asset_hierarchy_router",
+    "classifications_router",
+    "meters_router",
+    "documents_router",
 ]
+

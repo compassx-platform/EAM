@@ -593,7 +593,7 @@ export interface EntityTypeDefinition {
   updated_at?: string | null;
 }
 
-// ---- Person & Person Group (IBM Maximo People & Person Groups) -------------
+// ---- Person & Person Group (Enterprise People & Person Groups) -------------
 
 export interface Person {
   person_id: string;
@@ -666,7 +666,7 @@ export interface PersonRelated {
   groups: string[];
 }
 
-// ---- Workflow Roles & Task Assignments (IBM Maximo MAXROLE & WFTASK) --------
+// ---- Workflow Roles & Task Assignments (Dynamic Role & WFTASK) --------
 
 export type RoleType = 'PERSON' | 'PERSON_GROUP' | 'DATASET_ATTRIBUTE' | 'EMAIL_ADDRESS';
 
@@ -758,7 +758,7 @@ export interface InAppNotification {
   created_at: string;
 }
 
-// ---- Enterprise Escalations (IBM Maximo Escalation Architecture) -----------
+// ---- Enterprise Escalations (Enterprise Escalation Architecture) -----------
 
 export interface EscalationPointAction {
   action_type: 'TRANSITION_WORKFLOW' | 'CHANGE_STATUS' | 'SEND_NOTIFICATION' | 'REASSIGN_TASK' | 'UPDATE_FIELD' | string;
@@ -819,4 +819,558 @@ export interface EscalationLog {
   point_index?: number;
   actions_taken?: any[];
   execution_time: string;
+}
+
+// ============================================================================
+// Enterprise Organization, Company Sets & Companies Architecture
+// ============================================================================
+
+export interface CompanySet {
+  set_id: string;
+  description?: string | null;
+  auto_add_companies: boolean;
+  status: 'ACTIVE' | 'INACTIVE';
+  organizations_count?: number;
+  companies_count?: number;
+  organizations?: Array<{ org_id: string; name: string; status: string }>;
+  company_masters?: CompanyMaster[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CompanyMaster {
+  company: string;
+  company_set_id: string;
+  name: string;
+  type: string; // V, M, C, D, I
+  currency_code: string;
+  tax_id?: string | null;
+  homepage?: string | null;
+  phone?: string | null;
+  fax?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  active_in_orgs?: CompanyOrg[];
+  contacts?: CompanyContact[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface OrganizationPurchasingOptions {
+  po_autonumber_prefix?: string;
+  receiving_tolerance_percent?: number;
+  auto_close_po?: boolean;
+  tax_on_freight?: boolean;
+}
+
+export interface OrganizationInventoryOptions {
+  costing_method?: 'AVERAGE' | 'STANDARD' | 'FIFO' | 'LIFO';
+  allow_negative_balance?: boolean;
+  abc_break_a?: number;
+  abc_break_b?: number;
+}
+
+export interface OrganizationWorkOrderOptions {
+  wo_autonumber_prefix?: string;
+  allow_history_editing?: boolean;
+  require_actual_dates_on_completion?: boolean;
+  track_asset_downtime?: boolean;
+}
+
+export interface Organization {
+  org_id: string;
+  name: string;
+  description?: string | null;
+  company_set_id: string;
+  item_set_id: string;
+  base_currency_1: string;
+  base_currency_2?: string | null;
+  clearing_account?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  purchasing_options: OrganizationPurchasingOptions;
+  inventory_options: OrganizationInventoryOptions;
+  work_order_options: OrganizationWorkOrderOptions;
+  sites_count?: number;
+  companies_count?: number;
+  company_set?: CompanySet;
+  sites?: Site[];
+  companies?: CompanyOrg[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Site {
+  site_id: string;
+  org_id: string;
+  name: string;
+  description?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CompanyOrg {
+  org_id: string;
+  company: string;
+  name: string;
+  type: string;
+  currency_code: string;
+  payment_terms: string;
+  freight_terms: string;
+  fob: string;
+  customer_account_num?: string | null;
+  tax_exempt: boolean;
+  tax_code?: string | null;
+  gl_account?: string | null;
+  disabled: boolean; // Enterprise local disablement flag
+  remit_to_address?: string | null;
+  notes?: string | null;
+  master_info?: CompanyMaster;
+  contacts?: CompanyContact[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CompanyContact {
+  id: string;
+  company: string;
+  company_set_id: string;
+  org_id?: string | null;
+  contact_name: string;
+  position?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  is_primary: boolean;
+  created_at?: string;
+}
+
+export type LocationType = 'OPERATING' | 'STOREROOM' | 'SALVAGE' | 'HOLDING' | 'VENDOR' | 'REPAIR';
+export type LocationStatus = 'OPERATING' | 'NOT_READY' | 'DECOMMISSIONED';
+
+export interface Location {
+  location_id: string;
+  site_id: string;
+  org_id: string;
+  parent_location_id?: string | null;
+  description?: string | null;
+  type: LocationType;
+  status: LocationStatus;
+  gl_account?: string | null;
+  classstructure_id?: string | null;
+  classification_path?: string | null;
+  installed_assets?: Asset[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type AssetStatus = 'OPERATING' | 'NOT_READY' | 'IN_REPAIR' | 'DECOMMISSIONED';
+
+export interface Asset {
+  asset_id: string;
+  site_id: string;
+  org_id: string;
+  location_id?: string | null;
+  parent_asset_id?: string | null;
+  classstructure_id?: string | null;
+  classification_path?: string | null;
+  name: string;
+  description?: string | null;
+  item_num?: string | null;
+  serial_num?: string | null;
+  status: AssetStatus;
+  vendor?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  purchase_cost: number;
+  install_date?: string | null;
+  priority: number;
+  child_assets?: Asset[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DrilldownAsset extends Asset {
+  children?: DrilldownAsset[];
+}
+
+export interface DrilldownLocation extends Location {
+  children_locations?: DrilldownLocation[];
+  assets?: DrilldownAsset[];
+}
+
+export interface DrilldownSite {
+  site_id: string;
+  site_name: string;
+  org_id: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  locations_tree: DrilldownLocation[];
+  unassigned_assets: DrilldownAsset[];
+  total_locations: number;
+  total_assets: number;
+}
+
+// ---- Classifications & Specifications ---------------------------------------
+
+export type SpecDataType = 'ALN' | 'NUMERIC' | 'TABLE' | 'DATE' | 'YORN';
+
+export interface AssetAttribute {
+  attribute_id: string;
+  description: string;
+  data_type: SpecDataType;
+  unit_of_measure?: string | null;
+  domain_id?: string | null;
+  domain_values?: string[] | null;
+  org_id?: string | null;
+  site_id?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  usage_count?: number;
+  used_in_classifications?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ClassSpec {
+  id: string;
+  classstructure_id: string;
+  attribute_id: string;
+  section?: string | null;
+  description: string;
+  data_type: SpecDataType;
+  unit_of_measure?: string | null;
+  domain_id?: string | null;
+  domain_values?: string[] | null;
+  default_value?: string | null;
+  mandatory: boolean;
+  apply_down_hierarchy?: boolean;
+  inherited_from?: string | null;
+  inherited_from_path?: string | null;
+  display_sequence: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Classification {
+  classstructure_id: string;
+  classification_id: string;
+  parent_classstructure_id?: string | null;
+  description: string;
+  hierarchy_path: string;
+  use_with: string[];
+  org_id?: string | null;
+  site_id?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  attributes_count?: number;
+  attributes?: ClassSpec[];
+  all_attributes?: ClassSpec[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ClassificationTreeNode extends Classification {
+  children?: ClassificationTreeNode[];
+}
+
+export interface SpecValueItem {
+  attribute_id: string;
+  section?: string | null;
+  description?: string;
+  data_type?: string;
+  unit_of_measure?: string | null;
+  domain_values?: string[];
+  mandatory?: boolean;
+  inherited_from?: string | null;
+  inherited_from_path?: string | null;
+  aln_value?: string | null;
+  num_value?: number | null;
+  date_value?: string | null;
+  spec_id?: string | null;
+}
+
+export interface InstanceSpecificationResponse {
+  asset_id?: string;
+  location_id?: string;
+  site_id: string;
+  classstructure_id?: string | null;
+  classification_path?: string | null;
+  specifications: SpecValueItem[];
+}
+
+export interface AttributeInstanceAssetMatch {
+  site_id: string;
+  asset_id: string;
+  description?: string;
+  status: string;
+  classstructure_id?: string | null;
+  classification_path?: string | null;
+  location_id?: string | null;
+  section?: string | null;
+  aln_value?: string | null;
+  num_value?: number | null;
+  date_value?: string | null;
+  unit_of_measure?: string | null;
+}
+
+export interface AttributeInstanceLocationMatch {
+  site_id: string;
+  location_id: string;
+  description?: string;
+  status: string;
+  type?: string;
+  classstructure_id?: string | null;
+  classification_path?: string | null;
+  parent_location_id?: string | null;
+  section?: string | null;
+  aln_value?: string | null;
+  num_value?: number | null;
+  date_value?: string | null;
+  unit_of_measure?: string | null;
+}
+
+export interface AttributeInstancesSearchResult {
+  attribute_id: string;
+  attribute?: AssetAttribute | null;
+  assets: AttributeInstanceAssetMatch[];
+  locations: AttributeInstanceLocationMatch[];
+  total_count: number;
+}
+
+// ============================================================================
+// Meters & Condition Monitoring
+// ============================================================================
+
+export type MeterType = 'CONTINUOUS' | 'GAUGE' | 'CHARACTERISTIC';
+export type MeterReadingType = 'ACTUAL' | 'DELTA';
+
+export interface Meter {
+  meter_id: string;
+  description: string;
+  meter_type: MeterType;
+  reading_type: MeterReadingType;
+  unit_of_measure?: string | null;
+  domain_id?: string | null;
+  domain_values?: string[] | null;
+  org_id?: string | null;
+  site_id?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  asset_usage_count?: number;
+  location_usage_count?: number;
+  group_usage_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MeterInGroup {
+  id: string;
+  group_id: string;
+  meter_id: string;
+  sequence: number;
+  default_rollover?: number | null;
+  default_avg_method?: string;
+  default_avg_rate?: number | null;
+  description?: string;
+  meter_type?: MeterType;
+  unit_of_measure?: string | null;
+  domain_values?: string[];
+}
+
+export interface MeterGroup {
+  group_id: string;
+  description: string;
+  org_id?: string | null;
+  site_id?: string | null;
+  status: 'ACTIVE' | 'INACTIVE';
+  meters_count?: number;
+  meters?: MeterInGroup[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AssetMeter {
+  id: string;
+  site_id: string;
+  asset_id: string;
+  meter_id: string;
+  description?: string;
+  meter_type: MeterType;
+  reading_type: MeterReadingType;
+  unit_of_measure?: string | null;
+  domain_values?: string[];
+  last_reading?: number | null;
+  last_reading_aln?: string | null;
+  last_reading_date?: string | null;
+  rollover_point?: number | null;
+  avg_units_per_day: number;
+  avg_calc_method: string;
+  life_to_date: number;
+  since_last_overhaul: number;
+  since_last_repair: number;
+  active: boolean;
+  readings_count?: number;
+  updated_at?: string;
+}
+
+export interface LocationMeter {
+  id: string;
+  site_id: string;
+  location_id: string;
+  meter_id: string;
+  description?: string;
+  meter_type: MeterType;
+  reading_type: MeterReadingType;
+  unit_of_measure?: string | null;
+  domain_values?: string[];
+  last_reading?: number | null;
+  last_reading_aln?: string | null;
+  last_reading_date?: string | null;
+  rollover_point?: number | null;
+  avg_units_per_day: number;
+  avg_calc_method: string;
+  life_to_date: number;
+  active: boolean;
+  readings_count?: number;
+  updated_at?: string;
+}
+
+export interface MeterReading {
+  id: string;
+  site_id: string;
+  asset_id?: string | null;
+  location_id?: string | null;
+  meter_id: string;
+  reading_date: string;
+  reading_value?: number | null;
+  reading_aln?: string | null;
+  delta_value?: number | null;
+  is_rollover: boolean;
+  inspector_id?: string | null;
+  entered_by?: string | null;
+  workorder_id?: string | null;
+  remarks?: string | null;
+  created_at?: string;
+}
+
+export interface MeasurePoint {
+  point_id: string;
+  description: string;
+  site_id: string;
+  asset_id?: string | null;
+  location_id?: string | null;
+  meter_id: string;
+  meter_type?: MeterType;
+  unit_of_measure?: string | null;
+  upper_action_limit?: number | null;
+  lower_action_limit?: number | null;
+  upper_warning_limit?: number | null;
+  lower_warning_limit?: number | null;
+  action_aln_value?: string | null;
+  action_description?: string | null;
+  action_job_plan?: string | null;
+  action_priority: number;
+  status: 'ACTIVE' | 'INACTIVE';
+  last_breach_date?: string | null;
+  last_breach_value?: string | null;
+  last_breach_type?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MeterReadingResponse {
+  reading: MeterReading;
+  asset_meter?: AssetMeter;
+  location_meter?: LocationMeter;
+  breach_alert?: {
+    point_id: string;
+    breach_type: string;
+    action_description?: string;
+    action_job_plan?: string;
+    action_priority?: number;
+  } | null;
+}
+
+// ============================================================================
+// Document Management (Maximo Doclinks & CompassX Volumes)
+// ============================================================================
+
+export interface DocFolder {
+  id: string;
+  folder_name: string;
+  description?: string | null;
+  volume_id?: string | null;
+  default_sub_path: string;
+  allowed_extensions?: string[];
+  max_file_size_mb: number;
+  is_active: boolean;
+  default_print_thru_vendor: boolean;
+  document_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DocLink {
+  id: string;
+  doc_info_id: string;
+  owner_table: string;
+  owner_id: string;
+  folder_id?: string | null;
+  get_latest_version: boolean;
+  print_thru_vendor: boolean;
+  copy_to_target: boolean;
+  created_by?: string | null;
+  created_at?: string;
+  document?: DocInfo | null;
+}
+
+export interface DocInfo {
+  id: string;
+  document_code: string;
+  title: string;
+  description?: string | null;
+  folder_id?: string | null;
+  folder_name?: string | null;
+  url_name: string;
+  url_type: 'FILE' | 'URL';
+  file_name: string;
+  file_size_bytes: number;
+  content_type: string;
+  volume_id?: string | null;
+  sub_path?: string | null;
+  version: string;
+  sha256_hash?: string | null;
+  status: 'ACTIVE' | 'ARCHIVED' | 'DEPRECATED';
+  tags: string[];
+  custom_metadata: Record<string, any>;
+  links_count?: number;
+  created_by?: string | null;
+  created_at?: string;
+  updated_by?: string | null;
+  updated_at?: string;
+  links?: DocLink[];
+}
+
+export interface VolumeRead {
+  id: string;
+  name: string;
+  description?: string;
+  catalog_name?: string;
+  schema_name?: string;
+  created_at?: string;
+}
+
+export interface VolumeFileInfo {
+  file_path: string;
+  file_name: string;
+  size_bytes: number;
+  content_type: string;
+  last_modified: string;
+}
+
+export interface PresignedUrlResponse {
+  url: string;
+  expires_in_seconds: number;
+  is_direct_url?: boolean;
 }

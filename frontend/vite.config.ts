@@ -7,8 +7,6 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     watch: {
-      usePolling: true,
-      interval: 2000,
       ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.cache/**'],
     },
     hmr: { clientPort: 443 },

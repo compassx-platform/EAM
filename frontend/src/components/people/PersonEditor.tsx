@@ -363,7 +363,7 @@ export const PersonEditor: React.FC<PersonEditorProps> = ({ personId, onBack }) 
                 ))}
               </ul>
               <p className="mt-2 text-[11px] text-amber-700 italic">
-                Per Maximo governance rules, complete/reassign open work, supervisees, and group memberships before inactivating.
+                Per Enterprise governance rules, complete/reassign open work, supervisees, and group memberships before inactivating.
               </p>
             </div>
           )}
@@ -669,7 +669,7 @@ export const PersonEditor: React.FC<PersonEditorProps> = ({ personId, onBack }) 
                         <span className="text-[11px] font-bold uppercase tracking-wider text-gray-700">
                           Availability & Leaves
                         </span>
-                        <InfoTooltip text="Maximo Modify Person Availability analogue. Tracks sickness, holidays, and overtime windows." />
+                        <InfoTooltip text="Person Availability schedule. Tracks sickness, holidays, and overtime windows." />
                       </div>
 
                       <button

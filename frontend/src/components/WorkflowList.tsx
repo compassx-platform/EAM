@@ -288,18 +288,18 @@ export function WorkflowList({ onEdit, onNew }: WorkflowListProps) {
       )}
 
       {/* Surface Content Body */}
-      <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
+      <div className="flex-1 overflow-y-auto px-6 py-4 bg-white">
         {loading ? (
           <div className="flex justify-center py-16">
             <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-400">
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-sm text-gray-400">
             No workflow processes configured. Click{' '}
             <span className="font-medium text-gray-600">New Workflow</span> to design one.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs">
+          <div className="overflow-x-auto border-b border-gray-200">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-gray-100 text-[10px] font-semibold uppercase tracking-wider text-gray-400">

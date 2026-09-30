@@ -155,23 +155,23 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
       </div>
 
       {/* Surface Content Body */}
-      <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
+      <div className="flex-1 overflow-y-auto px-6 py-4 bg-white">
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
           </div>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-xs">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto border-b border-gray-200">
+          <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50/80 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Record ID</th>
-                <th className="px-4 py-3">Lifecycle Status</th>
-                <th className="px-4 py-3">Workflow Step</th>
-                <th className="px-4 py-3">Version</th>
-                <th className="px-4 py-3">Updated</th>
+              <tr className="border-b border-gray-200 bg-white text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                <th className="px-4 py-2.5">Title</th>
+                <th className="px-4 py-2.5">Record ID</th>
+                <th className="px-4 py-2.5">Lifecycle Status</th>
+                <th className="px-4 py-2.5">Workflow Step</th>
+                <th className="px-4 py-2.5">Version</th>
+                <th className="px-4 py-2.5">Updated</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

@@ -1,6 +1,6 @@
 """0004_workflow_roles_and_tasks
 
-Dynamic workflow roles and task assignments (IBM Maximo MAXROLE & WFTASK analogue).
+Dynamic workflow roles and task assignments (Enterprise EAM MAXROLE & WFTASK analogue).
 
 Revision ID: 0004_workflow_roles_and_tasks
 Revises: 0003_person_module

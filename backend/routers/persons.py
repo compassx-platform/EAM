@@ -108,7 +108,7 @@ def _person_to_dict(db: Session, person: Person) -> Dict[str, Any]:
 
 
 def _normalize_person_id(raw: Optional[str], email: Optional[str]) -> str:
-    """Maximo PERSONID = the User ID (login id) in capital letters."""
+    """Enterprise PERSONID = the User ID (login id) in capital letters."""
     if raw and raw.strip():
         candidate = raw.strip().upper()
     elif email and email.strip():

@@ -85,7 +85,7 @@ export function ConditionList() {
             </span>
           </div>
           <p className="mt-0.5 text-xs text-gray-500">
-            Reusable Maximo-style conditional rules for workflow transition routing and form visibility logic.
+            Reusable Standard conditional rules for workflow transition routing and form visibility logic.
           </p>
         </div>
 

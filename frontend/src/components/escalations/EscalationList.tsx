@@ -247,7 +247,7 @@ export function EscalationList({
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              Maximo-grade background watchdogs monitoring SLA dates, expirations, and triggers.
+              Enterprise-grade background watchdogs monitoring SLA dates, expirations, and triggers.
             </p>
           </div>
         </div>

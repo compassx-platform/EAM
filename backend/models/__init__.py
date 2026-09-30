@@ -24,6 +24,38 @@ from backend.models.task_assignment import TaskAssignment
 from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.notification import InAppNotification
 from backend.models.escalation import EscalationDefinition, EscalationLog
+from backend.models.organization import (
+    CompanySet,
+    CompanyMaster,
+    Organization,
+    Site,
+    CompanyOrg,
+    CompanyContact,
+)
+from backend.models.asset_hierarchy import Location, Asset
+from backend.models.classification import (
+    AssetAttribute,
+    Classification,
+    ClassSpec,
+    AssetSpec,
+    LocationSpec,
+)
+from backend.models.meter import (
+    Meter,
+    MeterGroup,
+    MeterInGroup,
+    AssetMeter,
+    LocationMeter,
+    MeterReading,
+    MeasurePoint,
+)
+from backend.models.doclink import (
+    DocFolder,
+    DocInfo,
+    DocLink,
+    DocAppFolder,
+)
+from backend.models.system_setting import SystemSetting
 
 __all__ = [
     "EntityBaseMixin",
@@ -56,4 +88,30 @@ __all__ = [
     "InAppNotification",
     "EscalationDefinition",
     "EscalationLog",
+    "CompanySet",
+    "CompanyMaster",
+    "Organization",
+    "Site",
+    "CompanyOrg",
+    "CompanyContact",
+    "Location",
+    "Asset",
+    "AssetAttribute",
+    "Classification",
+    "ClassSpec",
+    "AssetSpec",
+    "LocationSpec",
+    "Meter",
+    "MeterGroup",
+    "MeterInGroup",
+    "AssetMeter",
+    "LocationMeter",
+    "MeterReading",
+    "MeasurePoint",
+    "DocFolder",
+    "DocInfo",
+    "DocLink",
+    "DocAppFolder",
+    "SystemSetting",
 ]
+

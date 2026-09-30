@@ -9,7 +9,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.config import settings
-from backend.database import SessionLocal, engine, Base, ensure_schema_compatibility
+from backend.database import (
+    SessionLocal,
+    engine,
+    Base,
+    ensure_schema_compatibility,
+    seed_default_asset_hierarchy,
+    seed_default_classifications,
+    seed_default_meters,
+    seed_default_document_folders,
+)
 import backend.models
 from backend.services.expiry_worker import check_and_expire_permits
 from backend.services.escalation_service import check_and_escalate_overdue_tasks
@@ -30,6 +39,11 @@ from backend.routers import (
     tasks_router,
     notifications_router,
     escalations_router,
+    organizations_router,
+    asset_hierarchy_router,
+    classifications_router,
+    meters_router,
+    documents_router,
 )
 from backend.services.escalation_engine import seed_default_escalations
 
@@ -52,7 +66,7 @@ async def periodic_expiry_checker():
 
 
 async def periodic_escalation_checker():
-    """Background task to automatically escalate overdue task assignments (IBM Maximo Escalation engine)"""
+    """Background task to automatically escalate overdue task assignments"""
     while True:
         try:
             db = SessionLocal()
@@ -73,6 +87,10 @@ async def lifespan(app: FastAPI):
         try:
             ensure_schema_compatibility(db)
             seed_default_escalations(db)
+            seed_default_asset_hierarchy(db)
+            seed_default_classifications(db)
+            seed_default_meters(db)
+            seed_default_document_folders(db)
         finally:
             db.close()
     except Exception as exc:
@@ -118,8 +136,13 @@ app.include_router(roles_router, prefix=settings.API_PREFIX)
 app.include_router(tasks_router, prefix=settings.API_PREFIX)
 app.include_router(notifications_router, prefix=settings.API_PREFIX)
 app.include_router(escalations_router, prefix=settings.API_PREFIX)
+app.include_router(documents_router, prefix=settings.API_PREFIX)
 app.include_router(system_router, prefix=settings.API_PREFIX)
-app.include_router(entities_router)  # Includes /api/{entity_type}/...
+app.include_router(organizations_router)  # Includes /api/company-sets, /api/organizations, etc.
+app.include_router(asset_hierarchy_router)  # /api/locations, /api/assets, /api/hierarchy/drilldown
+app.include_router(classifications_router)  # /api/classifications, /api/classifications/tree, specs
+app.include_router(meters_router)  # /api/meters, /api/meter-groups, /api/measure-points, readings
+app.include_router(entities_router)  # Wildcard /api/{entity_type}/... MUST be last
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI
 from backend.mcp_server.server import mcp

@@ -41,7 +41,32 @@ import type {
   Escalation,
   EscalationLog,
   EntityLifecycleStatus,
+  CompanySet,
+  CompanyMaster,
+  Organization,
+  Site,
+  CompanyOrg,
+  CompanyContact,
+  Location,
+  Asset,
+  DrilldownSite,
+  AssetAttribute,
+  Classification,
+  ClassificationTreeNode,
+  ClassSpec,
+  SpecValueItem,
+  InstanceSpecificationResponse,
+  AttributeInstancesSearchResult,
+  Meter,
+  MeterGroup,
+  MeterInGroup,
+  AssetMeter,
+  LocationMeter,
+  MeterReading,
+  MeasurePoint,
+  MeterReadingResponse,
 } from '../types';
+
 
 const API_BASE = '/api';
 
@@ -465,7 +490,7 @@ export const api = {
     return request(`/entity-types/${encodeURIComponent(name)}`, { method: 'DELETE' });
   },
 
-  // ---- People & Person Groups (IBM Maximo People Management) --------------
+  // ---- People & Person Groups (Enterprise People Management) --------------
 
   listPersons(opts?: {
     status?: string;
@@ -636,7 +661,7 @@ export const api = {
     );
   },
 
-  // ---- Roles & Task Assignment (IBM Maximo MAXROLE & WFTASK) ----------------
+  // ---- Roles & Task Assignment (Dynamic Role & WFTASK) ----------------
 
   listRoles(search?: string, roleType?: string): Promise<{ items: WorkflowRole[]; total: number }> {
     const params = new URLSearchParams();
@@ -930,4 +955,874 @@ export const api = {
     }
     return request<EscalationLog[]>(`/escalations/logs?limit=${limit}`);
   },
+
+  // ==========================================================================
+  // Company Sets API
+  // ==========================================================================
+  listCompanySets(params?: { search?: string; status?: string }): Promise<CompanySet[]> {
+    const sp = new URLSearchParams();
+    if (params?.search) sp.set('search', params.search);
+    if (params?.status) sp.set('status', params.status);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<CompanySet[]>(`/company-sets${qs}`);
+  },
+
+  getCompanySet(setId: string): Promise<CompanySet> {
+    return request<CompanySet>(`/company-sets/${encodeURIComponent(setId)}`);
+  },
+
+  createCompanySet(input: {
+    set_id: string;
+    description?: string;
+    auto_add_companies?: boolean;
+    status?: string;
+  }): Promise<CompanySet> {
+    return request<CompanySet>('/company-sets', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateCompanySet(
+    setId: string,
+    input: { description?: string; auto_add_companies?: boolean; status?: string }
+  ): Promise<CompanySet> {
+    return request<CompanySet>(`/company-sets/${encodeURIComponent(setId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteCompanySet(setId: string): Promise<void> {
+    return request<void>(`/company-sets/${encodeURIComponent(setId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ==========================================================================
+  // Company Master API (Set Level)
+  // ==========================================================================
+  listCompanyMasters(params?: {
+    company_set_id?: string;
+    search?: string;
+    type?: string;
+    status?: string;
+  }): Promise<CompanyMaster[]> {
+    const sp = new URLSearchParams();
+    if (params?.company_set_id) sp.set('company_set_id', params.company_set_id);
+    if (params?.search) sp.set('search', params.search);
+    if (params?.type) sp.set('type', params.type);
+    if (params?.status) sp.set('status', params.status);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<CompanyMaster[]>(`/company-master${qs}`);
+  },
+
+  getCompanyMaster(companySetId: string, company: string): Promise<CompanyMaster> {
+    return request<CompanyMaster>(
+      `/company-master/${encodeURIComponent(companySetId)}/${encodeURIComponent(company)}`
+    );
+  },
+
+  createCompanyMaster(input: Partial<CompanyMaster>): Promise<CompanyMaster> {
+    return request<CompanyMaster>('/company-master', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateCompanyMaster(
+    companySetId: string,
+    company: string,
+    input: Partial<CompanyMaster>
+  ): Promise<CompanyMaster> {
+    return request<CompanyMaster>(
+      `/company-master/${encodeURIComponent(companySetId)}/${encodeURIComponent(company)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteCompanyMaster(companySetId: string, company: string): Promise<void> {
+    return request<void>(
+      `/company-master/${encodeURIComponent(companySetId)}/${encodeURIComponent(company)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  addCompanyToOrgs(
+    companySetId: string,
+    company: string,
+    input: {
+      org_ids: string[];
+      payment_terms?: string;
+      freight_terms?: string;
+      fob?: string;
+      currency_code?: string;
+    }
+  ): Promise<{ company: string; company_set_id: string; added_to: string[]; skipped: string[] }> {
+    return request(
+      `/company-master/${encodeURIComponent(companySetId)}/${encodeURIComponent(company)}/add-to-orgs`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  // ==========================================================================
+  // Organizations API
+  // ==========================================================================
+  listOrganizations(params?: {
+    company_set_id?: string;
+    search?: string;
+    status?: string;
+  }): Promise<Organization[]> {
+    const sp = new URLSearchParams();
+    if (params?.company_set_id) sp.set('company_set_id', params.company_set_id);
+    if (params?.search) sp.set('search', params.search);
+    if (params?.status) sp.set('status', params.status);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<Organization[]>(`/organizations${qs}`);
+  },
+
+  getOrganization(orgId: string): Promise<Organization> {
+    return request<Organization>(`/organizations/${encodeURIComponent(orgId)}`);
+  },
+
+  createOrganization(input: Partial<Organization>): Promise<Organization> {
+    return request<Organization>('/organizations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateOrganization(orgId: string, input: Partial<Organization>): Promise<Organization> {
+    return request<Organization>(`/organizations/${encodeURIComponent(orgId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteOrganization(orgId: string): Promise<void> {
+    return request<void>(`/organizations/${encodeURIComponent(orgId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ==========================================================================
+  // Sites API
+  // ==========================================================================
+  listSites(orgId?: string): Promise<Site[]> {
+    if (orgId) {
+      return request<Site[]>(`/organizations/${encodeURIComponent(orgId)}/sites`);
+    }
+    return request<Site[]>('/sites');
+  },
+
+  createSite(
+    orgId: string,
+    input: { site_id: string; name: string; description?: string; status?: string }
+  ): Promise<Site> {
+    return request<Site>(`/organizations/${encodeURIComponent(orgId)}/sites`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateSite(siteId: string, input: Partial<Site>): Promise<Site> {
+    return request<Site>(`/sites/${encodeURIComponent(siteId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteSite(siteId: string): Promise<void> {
+    return request<void>(`/sites/${encodeURIComponent(siteId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ==========================================================================
+  // Organization Companies API (Enterprise COMPANIES table)
+  // ==========================================================================
+  listOrgCompanies(
+    orgId: string,
+    params?: { search?: string; type?: string; disabled?: boolean }
+  ): Promise<CompanyOrg[]> {
+    const sp = new URLSearchParams();
+    if (params?.search) sp.set('search', params.search);
+    if (params?.type) sp.set('type', params.type);
+    if (params?.disabled !== undefined) sp.set('disabled', String(params.disabled));
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<CompanyOrg[]>(`/organizations/${encodeURIComponent(orgId)}/companies${qs}`);
+  },
+
+  listAllCompanies(params?: { org_id?: string; search?: string }): Promise<CompanyOrg[]> {
+    const sp = new URLSearchParams();
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString() ? `?${sp.toString()}` : '';
+    return request<CompanyOrg[]>(`/companies${qs}`);
+  },
+
+  getCompanyOrg(orgId: string, company: string): Promise<CompanyOrg> {
+    return request<CompanyOrg>(
+      `/companies/${encodeURIComponent(orgId)}/${encodeURIComponent(company)}`
+    );
+  },
+
+  addCompanyToOrganization(orgId: string, input: Partial<CompanyOrg>): Promise<CompanyOrg> {
+    return request<CompanyOrg>(`/organizations/${encodeURIComponent(orgId)}/companies`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateCompanyOrg(
+    orgId: string,
+    company: string,
+    input: Partial<CompanyOrg>
+  ): Promise<CompanyOrg> {
+    return request<CompanyOrg>(
+      `/companies/${encodeURIComponent(orgId)}/${encodeURIComponent(company)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  removeCompanyFromOrganization(orgId: string, company: string): Promise<void> {
+    return request<void>(
+      `/companies/${encodeURIComponent(orgId)}/${encodeURIComponent(company)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  // ==========================================================================
+  // Company Contacts API
+  // ==========================================================================
+  listCompanyContacts(
+    company: string,
+    companySetId: string,
+    orgId?: string
+  ): Promise<CompanyContact[]> {
+    const sp = new URLSearchParams({
+      company,
+      company_set_id: companySetId,
+    });
+    if (orgId) sp.set('org_id', orgId);
+    return request<CompanyContact[]>(`/company-contacts?${sp.toString()}`);
+  },
+
+  createCompanyContact(input: Partial<CompanyContact>): Promise<CompanyContact> {
+    return request<CompanyContact>('/company-contacts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteCompanyContact(contactId: string): Promise<void> {
+    return request<void>(`/company-contacts/${encodeURIComponent(contactId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ==========================================================================
+  // Locations & Asset Hierarchy API
+  // ==========================================================================
+  listLocations(params?: {
+    site_id?: string;
+    org_id?: string;
+    type?: string;
+    search?: string;
+  }): Promise<Location[]> {
+    const sp = new URLSearchParams();
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.type) sp.set('type', params.type);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<Location[]>(`/locations${qs ? `?${qs}` : ''}`);
+  },
+
+  getLocation(siteId: string, locationId: string): Promise<Location> {
+    return request<Location>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}`
+    );
+  },
+
+  createLocation(input: Partial<Location>): Promise<Location> {
+    return request<Location>('/locations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateLocation(
+    siteId: string,
+    locationId: string,
+    input: Partial<Location>
+  ): Promise<Location> {
+    return request<Location>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteLocation(siteId: string, locationId: string): Promise<void> {
+    return request<void>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  listAssets(params?: {
+    site_id?: string;
+    org_id?: string;
+    location_id?: string;
+    parent_asset_id?: string;
+    status?: string;
+    search?: string;
+  }): Promise<Asset[]> {
+    const sp = new URLSearchParams();
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.location_id) sp.set('location_id', params.location_id);
+    if (params?.parent_asset_id) sp.set('parent_asset_id', params.parent_asset_id);
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<Asset[]>(`/assets${qs ? `?${qs}` : ''}`);
+  },
+
+  getAsset(siteId: string, assetId: string): Promise<Asset> {
+    return request<Asset>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}`
+    );
+  },
+
+  createAsset(input: Partial<Asset>): Promise<Asset> {
+    return request<Asset>('/assets', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateAsset(
+    siteId: string,
+    assetId: string,
+    input: Partial<Asset>
+  ): Promise<Asset> {
+    return request<Asset>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteAsset(siteId: string, assetId: string): Promise<void> {
+    return request<void>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  getDrilldownHierarchy(params?: {
+    site_id?: string;
+    org_id?: string;
+  }): Promise<DrilldownSite[]> {
+    const sp = new URLSearchParams();
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    const qs = sp.toString();
+    return request<DrilldownSite[]>(`/hierarchy/drilldown${qs ? `?${qs}` : ''}`);
+  },
+
+  listClassifications(params?: {
+    use_with?: string;
+    org_id?: string;
+    site_id?: string;
+    parent_id?: string;
+    status?: string;
+    search?: string;
+  }): Promise<Classification[]> {
+    const sp = new URLSearchParams();
+    if (params?.use_with) sp.set('use_with', params.use_with);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.parent_id !== undefined) sp.set('parent_id', params.parent_id);
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<Classification[]>(`/classifications${qs ? `?${qs}` : ''}`);
+  },
+
+  getClassificationTree(params?: {
+    use_with?: string;
+    org_id?: string;
+    site_id?: string;
+  }): Promise<ClassificationTreeNode[]> {
+    const sp = new URLSearchParams();
+    if (params?.use_with) sp.set('use_with', params.use_with);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    const qs = sp.toString();
+    return request<ClassificationTreeNode[]>(`/classifications/tree${qs ? `?${qs}` : ''}`);
+  },
+
+  getClassification(classstructureId: string): Promise<Classification> {
+    return request<Classification>(
+      `/classifications/${encodeURIComponent(classstructureId)}`
+    );
+  },
+
+  createClassification(
+    input: Partial<Classification> & { attributes?: Partial<ClassSpec>[] }
+  ): Promise<Classification> {
+    return request<Classification>('/classifications', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateClassification(
+    classstructureId: string,
+    input: Partial<Classification>
+  ): Promise<Classification> {
+    return request<Classification>(
+      `/classifications/${encodeURIComponent(classstructureId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteClassification(classstructureId: string): Promise<void> {
+    return request<void>(
+      `/classifications/${encodeURIComponent(classstructureId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  addClassificationAttribute(
+    classstructureId: string,
+    input: Partial<ClassSpec>
+  ): Promise<ClassSpec> {
+    return request<ClassSpec>(
+      `/classifications/${encodeURIComponent(classstructureId)}/attributes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  updateClassificationAttribute(
+    classstructureId: string,
+    attributeId: string,
+    input: Partial<ClassSpec>
+  ): Promise<ClassSpec> {
+    return request<ClassSpec>(
+      `/classifications/${encodeURIComponent(classstructureId)}/attributes/${encodeURIComponent(attributeId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteClassificationAttribute(
+    classstructureId: string,
+    attributeId: string
+  ): Promise<void> {
+    return request<void>(
+      `/classifications/${encodeURIComponent(classstructureId)}/attributes/${encodeURIComponent(attributeId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  getAssetSpecifications(
+    siteId: string,
+    assetId: string
+  ): Promise<InstanceSpecificationResponse> {
+    return request<InstanceSpecificationResponse>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/specifications`
+    );
+  },
+
+  updateAssetSpecifications(
+    siteId: string,
+    assetId: string,
+    payload: { classstructure_id?: string | null; specs?: SpecValueItem[] }
+  ): Promise<InstanceSpecificationResponse> {
+    return request<InstanceSpecificationResponse>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/specifications`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  getLocationSpecifications(
+    siteId: string,
+    locationId: string
+  ): Promise<InstanceSpecificationResponse> {
+    return request<InstanceSpecificationResponse>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/specifications`
+    );
+  },
+
+  updateLocationSpecifications(
+    siteId: string,
+    locationId: string,
+    payload: { classstructure_id?: string | null; specs?: SpecValueItem[] }
+  ): Promise<InstanceSpecificationResponse> {
+    return request<InstanceSpecificationResponse>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/specifications`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  // ---- Master Attribute Catalog (ASSETATTRIBUTE Dictionary) ------------------
+
+  listMasterAttributes(params?: {
+    org_id?: string;
+    site_id?: string;
+    data_type?: string;
+    status?: string;
+    search?: string;
+  }): Promise<AssetAttribute[]> {
+    const sp = new URLSearchParams();
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.data_type) sp.set('data_type', params.data_type);
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<AssetAttribute[]>(`/attributes${qs ? `?${qs}` : ''}`);
+  },
+
+  getMasterAttribute(attributeId: string): Promise<AssetAttribute> {
+    return request<AssetAttribute>(`/attributes/${encodeURIComponent(attributeId)}`);
+  },
+
+  createMasterAttribute(
+    input: Partial<AssetAttribute> & { attribute_id: string; description: string }
+  ): Promise<AssetAttribute> {
+    return request<AssetAttribute>('/attributes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateMasterAttribute(
+    attributeId: string,
+    input: Partial<AssetAttribute>
+  ): Promise<AssetAttribute> {
+    return request<AssetAttribute>(`/attributes/${encodeURIComponent(attributeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteMasterAttribute(attributeId: string): Promise<void> {
+    return request<void>(`/attributes/${encodeURIComponent(attributeId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  searchAttributeInstances(
+    attributeId: string,
+    params?: {
+      min_num?: number;
+      max_num?: number;
+      aln_match?: string;
+      exact_aln?: string;
+      site_id?: string;
+      entity_type?: 'ASSET' | 'LOCATION' | 'ALL';
+    }
+  ): Promise<AttributeInstancesSearchResult> {
+    const sp = new URLSearchParams();
+    if (params?.min_num !== undefined) sp.set('min_num', String(params.min_num));
+    if (params?.max_num !== undefined) sp.set('max_num', String(params.max_num));
+    if (params?.aln_match) sp.set('aln_match', params.aln_match);
+    if (params?.exact_aln) sp.set('exact_aln', params.exact_aln);
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.entity_type) sp.set('entity_type', params.entity_type);
+    const qs = sp.toString();
+    return request<AttributeInstancesSearchResult>(
+      `/attributes/${encodeURIComponent(attributeId)}/instances${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  // ==========================================================================
+  // Meters & Condition Monitoring API (METER, METERGROUP, MEASUREPOINT)
+  // ==========================================================================
+
+  listMeters(params?: {
+    meter_type?: string;
+    status?: string;
+    search?: string;
+    org_id?: string;
+    site_id?: string;
+  }): Promise<Meter[]> {
+    const sp = new URLSearchParams();
+    if (params?.meter_type) sp.set('meter_type', params.meter_type);
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    if (params?.org_id) sp.set('org_id', params.org_id);
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    const qs = sp.toString();
+    return request<Meter[]>(`/meters${qs ? `?${qs}` : ''}`);
+  },
+
+  getMeter(meterId: string): Promise<Meter> {
+    return request<Meter>(`/meters/${encodeURIComponent(meterId)}`);
+  },
+
+  createMeter(input: Partial<Meter> & { meter_id: string; description: string }): Promise<Meter> {
+    return request<Meter>('/meters', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateMeter(meterId: string, input: Partial<Meter>): Promise<Meter> {
+    return request<Meter>(`/meters/${encodeURIComponent(meterId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteMeter(meterId: string): Promise<void> {
+    return request<void>(`/meters/${encodeURIComponent(meterId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ---- Meter Groups ----
+
+  listMeterGroups(params?: { status?: string; search?: string }): Promise<MeterGroup[]> {
+    const sp = new URLSearchParams();
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<MeterGroup[]>(`/meter-groups${qs ? `?${qs}` : ''}`);
+  },
+
+  getMeterGroup(groupId: string): Promise<MeterGroup> {
+    return request<MeterGroup>(`/meter-groups/${encodeURIComponent(groupId)}`);
+  },
+
+  createMeterGroup(
+    input: Partial<MeterGroup> & { group_id: string; description: string; meters?: any[] }
+  ): Promise<MeterGroup> {
+    return request<MeterGroup>('/meter-groups', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  addMeterToGroup(groupId: string, input: Partial<MeterInGroup> & { meter_id: string }): Promise<MeterGroup> {
+    return request<MeterGroup>(`/meter-groups/${encodeURIComponent(groupId)}/meters`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  removeMeterFromGroup(groupId: string, meterId: string): Promise<void> {
+    return request<void>(
+      `/meter-groups/${encodeURIComponent(groupId)}/meters/${encodeURIComponent(meterId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  deleteMeterGroup(groupId: string): Promise<void> {
+    return request<void>(`/meter-groups/${encodeURIComponent(groupId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ---- Asset & Location Meters & Readings ----
+
+  getAssetMeters(siteId: string, assetId: string): Promise<{ site_id: string; asset_id: string; asset_name: string; meters: AssetMeter[] }> {
+    return request<{ site_id: string; asset_id: string; asset_name: string; meters: AssetMeter[] }>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters`
+    );
+  },
+
+  attachMeterToAsset(
+    siteId: string,
+    assetId: string,
+    input: { meter_id?: string; group_id?: string; rollover_point?: number; initial_reading?: number; initial_reading_aln?: string; avg_calc_method?: string }
+  ): Promise<{ site_id: string; asset_id: string; asset_name: string; meters: AssetMeter[] }> {
+    return request<{ site_id: string; asset_id: string; asset_name: string; meters: AssetMeter[] }>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  recordAssetMeterReading(
+    siteId: string,
+    assetId: string,
+    meterId: string,
+    input: { reading_value?: number; reading_aln?: string; reading_date?: string; inspector_id?: string; workorder_id?: string; remarks?: string; is_rollover_manual?: boolean }
+  ): Promise<MeterReadingResponse> {
+    return request<MeterReadingResponse>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters/${encodeURIComponent(meterId)}/readings`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  resetAssetMeter(
+    siteId: string,
+    assetId: string,
+    meterId: string,
+    input: { reset_type: 'OVERHAUL' | 'REPAIR' | 'REPLACE_METER'; new_initial_reading?: number; rollover_point?: number; remarks?: string }
+  ): Promise<AssetMeter> {
+    return request<AssetMeter>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters/${encodeURIComponent(meterId)}/reset`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  getAssetMeterReadings(siteId: string, assetId: string, meterId: string, limit: number = 50): Promise<MeterReading[]> {
+    return request<MeterReading[]>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters/${encodeURIComponent(meterId)}/readings?limit=${limit}`
+    );
+  },
+
+  detachMeterFromAsset(siteId: string, assetId: string, meterId: string): Promise<void> {
+    return request<void>(
+      `/assets/${encodeURIComponent(siteId)}/${encodeURIComponent(assetId)}/meters/${encodeURIComponent(meterId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  getLocationMeters(siteId: string, locationId: string): Promise<{ site_id: string; location_id: string; location_description?: string; meters: LocationMeter[] }> {
+    return request<{ site_id: string; location_id: string; location_description?: string; meters: LocationMeter[] }>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/meters`
+    );
+  },
+
+  attachMeterToLocation(
+    siteId: string,
+    locationId: string,
+    input: { meter_id?: string; group_id?: string; rollover_point?: number; initial_reading?: number; initial_reading_aln?: string; avg_calc_method?: string }
+  ): Promise<{ site_id: string; location_id: string; location_description?: string; meters: LocationMeter[] }> {
+    return request<{ site_id: string; location_id: string; location_description?: string; meters: LocationMeter[] }>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/meters`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  recordLocationMeterReading(
+    siteId: string,
+    locationId: string,
+    meterId: string,
+    input: { reading_value?: number; reading_aln?: string; reading_date?: string; inspector_id?: string; remarks?: string }
+  ): Promise<{ reading: MeterReading; location_meter: LocationMeter }> {
+    return request<{ reading: MeterReading; location_meter: LocationMeter }>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/meters/${encodeURIComponent(meterId)}/readings`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  detachMeterFromLocation(siteId: string, locationId: string, meterId: string): Promise<void> {
+    return request<void>(
+      `/locations/${encodeURIComponent(siteId)}/${encodeURIComponent(locationId)}/meters/${encodeURIComponent(meterId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  // ---- Condition Monitoring / Measure Points ----
+
+  listMeasurePoints(params?: {
+    site_id?: string;
+    asset_id?: string;
+    location_id?: string;
+    status?: string;
+    search?: string;
+  }): Promise<MeasurePoint[]> {
+    const sp = new URLSearchParams();
+    if (params?.site_id) sp.set('site_id', params.site_id);
+    if (params?.asset_id) sp.set('asset_id', params.asset_id);
+    if (params?.location_id) sp.set('location_id', params.location_id);
+    if (params?.status) sp.set('status', params.status);
+    if (params?.search) sp.set('search', params.search);
+    const qs = sp.toString();
+    return request<MeasurePoint[]>(`/measure-points${qs ? `?${qs}` : ''}`);
+  },
+
+  getMeasurePoint(pointId: string): Promise<MeasurePoint> {
+    return request<MeasurePoint>(`/measure-points/${encodeURIComponent(pointId)}`);
+  },
+
+  createMeasurePoint(input: Partial<MeasurePoint> & { point_id: string; description: string; site_id: string; meter_id: string }): Promise<MeasurePoint> {
+    return request<MeasurePoint>('/measure-points', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateMeasurePoint(pointId: string, input: Partial<MeasurePoint>): Promise<MeasurePoint> {
+    return request<MeasurePoint>(`/measure-points/${encodeURIComponent(pointId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteMeasurePoint(pointId: string): Promise<void> {
+    return request<void>(`/measure-points/${encodeURIComponent(pointId)}`, {
+      method: 'DELETE',
+    });
+  },
 };
+
+export const apiClient = api;

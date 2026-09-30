@@ -78,7 +78,7 @@ def resolve_workflow_role(
     check_time: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """
-    Resolves a WorkflowRole dynamically based on its Maximo-aligned configuration.
+    Resolves a WorkflowRole dynamically based on its Enterprise-aligned configuration.
     """
     role = db.query(WorkflowRole).filter(WorkflowRole.id == role_id).first()
     if not role:

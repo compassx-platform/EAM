@@ -370,14 +370,14 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
   };
 
   const isValidConnection = useCallback((connection: Connection | Edge) => {
-    // 1. Maximo constraint: Cannot connect a node to itself directly
+    // 1. Enterprise constraint: Cannot connect a node to itself directly
     if (connection.source === connection.target) return false;
 
-    // 2. Maximo constraint: Start node cannot receive incoming connections
+    // 2. Enterprise constraint: Start node cannot receive incoming connections
     const targetNode = nodesRef.current.find((n) => n.id === connection.target || n.data?.label === connection.target);
     if (targetNode?.data?.kind === 'start') return false;
 
-    // 3. Maximo constraint: Stop / End node cannot have outgoing connections
+    // 3. Enterprise constraint: Stop / End node cannot have outgoing connections
     const sourceNode = nodesRef.current.find((n) => n.id === connection.source || n.data?.label === connection.source);
     if (isStopKind(sourceNode?.data?.kind) || sourceNode?.data?.terminal) return false;
 
@@ -407,7 +407,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         sourceHandle = defaultEvent;
       }
 
-      // Maximo Condition / Router constraint: Strictly ONE connection per branch (TRUE / FALSE)
+      // Enterprise Condition / Router constraint: Strictly ONE connection per branch (TRUE / FALSE)
       const existingBranchEdge = edgesRef.current.find(
         (e) =>
           (e.source === connection.source || e.source === sourceNode?.id || e.source === sourceNode?.data?.label) &&
@@ -432,7 +432,7 @@ function BuilderInner({ workflowId, onBack, onListRefresh }: BuilderInnerProps) 
         return;
       }
     } else if (isSingleOut) {
-      // Maximo Single-Outgoing constraint (Start, Action, Wait, Interaction, Subprocess): Strictly ONE outgoing connection
+      // Enterprise Single-Outgoing constraint (Start, Action, Wait, Interaction, Subprocess): Strictly ONE outgoing connection
       const existingOutgoing = edgesRef.current.filter(
         (e) => e.source === connection.source || e.source === sourceNode?.id || e.source === sourceNode?.data?.label
       );

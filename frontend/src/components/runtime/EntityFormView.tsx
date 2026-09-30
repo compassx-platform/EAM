@@ -708,7 +708,7 @@ export function EntityFormView({
 
   const autoSwitchedKeyRef = useRef<string | null>(null);
 
-  // Maximo-aligned Interaction Node auto-tab switching (runs once on stage entry)
+  // Enterprise-grade Interaction Node auto-tab switching (runs once on stage entry)
   useEffect(() => {
     if (!isInteractionState || visibleTabs.length === 0) return;
     const currentStageKey = currentEntity ? `${currentEntity.id}:${currentStage || currentEntity.status}` : null;
@@ -1155,7 +1155,7 @@ export function EntityFormView({
                     </span>
                   </div>
                   <span className="text-[11px] text-sky-600/90 font-medium hidden sm:inline">
-                    Maximo Interaction Dialog Step
+                    Interaction Dialog Step
                   </span>
                 </div>
 
@@ -1344,7 +1344,7 @@ export function EntityFormView({
                       <span>Check Escalations</span>
                     </button>
                     <span className="text-[11px] text-gray-400 hidden sm:inline">
-                      Maximo-aligned escalation & delegation engine
+                      Enterprise-grade escalation & delegation engine
                     </span>
                   </div>
                 </div>

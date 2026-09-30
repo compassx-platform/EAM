@@ -46,9 +46,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ onSelectGroup }) => {
   };
 
   return (
-    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-slate-50/50">
+    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-white">
       {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200/80 bg-white px-6 py-4 shrink-0 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3.5 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-700 border border-gray-200/80 shadow-2xs">
             <Layers className="h-5 w-5 text-gray-700" />
@@ -56,7 +56,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ onSelectGroup }) => {
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-base font-bold text-gray-900 tracking-tight">Person Groups</h1>
-              <InfoTooltip text="Person Groups modeled after IBM Maximo PERSONGROUP. Used for work routing, crew assignments, and multi-tier approval escalations." />
+              <InfoTooltip text="Person Groups modeled after PERSONGROUP. Used for work routing, crew assignments, and multi-tier approval escalations." />
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
               {groups.length} {groups.length === 1 ? 'group' : 'groups'} defined · Master data system of record

@@ -50,7 +50,7 @@ def seed_default_escalations(db: Session) -> None:
                         {
                             "action_type": "TRANSITION_WORKFLOW",
                             "event_type": "EXPIRED",
-                            "reason": "Permit auto-expired past authorized expiry date (Maximo Escalation Engine)"
+                            "reason": "Permit auto-expired past authorized expiry date (Enterprise Escalation Engine)"
                         },
                         {
                             "action_type": "SEND_NOTIFICATION",

@@ -66,9 +66,9 @@ export const RolesView: React.FC<RolesViewProps> = ({ onSelectRole }) => {
   };
 
   return (
-    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-slate-50/50">
+    <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-white">
       {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200/80 bg-white px-6 py-4 shrink-0 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3.5 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-700 border border-gray-200/80 shadow-2xs">
             <UserCheck className="h-5 w-5 text-gray-700" />
@@ -76,7 +76,7 @@ export const RolesView: React.FC<RolesViewProps> = ({ onSelectRole }) => {
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-base font-bold text-gray-900 tracking-tight">Roles & Routing</h1>
-              <InfoTooltip text="Dynamic recipient resolvers modeled after IBM Maximo MAXROLE. Roles decouple workflow assignments and tasks from hardcoded persons, dynamically evaluating recipients via Persons, Person Groups, or Record Attributes with calendar availability and delegation awareness." />
+              <InfoTooltip text="Dynamic recipient resolvers modeled after Dynamic Role. Roles decouple workflow assignments and tasks from hardcoded persons, dynamically evaluating recipients via Persons, Person Groups, or Record Attributes with calendar availability and delegation awareness." />
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
               {total} dynamic {total === 1 ? 'role' : 'roles'} configured · Task assignment & notification engine

@@ -5,7 +5,7 @@ from backend.models.base import utc_now
 
 
 class WorkflowRole(Base):
-    """Dynamic recipient resolver (IBM Maximo MAXROLE analogue).
+    """Dynamic recipient resolver (Enterprise EAM MAXROLE analogue).
 
     Used primarily by Workflow Task Nodes, Escalations, and Communication
     Actions to dynamically determine assignees/recipients at runtime.

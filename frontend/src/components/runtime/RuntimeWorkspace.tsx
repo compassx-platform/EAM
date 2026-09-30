@@ -68,14 +68,14 @@ export function RuntimeWorkspace() {
   return (
     <div className="flex h-full w-full min-h-0 overflow-hidden">
       {/* Master sidebar: every entity type */}
-      <aside className="flex w-60 shrink-0 flex-col min-h-0 overflow-y-auto border-r border-gray-200/80 bg-slate-50/70">
-        <div className="border-b border-gray-100 px-4 py-4">
-          <h2 className="flex items-center gap-2 text-sm font-bold text-gray-900">
+      <aside className="flex w-52 shrink-0 flex-col min-h-0 overflow-y-auto border-r border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-4 py-3.5">
+          <h2 className="flex items-center gap-2 text-xs font-semibold text-gray-900">
             <Layers className="h-4 w-4 text-gray-500" />
             <span>Records</span>
           </h2>
           <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
-            Create records and drive them through their workflows.
+            Create records and drive them through workflows.
           </p>
         </div>
 
@@ -91,13 +91,13 @@ export function RuntimeWorkspace() {
                 key={t.name}
                 type="button"
                 onClick={() => navigate('/records', { type: t.name })}
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
+                className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
                   isActive
-                    ? 'border border-gray-200/80 bg-white font-semibold text-gray-900 shadow-2xs'
-                    : 'border border-transparent font-medium text-gray-600 hover:bg-white/70 hover:text-gray-900'
+                    ? 'bg-[#E8F1FC] font-semibold text-[#0B5CAD]'
+                    : 'font-normal text-gray-700 hover:bg-gray-100/70 hover:text-gray-900'
                 }`}
               >
-                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-gray-700' : 'text-gray-400'}`} />
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-[#0B5CAD]' : 'text-gray-500'}`} />
                 <span className="truncate">{t.display_name || t.name}</span>
                 {!isActive && typeof t.record_count === 'number' && t.record_count > 0 && (
                   <span className="ml-auto shrink-0 font-mono text-[10px] text-gray-400">

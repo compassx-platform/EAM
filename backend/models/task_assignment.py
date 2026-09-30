@@ -5,7 +5,7 @@ from backend.models.base import generate_uuid, utc_now
 
 
 class TaskAssignment(Base):
-    """Runtime task assignment for workflow task nodes (IBM Maximo WFTASK / ASSIGNMENT analogue)."""
+    """Runtime task assignment for workflow task nodes (Enterprise EAM WFTASK / ASSIGNMENT analogue)."""
     __tablename__ = "task_assignment"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)

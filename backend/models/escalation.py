@@ -5,7 +5,7 @@ from backend.models.base import generate_uuid, utc_now
 
 class EscalationDefinition(Base):
     """
-    Enterprise Escalation Definition (IBM Maximo Escalation Architecture).
+    Enterprise Escalation Definition (Enterprise EAM Escalation Architecture).
     Allows defining autonomous background watchdogs, SLA timers, date monitors,
     and automated workflow transitions / notifications across any entity type.
     """

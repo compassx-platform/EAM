@@ -1,6 +1,6 @@
 """0003_person_module
 
-Person and Person Group master identity tables (IBM Maximo PERSON & PERSONGROUP analogue).
+Person and Person Group master identity tables (Enterprise EAM PERSON & PERSONGROUP analogue).
 
 Revision ID: 0003_person_module
 Revises: 0002_condition_registry

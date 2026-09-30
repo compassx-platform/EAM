@@ -305,7 +305,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ roleId = 'new', onBack }
               <div className="flex items-center gap-1.5">
                 <Shield className="h-4 w-4 text-gray-700" />
                 <h2 className="text-xs font-bold uppercase tracking-wider text-gray-700">Role Identity</h2>
-                <InfoTooltip text="Unique identifier and display label for the role. Role IDs are capitalized according to IBM Maximo standards (e.g. ROLE_SUPERVISOR)." />
+                <InfoTooltip text="Unique identifier and display label for the role. Role IDs are capitalized according to Enterprise standards (e.g. ROLE_SUPERVISOR)." />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -510,7 +510,7 @@ export const RoleEditor: React.FC<RoleEditorProps> = ({ roleId = 'new', onBack }
               <div className="flex items-center gap-1.5">
                 <Sparkles className="h-4 w-4 text-gray-700" />
                 <h2 className="text-xs font-bold uppercase tracking-wider text-gray-700">
-                  Live Maximo Resolution
+                  Live Role Resolution
                 </h2>
                 <InfoTooltip text="Simulates real-time role resolution against live People, Person Groups, active calendar availability overlays, and delegation rules." />
               </div>

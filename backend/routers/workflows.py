@@ -247,7 +247,7 @@ def deprecate_workflow(id: str, db: Session = Depends(get_db)):
 @router.delete("/{id}")
 def delete_workflow(id: str, db: Session = Depends(get_db)):
     """
-    Deletes a workflow definition draft (Maximo governance: only unreferenced drafts can be hard deleted).
+    Deletes a workflow definition draft (Enterprise governance: only unreferenced drafts can be hard deleted).
     Published workflows or workflows with active bound entity records must be deprecated instead.
     """
     wf = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == id).first()
