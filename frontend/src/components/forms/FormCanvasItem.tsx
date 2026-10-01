@@ -14,6 +14,7 @@ import {
   Info,
   ChevronDown,
   Database,
+  Folder,
 } from 'lucide-react';
 import type {
   EntityFormItem,
@@ -300,6 +301,9 @@ function ControlPreviewWidget({
 
   // 1. File Upload Dropzone
   if (type === 'file' || (type as string) === 'file_attachment' || (type as string) === 'attachment') {
+    const allowDevice = item.allowDeviceUpload ?? item.allow_device_upload ?? true;
+    const allowDoc = item.allowDocModule ?? item.allow_doc_module ?? true;
+
     return (
       <div
         onClick={(e) => e.stopPropagation()}
@@ -307,9 +311,22 @@ function ControlPreviewWidget({
       >
         <div className="flex items-center justify-center gap-1.5 text-xs text-gray-700 font-medium">
           <Paperclip className="h-3.5 w-3.5 text-gray-400" />
-          <span className="truncate">{item.placeholder || 'Click to browse or drop files'}</span>
+          <span className="truncate">
+            {item.placeholder || (allowDevice && allowDoc ? 'Upload from device or attach from Documents' : allowDoc ? 'Attach from Document Library' : 'Click to browse or drop files')}
+          </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
+          {allowDevice && (
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-[9px] text-gray-600">
+              Device
+            </span>
+          )}
+          {allowDoc && (
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-[9px] text-gray-600 flex items-center gap-0.5">
+              <Folder className="h-2.5 w-2.5 text-gray-500" />
+              Doc Library
+            </span>
+          )}
           {item.accept && (
             <span className="rounded bg-gray-200/80 px-1.5 py-0.5 font-mono text-[9px] text-gray-600">
               {item.accept}

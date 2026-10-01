@@ -85,6 +85,7 @@ def ensure_schema_compatibility(db: Session) -> None:
     _ensure_column(db, "class_spec", "apply_down_hierarchy", "apply_down_hierarchy BOOLEAN DEFAULT 1")
     _ensure_column(db, "asset_spec", "section", "section VARCHAR(100)")
     _ensure_column(db, "location_spec", "section", "section VARCHAR(100)")
+    _ensure_column(db, "doc_folder", "parent_id", "parent_id VARCHAR(36)")
 
 
 def seed_default_organizations(db: Session) -> None:
@@ -1382,7 +1383,14 @@ def seed_default_meters(db: Session) -> None:
 
 
 def seed_default_document_folders(db: Session) -> None:
-    """Seeds default document folder categories (Attachments, Manuals, Drawings, Certificates, Invoices, Photos)."""
+    """Seeds default document folder categories (Attachments, Manuals, Drawings, Certificates, Invoices, Photos) only when no volume is configured."""
+    try:
+        from backend.models.system_setting import SystemSetting
+        setting = db.query(SystemSetting).filter(SystemSetting.key == "storage_config").first()
+        if setting and isinstance(setting.value, dict) and setting.value.get("volume_id"):
+            return
+    except Exception:
+        pass
     from backend.services.doc_management_service import doc_management_service
     doc_management_service.seed_default_folders(db)
 

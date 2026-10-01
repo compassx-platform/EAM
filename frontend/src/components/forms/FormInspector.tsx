@@ -17,6 +17,7 @@ import {
   Paperclip,
   Settings2,
   Table2,
+  Folder,
 } from 'lucide-react';
 import type {
   EntityFormItem,
@@ -25,7 +26,9 @@ import type {
   ResolvedList,
   ChecklistItem,
   ConditionDefinition,
+  DocFolder,
 } from '../../types';
+import { listDocumentFolders } from '../../api/documents';
 import { FormConditionSelector } from './FormConditionSelector';
 
 interface FormInspectorProps {
@@ -661,6 +664,9 @@ function FileUploadRulesModal({
   maxFileSizeMb,
   allowMultiple,
   maxFiles,
+  allowDeviceUpload = true,
+  allowDocModule = true,
+  docFolderFilter = null,
   anchorY,
   onSave,
   onClose,
@@ -670,12 +676,36 @@ function FileUploadRulesModal({
   maxFileSizeMb?: number;
   allowMultiple?: boolean;
   maxFiles?: number;
+  allowDeviceUpload?: boolean;
+  allowDocModule?: boolean;
+  docFolderFilter?: string | null;
   anchorY?: number | null;
-  onSave: (patch: { accept?: string; maxFileSizeMb?: number; allowMultiple?: boolean; maxFiles?: number }) => void;
+  onSave: (patch: {
+    accept?: string;
+    maxFileSizeMb?: number;
+    allowMultiple?: boolean;
+    maxFiles?: number;
+    allowDeviceUpload?: boolean;
+    allowDocModule?: boolean;
+    docFolderFilter?: string | null;
+  }) => void;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const { top, arrowTop } = computeAnchoredDialogStyle(anchorY, 460);
+  const { top, arrowTop } = computeAnchoredDialogStyle(anchorY, 520);
+  const [folders, setFolders] = useState<DocFolder[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    listDocumentFolders()
+      .then((data) => {
+        if (active) setFolders(data);
+      })
+      .catch((e) => console.warn('Could not load folders for file upload rules:', e));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -826,6 +856,65 @@ function FileUploadRulesModal({
               }}
               className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
             />
+          </div>
+        )}
+
+        {/* Attachment Sources: Device & Document Module */}
+        <div className="space-y-2 border-t border-gray-100 pt-3">
+          <label className="text-xs font-semibold text-gray-700">Allowed Attachment Sources</label>
+          <div className="space-y-1.5">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-2.5 hover:bg-gray-100/60 transition-colors">
+              <input
+                type="checkbox"
+                checked={allowDeviceUpload}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  if (!next && !allowDocModule) return; // Must keep at least one source
+                  onSave({ allowDeviceUpload: next });
+                }}
+                className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+              />
+              <div className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-gray-800">Local Device Upload</span>
+                <span className="block text-[11px] text-gray-500">Users can drag & drop or browse files from their local device</span>
+              </div>
+            </label>
+
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/60 p-2.5 hover:bg-gray-100/60 transition-colors">
+              <input
+                type="checkbox"
+                checked={allowDocModule}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  if (!next && !allowDeviceUpload) return; // Must keep at least one source
+                  onSave({ allowDocModule: next });
+                }}
+                className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+              />
+              <div className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-gray-800">Attach from Document Module</span>
+                <span className="block text-[11px] text-gray-500">Users can select stored documents from CompassX storage</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {allowDocModule && folders.length > 0 && (
+          <div className="space-y-1.5 pl-6">
+            <label className="text-xs font-semibold text-gray-700">Initial Document Folder (Optional)</label>
+            <select
+              value={docFolderFilter || ''}
+              onChange={(e) => onSave({ docFolderFilter: e.target.value || null })}
+              className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">All folders (unrestricted)</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.folder_name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-400">Pre-selects this folder when opening the document picker modal.</p>
           </div>
         )}
       </div>
@@ -1811,16 +1900,32 @@ export function FormInspector({
               </button>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-gray-600 px-1 py-0.5">
-              <span className="truncate font-mono text-[11px]">
-                {selectedItem.accept ? selectedItem.accept : 'All file types'}
-              </span>
-              <span className="shrink-0 font-medium text-[10px] text-gray-400">
-                {selectedItem.maxFileSizeMb ?? 10}MB{' '}
-                {selectedItem.allowMultiple
-                  ? `• up to ${selectedItem.maxFiles ?? 5}`
-                  : '• single'}
-              </span>
+            <div className="flex flex-col gap-1 text-xs text-gray-600 px-1 py-0.5">
+              <div className="flex items-center justify-between">
+                <span className="truncate font-mono text-[11px]">
+                  {selectedItem.accept ? selectedItem.accept : 'All file types'}
+                </span>
+                <span className="shrink-0 font-medium text-[10px] text-gray-400">
+                  {selectedItem.maxFileSizeMb ?? 10}MB{' '}
+                  {selectedItem.allowMultiple
+                    ? `• up to ${selectedItem.maxFiles ?? 5}`
+                    : '• single'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] text-gray-400">Sources:</span>
+                {(selectedItem.allowDeviceUpload ?? selectedItem.allow_device_upload ?? true) && (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-[10px] text-gray-700">
+                    Device
+                  </span>
+                )}
+                {(selectedItem.allowDocModule ?? selectedItem.allow_doc_module ?? true) && (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-[10px] text-gray-700 flex items-center gap-1">
+                    <Folder className="h-2.5 w-2.5 text-gray-500" />
+                    Doc Library
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1929,6 +2034,9 @@ export function FormInspector({
           maxFileSizeMb={selectedItem.maxFileSizeMb}
           allowMultiple={selectedItem.allowMultiple}
           maxFiles={selectedItem.maxFiles}
+          allowDeviceUpload={selectedItem.allowDeviceUpload ?? selectedItem.allow_device_upload ?? true}
+          allowDocModule={selectedItem.allowDocModule ?? selectedItem.allow_doc_module ?? true}
+          docFolderFilter={selectedItem.docFolderFilter ?? selectedItem.doc_folder_filter ?? null}
           anchorY={modalAnchorY}
           onSave={(patch) => onPatchItem(selectedItem.i, patch)}
           onClose={() => setActiveModal(null)}

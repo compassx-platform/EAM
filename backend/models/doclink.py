@@ -15,7 +15,8 @@ class DocFolder(Base):
     __tablename__ = "doc_folder"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    folder_name = Column(String(50), unique=True, nullable=False, index=True)  # e.g. ATTACHMENTS, MANUALS, DRAWINGS
+    folder_name = Column(String(100), nullable=False, index=True)  # e.g. ATTACHMENTS, MANUALS, DRAWINGS, SUBFOLDER
+    parent_id = Column(String(36), ForeignKey("doc_folder.id", ondelete="CASCADE"), nullable=True, index=True)
     description = Column(String(255), nullable=True)
     volume_id = Column(String(36), nullable=True, index=True)  # Target CompassX Volume UUID
     default_sub_path = Column(String(255), default="", nullable=False)  # e.g. eam/attachments
@@ -27,6 +28,14 @@ class DocFolder(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
+    parent = relationship("DocFolder", remote_side=[id], back_populates="subfolders", foreign_keys=[parent_id])
+    subfolders = relationship(
+        "DocFolder",
+        cascade="all, delete-orphan",
+        back_populates="parent",
+        foreign_keys=[parent_id],
+        lazy="selectin",
+    )
     documents = relationship("DocInfo", back_populates="folder", cascade="all, delete-orphan", lazy="selectin")
     app_mappings = relationship("DocAppFolder", back_populates="folder", cascade="all, delete-orphan", lazy="selectin")
 
@@ -34,6 +43,7 @@ class DocFolder(Base):
         return {
             "id": self.id,
             "folder_name": self.folder_name,
+            "parent_id": self.parent_id,
             "description": self.description,
             "volume_id": self.volume_id,
             "default_sub_path": self.default_sub_path,
@@ -42,6 +52,7 @@ class DocFolder(Base):
             "is_active": self.is_active,
             "default_print_thru_vendor": self.default_print_thru_vendor,
             "document_count": len(self.documents) if self.documents else 0 if include_counts else None,
+            "subfolder_count": len(self.subfolders) if self.subfolders else 0 if include_counts else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

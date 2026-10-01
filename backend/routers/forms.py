@@ -111,6 +111,12 @@ class FormItem(BaseModel):
     allowMultiple: Optional[bool] = None
     max_files: Optional[int] = None
     maxFiles: Optional[int] = None
+    allow_device_upload: Optional[bool] = None
+    allowDeviceUpload: Optional[bool] = None
+    allow_doc_module: Optional[bool] = None
+    allowDocModule: Optional[bool] = None
+    doc_folder_filter: Optional[str] = None
+    docFolderFilter: Optional[str] = None
     model_config = ConfigDict(extra="allow")
 
 class EntityFormRequest(BaseModel):
@@ -347,6 +353,12 @@ def create_or_update_form(req: EntityFormRequest, db: Session = Depends(get_db))
                 "allowMultiple": bool(item.allow_multiple or item.allowMultiple),
                 "max_files": item.max_files or item.maxFiles or None,
                 "maxFiles": item.max_files or item.maxFiles or None,
+                "allow_device_upload": bool(item.allow_device_upload if item.allow_device_upload is not None else (item.allowDeviceUpload if item.allowDeviceUpload is not None else True)),
+                "allowDeviceUpload": bool(item.allow_device_upload if item.allow_device_upload is not None else (item.allowDeviceUpload if item.allowDeviceUpload is not None else True)),
+                "allow_doc_module": bool(item.allow_doc_module if item.allow_doc_module is not None else (item.allowDocModule if item.allowDocModule is not None else True)),
+                "allowDocModule": bool(item.allow_doc_module if item.allow_doc_module is not None else (item.allowDocModule if item.allowDocModule is not None else True)),
+                "doc_folder_filter": (item.doc_folder_filter or item.docFolderFilter or "").strip() or None,
+                "docFolderFilter": (item.doc_folder_filter or item.docFolderFilter or "").strip() or None,
             })
             continue
 

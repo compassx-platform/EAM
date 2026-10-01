@@ -33,9 +33,12 @@ class Settings(BaseSettings):
     # Auto-expiry interval seconds for background worker (if running)
     EXPIRY_CHECK_INTERVAL_SECONDS: int = 5
     
-    # CompassX Volume & Storage Catalog Configuration (Dynamic per Browser/Request Origin)
+    # CompassX Platform REST API Connection (Catalog, Storage, Compute)
+    COMPASSX_BACKEND_URL: str = "http://compassx-backend.compassx.svc.cluster.local:8000"
+    WORKSPACE_ID: str = ""
+    COMPASSX_WORKLOAD_IDENTITY: str = ""
     COMPASSX_CATALOG_URL: str = ""
-    COMPASSX_CATALOG_TOKEN: str = "compassx-default-token-2026"
+    COMPASSX_CATALOG_TOKEN: str = ""
     COMPASSX_DEFAULT_CATALOG: str = "eam_catalog"
     COMPASSX_DEFAULT_SCHEMA: str = "documents_schema"
     COMPASSX_DEFAULT_VOLUME_NAME: str = "eam_documents_volume"

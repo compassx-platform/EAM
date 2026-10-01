@@ -91,7 +91,7 @@ export function SystemSettingsModal({
                 }`}
               >
                 <HardDrive className={`h-4 w-4 ${activeTab === 'storage' ? 'text-blue-600' : 'text-gray-500'}`} />
-                <span>Storage & Volumes</span>
+                <span>Document Storage</span>
               </button>
 
               <button

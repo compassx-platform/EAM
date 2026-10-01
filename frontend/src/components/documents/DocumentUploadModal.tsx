@@ -18,6 +18,8 @@ interface DocumentUploadModalProps {
   onClose: () => void;
   folders: DocFolder[];
   selectedFolderId?: string | null;
+  volumeId?: string | null;
+  initialMode?: 'upload' | 'url';
   onSuccess: (doc: DocInfo) => void;
 }
 
@@ -26,12 +28,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onClose,
   folders,
   selectedFolderId,
+  volumeId,
+  initialMode = 'upload',
   onSuccess,
 }) => {
-  const [mode, setMode] = useState<'upload' | 'url'>('upload');
+  const [mode, setMode] = useState<'upload' | 'url'>(initialMode);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [folderId, setFolderId] = useState<string>(selectedFolderId || (folders[0]?.id ?? ''));
+  const [folderId, setFolderId] = useState<string>(selectedFolderId || '');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [url, setUrl] = useState('');
@@ -40,6 +44,20 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      setFolderId(selectedFolderId || '');
+      setSelectedFile(null);
+      setTitle('');
+      setDescription('');
+      setUrl('');
+      setTagsInput('');
+      setVersion('1.0');
+      setError(null);
+    }
+  }, [isOpen, selectedFolderId, folders, initialMode]);
 
   if (!isOpen) return null;
 
@@ -97,6 +115,16 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         if (tagsInput.trim()) formData.append('tags', tagsInput.trim());
         if (version.trim()) formData.append('version', version.trim());
         formData.append('created_by', 'current_user');
+
+        const selectedFolder = folders.find((f) => f.id === folderId);
+        const effectiveVol = selectedFolder?.volume_id || volumeId;
+        if (effectiveVol) {
+          formData.append('volume_id', effectiveVol);
+        }
+        const effectiveSubPath = selectedFolder?.default_sub_path || selectedFolder?.folder_name;
+        if (effectiveSubPath) {
+          formData.append('sub_path', effectiveSubPath);
+        }
 
         const doc = await uploadDocument(formData);
         onSuccess(doc);
@@ -279,6 +307,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
                   onChange={(e) => setFolderId(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 pl-9 pr-3 py-2 text-xs text-gray-900 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-hidden bg-white"
                 >
+                  <option value="">Volume Root</option>
                   {folders.map((f) => (
                     <option key={f.id} value={f.id}>
                       {f.folder_name} {f.description ? `(${f.description})` : ''}

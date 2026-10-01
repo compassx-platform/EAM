@@ -8,7 +8,13 @@ from backend.database import get_db
 from backend.services.doc_management_service import doc_management_service
 from backend.services.compassx_volume_client import compassx_volume_client
 from backend.models.doclink import DocFolder, DocInfo
-from backend.routers.system import resolve_browser_catalog_url
+from backend.models.system_setting import SystemSetting
+from backend.routers.system import (
+    resolve_browser_catalog_url,
+    resolve_auth_token,
+    resolve_workload_identity,
+    resolve_workspace_id,
+)
 
 router = APIRouter(prefix="", tags=["Document Management (Doclinks & Volumes)"])
 
@@ -18,7 +24,8 @@ router = APIRouter(prefix="", tags=["Document Management (Doclinks & Volumes)"])
 # -----------------------------------------------------------------------------
 
 class DocFolderCreate(BaseModel):
-    folder_name: str = Field(..., description="Document folder code, e.g. ATTACHMENTS, MANUALS")
+    folder_name: str = Field(..., description="Document folder code or name, e.g. ATTACHMENTS, MANUALS, SUBFOLDER")
+    parent_id: Optional[str] = Field(None, description="Parent folder UUID for nested folder hierarchy")
     description: Optional[str] = None
     volume_id: Optional[str] = None
     default_sub_path: Optional[str] = ""
@@ -28,6 +35,8 @@ class DocFolderCreate(BaseModel):
 
 
 class DocFolderUpdate(BaseModel):
+    folder_name: Optional[str] = None
+    parent_id: Optional[str] = None
     description: Optional[str] = None
     volume_id: Optional[str] = None
     default_sub_path: Optional[str] = None
@@ -35,6 +44,14 @@ class DocFolderUpdate(BaseModel):
     max_file_size_mb: Optional[float] = None
     is_active: Optional[bool] = None
     default_print_thru_vendor: Optional[bool] = None
+
+
+class DocFolderMoveRequest(BaseModel):
+    target_parent_id: Optional[str] = None
+
+
+class DocMoveRequest(BaseModel):
+    target_folder_id: Optional[str] = None
 
 
 class DocUrlCreate(BaseModel):
@@ -63,16 +80,38 @@ class DocMetadataUpdate(BaseModel):
     updated_by: Optional[str] = "system"
 
 
-class VolumeCreateRequest(BaseModel):
-    name: str = Field(..., description="Volume name")
-    description: Optional[str] = ""
-    catalog_name: Optional[str] = "eam_catalog"
-    schema_name: Optional[str] = "documents_schema"
+def resolve_effective_volume_id(db: Session, volume_id: Optional[str] = None) -> Optional[str]:
+    """Resolves target volume ID: explicit param, active storage_config setting, or active DB volume."""
+    if volume_id is not None:
+        clean = volume_id.strip()
+        if clean.lower() == "all":
+            return None
+        if clean:
+            return clean
 
+    # 1. Check storage_config setting
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "storage_config").first()
+    if setting and isinstance(setting.value, dict) and setting.value.get("volume_id"):
+        return setting.value.get("volume_id")
 
-class DirectoryCreateRequest(BaseModel):
-    dir_name: str = Field(..., description="Directory name to create")
-    sub_path: Optional[str] = ""
+    # 2. Check active volume present in DocFolder or DocInfo
+    first_folder_vol = db.query(DocFolder.volume_id).filter(
+        DocFolder.volume_id.isnot(None),
+        DocFolder.volume_id != "",
+        DocFolder.volume_id != "__unconfigured__",
+    ).first()
+    if first_folder_vol and first_folder_vol[0]:
+        return first_folder_vol[0]
+
+    first_doc_vol = db.query(DocInfo.volume_id).filter(
+        DocInfo.volume_id.isnot(None),
+        DocInfo.volume_id != "",
+        DocInfo.volume_id != "__unconfigured__",
+    ).first()
+    if first_doc_vol and first_doc_vol[0]:
+        return first_doc_vol[0]
+
+    return None
 
 
 # -----------------------------------------------------------------------------
@@ -80,35 +119,146 @@ class DirectoryCreateRequest(BaseModel):
 # -----------------------------------------------------------------------------
 
 @router.get("/document-folders")
-def list_document_folders(
+async def list_document_folders(
+    request: Request,
     active_only: bool = Query(False, description="Filter only active folders"),
+    parent_id: Optional[str] = Query(None, description="Filter by parent folder UUID or 'root'"),
+    volume_id: Optional[str] = Query(None, description="Filter by volume ID"),
+    sync: bool = Query(True, description="Sync with volume before returning"),
     db: Session = Depends(get_db),
 ):
-    """Lists all document folder categories (Maximo DOCTYPES)."""
-    folders = doc_management_service.list_folders(db, is_active_only=active_only)
+    """Lists all document folder categories (Maximo DOCTYPES and nested folders)."""
+    filter_volume_id = resolve_effective_volume_id(db, volume_id)
+
+    if sync and filter_volume_id:
+        base_url = resolve_browser_catalog_url(request, db)
+        auth_token = resolve_auth_token(request, db)
+        workload_identity = resolve_workload_identity(request, db)
+        workspace_id = resolve_workspace_id(request, db)
+        try:
+            await doc_management_service.sync_volume_with_db(
+                db=db,
+                volume_id=filter_volume_id,
+                base_url=base_url,
+                auth_token=auth_token,
+                workload_identity=workload_identity,
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            pass
+
+    folders = doc_management_service.list_folders(
+        db,
+        is_active_only=active_only,
+        parent_id=parent_id,
+        volume_id=filter_volume_id,
+    )
     return [f.to_dict() for f in folders]
 
 
-@router.post("/document-folders", status_code=status.HTTP_201_CREATED)
-def create_document_folder(
-    payload: DocFolderCreate,
+@router.get("/document-folders/tree")
+async def get_document_folder_tree(
+    request: Request,
+    active_only: bool = Query(False, description="Filter only active folders"),
+    volume_id: Optional[str] = Query(None, description="Filter by volume ID"),
+    sync: bool = Query(True, description="Sync with volume before returning"),
     db: Session = Depends(get_db),
 ):
-    """Creates a new document folder category."""
+    """Returns the full recursive folder hierarchy tree for Databricks-style explorer."""
+    filter_volume_id = resolve_effective_volume_id(db, volume_id)
+
+    if sync and filter_volume_id:
+        base_url = resolve_browser_catalog_url(request, db)
+        auth_token = resolve_auth_token(request, db)
+        workload_identity = resolve_workload_identity(request, db)
+        workspace_id = resolve_workspace_id(request, db)
+        try:
+            await doc_management_service.sync_volume_with_db(
+                db=db,
+                volume_id=filter_volume_id,
+                base_url=base_url,
+                auth_token=auth_token,
+                workload_identity=workload_identity,
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            pass
+
+    return doc_management_service.get_folder_tree(
+        db,
+        is_active_only=active_only,
+        volume_id=filter_volume_id,
+    )
+
+
+@router.get("/document-folders/{folder_id}/path")
+def get_document_folder_path(
+    folder_id: str,
+    db: Session = Depends(get_db),
+):
+    """Returns the ordered breadcrumb path from root down to the target folder."""
+    return doc_management_service.get_folder_path(db, folder_id)
+
+
+@router.post("/document-folders", status_code=status.HTTP_201_CREATED)
+async def create_document_folder(
+    payload: DocFolderCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Creates a new document folder (root or nested subfolder) directly in CompassX volume storage."""
+    base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
     try:
-        folder = doc_management_service.create_folder(
+        folder = await doc_management_service.create_folder(
             db=db,
             folder_name=payload.folder_name,
+            parent_id=payload.parent_id,
             description=payload.description,
             volume_id=payload.volume_id,
             default_sub_path=payload.default_sub_path or "",
             allowed_extensions=payload.allowed_extensions,
             max_file_size_mb=payload.max_file_size_mb,
             default_print_thru_vendor=payload.default_print_thru_vendor,
+            base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
         )
         return folder.to_dict()
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.post("/document-folders/sync")
+@router.post("/documents/sync")
+async def sync_volume_documents(
+    request: Request,
+    volume_id: Optional[str] = Query(None, description="Volume ID to sync (defaults to active volume)"),
+    db: Session = Depends(get_db),
+):
+    """Explicitly triggers full bidirectional sync between CompassX Volume and Document module."""
+    filter_volume_id = resolve_effective_volume_id(db, volume_id)
+    if not filter_volume_id:
+        raise HTTPException(status_code=400, detail="No active CompassX Volume configured to sync.")
+
+    base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
+
+    res = await doc_management_service.sync_volume_with_db(
+        db=db,
+        volume_id=filter_volume_id,
+        base_url=base_url,
+        auth_token=auth_token,
+        workload_identity=workload_identity,
+        workspace_id=workspace_id,
+        force=True,
+    )
+    return res
 
 
 @router.get("/document-folders/{folder_id}")
@@ -134,6 +284,8 @@ def update_document_folder(
         folder = doc_management_service.update_folder(
             db=db,
             folder_id=folder_id,
+            folder_name=payload.folder_name,
+            parent_id=payload.parent_id,
             description=payload.description,
             volume_id=payload.volume_id,
             default_sub_path=payload.default_sub_path,
@@ -147,14 +299,46 @@ def update_document_folder(
         raise HTTPException(status_code=404, detail=str(err))
 
 
-@router.delete("/document-folders/{folder_id}")
-def delete_document_folder(
+@router.put("/document-folders/{folder_id}/move")
+def move_document_folder(
     folder_id: str,
+    payload: DocFolderMoveRequest,
     db: Session = Depends(get_db),
 ):
-    """Deletes a document folder category."""
+    """Moves a folder to another parent directory in the hierarchy."""
     try:
-        doc_management_service.delete_folder(db, folder_id)
+        folder = doc_management_service.move_folder(
+            db=db,
+            folder_id=folder_id,
+            target_parent_id=payload.target_parent_id,
+        )
+        return folder.to_dict()
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.delete("/document-folders/{folder_id}")
+async def delete_document_folder(
+    folder_id: str,
+    request: Request,
+    purge_storage: bool = Query(True, description="Also delete underlying directory marker from CompassX Volume"),
+    db: Session = Depends(get_db),
+):
+    """Deletes a document folder category and its nested descendants."""
+    base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
+    try:
+        await doc_management_service.delete_folder(
+            db=db,
+            folder_id=folder_id,
+            purge_storage=purge_storage,
+            base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
+        )
         return {"id": folder_id, "deleted": True}
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err))
@@ -165,18 +349,39 @@ def delete_document_folder(
 # -----------------------------------------------------------------------------
 
 @router.get("/documents")
-def list_documents(
+async def list_documents(
+    request: Request,
     folder_id: Optional[str] = Query(None, description="Filter by folder ID"),
     search: Optional[str] = Query(None, description="Keyword search in title, code, filename"),
     url_type: Optional[str] = Query(None, description="FILE or URL"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
     status: Optional[str] = Query(None, description="ACTIVE, ARCHIVED, DEPRECATED"),
-    volume_id: Optional[str] = Query(None, description="Filter by CompassX volume ID"),
+    volume_id: Optional[str] = Query(None, description="Filter by CompassX volume ID. Pass 'all' to show all volumes"),
+    sync: bool = Query(False, description="Sync with volume before returning"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     """Queries and lists registered documents with filtering and search."""
+    filter_volume_id = resolve_effective_volume_id(db, volume_id)
+
+    if sync and filter_volume_id:
+        base_url = resolve_browser_catalog_url(request, db)
+        auth_token = resolve_auth_token(request, db)
+        workload_identity = resolve_workload_identity(request, db)
+        workspace_id = resolve_workspace_id(request, db)
+        try:
+            await doc_management_service.sync_volume_with_db(
+                db=db,
+                volume_id=filter_volume_id,
+                base_url=base_url,
+                auth_token=auth_token,
+                workload_identity=workload_identity,
+                workspace_id=workspace_id,
+            )
+        except Exception:
+            pass
+
     docs, total = doc_management_service.list_documents(
         db=db,
         folder_id=folder_id,
@@ -184,7 +389,7 @@ def list_documents(
         url_type=url_type,
         tag=tag,
         status=status,
-        volume_id=volume_id,
+        volume_id=filter_volume_id,
         limit=limit,
         offset=offset,
     )
@@ -212,6 +417,10 @@ async def upload_document(
 ):
     """Uploads a file directly to CompassX volume storage and creates DocInfo metadata."""
     base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
+    effective_vol_id = resolve_effective_volume_id(db, volume_id)
     try:
         content = await file.read()
         parsed_tags = []
@@ -231,11 +440,14 @@ async def upload_document(
             description=description,
             folder_id=folder_id,
             sub_path=sub_path,
-            volume_id=volume_id,
+            volume_id=effective_vol_id,
             tags=parsed_tags,
             created_by=created_by,
             version=version or "1.0",
             base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
         )
         return doc.to_dict(include_links=True)
     except ValueError as err:
@@ -286,8 +498,18 @@ async def download_document(
 ):
     """Streams the raw document binary content from CompassX volume storage."""
     base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
     try:
-        content, content_type, filename = await doc_management_service.download_document(db, doc_id, base_url=base_url)
+        content, content_type, filename = await doc_management_service.download_document(
+            db,
+            doc_id,
+            base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
+        )
         return Response(
             content=content,
             media_type=content_type,
@@ -311,8 +533,19 @@ async def get_document_presigned_url(
 ):
     """Generates a temporary scoped SAS / S3 download URL from CompassX volume storage."""
     base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
     try:
-        res = await doc_management_service.get_presigned_url(db, doc_id, expiry_seconds=expiry_seconds, base_url=base_url)
+        res = await doc_management_service.get_presigned_url(
+            db,
+            doc_id,
+            expiry_seconds=expiry_seconds,
+            base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
+        )
         return res
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err))
@@ -327,6 +560,9 @@ async def rename_document(
 ):
     """Renames file in CompassX volume storage and updates DocInfo database record."""
     base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
     try:
         doc = await doc_management_service.rename_document(
             db=db,
@@ -335,6 +571,9 @@ async def rename_document(
             new_title=payload.new_title,
             updated_by=payload.updated_by,
             base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
         )
         return doc.to_dict(include_links=True)
     except ValueError as err:
@@ -365,6 +604,24 @@ def update_document_metadata(
         raise HTTPException(status_code=404, detail=str(err))
 
 
+@router.put("/documents/{doc_id}/move")
+def move_document(
+    doc_id: str,
+    payload: DocMoveRequest,
+    db: Session = Depends(get_db),
+):
+    """Moves a document to another folder or root."""
+    try:
+        doc = doc_management_service.move_document(
+            db=db,
+            doc_id=doc_id,
+            target_folder_id=payload.target_folder_id,
+        )
+        return doc.to_dict(include_links=True)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
 @router.delete("/documents/{doc_id}")
 async def delete_document(
     doc_id: str,
@@ -374,79 +631,20 @@ async def delete_document(
 ):
     """Deletes document metadata and removes file from CompassX volume storage."""
     base_url = resolve_browser_catalog_url(request, db)
+    auth_token = resolve_auth_token(request, db)
+    workload_identity = resolve_workload_identity(request, db)
+    workspace_id = resolve_workspace_id(request, db)
     try:
-        await doc_management_service.delete_document(db, doc_id, purge_storage=purge_storage, base_url=base_url)
+        await doc_management_service.delete_document(
+            db,
+            doc_id,
+            purge_storage=purge_storage,
+            base_url=base_url,
+            auth_token=auth_token,
+            workload_identity=workload_identity,
+            workspace_id=workspace_id,
+        )
         return {"id": doc_id, "deleted": True}
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err))
-
-
-# -----------------------------------------------------------------------------
-# 3. Direct CompassX Volume Explorer Operations
-# -----------------------------------------------------------------------------
-
-@router.get("/documents-volume/volumes")
-async def list_volumes(
-    request: Request,
-    catalog: Optional[str] = Query(None),
-    schema_name: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """Lists available CompassX storage volumes using browser base URL."""
-    base_url = resolve_browser_catalog_url(request, db)
-    return await compassx_volume_client.list_volumes(
-        catalog=catalog,
-        schema_name=schema_name,
-        base_url=base_url,
-    )
-
-
-@router.post("/documents-volume/volumes", status_code=status.HTTP_201_CREATED)
-async def create_volume(
-    payload: VolumeCreateRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """Creates a new CompassX storage volume using browser base URL."""
-    base_url = resolve_browser_catalog_url(request, db)
-    return await compassx_volume_client.create_volume(
-        catalog_name=payload.catalog_name or "eam_catalog",
-        schema_name=payload.schema_name or "documents_schema",
-        name=payload.name,
-        description=payload.description or "",
-        base_url=base_url,
-    )
-
-
-@router.post("/documents-volume/volumes/{volume_id}/directories")
-async def create_directory(
-    volume_id: str,
-    payload: DirectoryCreateRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """Creates a directory folder inside a CompassX storage volume."""
-    base_url = resolve_browser_catalog_url(request, db)
-    return await compassx_volume_client.create_directory(
-        volume_id=volume_id,
-        dir_name=payload.dir_name,
-        sub_path=payload.sub_path or "",
-        base_url=base_url,
-    )
-
-
-@router.get("/documents-volume/volumes/{volume_id}/files")
-async def list_volume_files(
-    volume_id: str,
-    request: Request,
-    sub_path: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """Directly lists files and folders inside a CompassX storage volume."""
-    base_url = resolve_browser_catalog_url(request, db)
-    return await compassx_volume_client.list_files(
-        volume_id=volume_id,
-        sub_path=sub_path,
-        base_url=base_url,
-    )
 

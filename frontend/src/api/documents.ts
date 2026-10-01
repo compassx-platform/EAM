@@ -1,30 +1,105 @@
 import type {
   DocFolder,
   DocInfo,
-  VolumeRead,
-  VolumeFileInfo,
   PresignedUrlResponse,
 } from '../types';
-import { getCompassXCatalogBaseUrl } from './system';
-
 const API_BASE = '/api';
 
 function getDocHeaders(extra?: Record<string, string>): Record<string, string> {
-  return {
-    'X-CompassX-Catalog-Url': getCompassXCatalogBaseUrl(),
+  const headers: Record<string, string> = {
     ...(extra || {}),
   };
+  if (typeof window !== 'undefined') {
+    const token =
+      localStorage.getItem('compassx_auth_token') ||
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('auth_token');
+    if (token && token.trim()) {
+      const clean = token.trim();
+      headers['Authorization'] = clean.toLowerCase().startsWith('bearer ') ? clean : `Bearer ${clean}`;
+      headers['X-CompassX-Auth-Token'] = clean.replace(/^bearer\s+/i, '');
+    }
+    const workloadId =
+      localStorage.getItem('compassx_workload_identity') ||
+      localStorage.getItem('workload_identity') ||
+      localStorage.getItem('COMPASSX_WORKLOAD_IDENTITY');
+    if (workloadId && workloadId.trim()) {
+      headers['X-Workload-Identity'] = workloadId.trim();
+      headers['X-CompassX-Workload-Identity'] = workloadId.trim();
+    }
+    const workspaceId =
+      localStorage.getItem('compassx_workspace_id') ||
+      localStorage.getItem('workspace_id') ||
+      localStorage.getItem('WORKSPACE_ID');
+    if (workspaceId && workspaceId.trim()) {
+      headers['X-Workspace-Id'] = workspaceId.trim();
+    }
+  }
+  return headers;
 }
 
-export async function listDocumentFolders(activeOnly = false): Promise<DocFolder[]> {
-  const url = `${API_BASE}/document-folders${activeOnly ? '?active_only=true' : ''}`;
+export async function listDocumentFolders(params?: {
+  activeOnly?: boolean;
+  parentId?: string | null;
+  volumeId?: string | null;
+  sync?: boolean;
+}): Promise<DocFolder[]> {
+  const query = new URLSearchParams();
+  if (params?.activeOnly) query.set('active_only', 'true');
+  if (params?.parentId !== undefined && params?.parentId !== null) query.set('parent_id', params.parentId);
+  if (params?.volumeId) query.set('volume_id', params.volumeId);
+  if (params?.sync !== undefined) query.set('sync', params.sync ? 'true' : 'false');
+  const url = `${API_BASE}/document-folders?${query.toString()}`;
   const res = await fetch(url, { headers: getDocHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch folders: ${res.statusText}`);
   return res.json();
 }
 
+export async function getDocumentFolderTree(
+  activeOnly = false,
+  volumeId?: string | null,
+  sync = true
+): Promise<DocFolder[]> {
+  const query = new URLSearchParams();
+  if (activeOnly) query.set('active_only', 'true');
+  if (volumeId) query.set('volume_id', volumeId);
+  if (sync !== undefined) query.set('sync', sync ? 'true' : 'false');
+  const url = `${API_BASE}/document-folders/tree?${query.toString()}`;
+  const res = await fetch(url, { headers: getDocHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch folder tree: ${res.statusText}`);
+  return res.json();
+}
+
+export async function syncVolumeDocuments(volumeId?: string): Promise<{
+  synced: boolean;
+  volume_id?: string;
+  folders_synced?: number;
+  files_synced?: number;
+}> {
+  const query = volumeId ? `?volume_id=${encodeURIComponent(volumeId)}` : '';
+  const res = await fetch(`${API_BASE}/documents/sync${query}`, {
+    method: 'POST',
+    headers: getDocHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to sync with volume');
+  }
+  return res.json();
+}
+
+export async function getDocumentFolderPath(folderId: string): Promise<Array<{ id: string; folder_name: string }>> {
+  const res = await fetch(`${API_BASE}/document-folders/${encodeURIComponent(folderId)}/path`, {
+    headers: getDocHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch folder path: ${res.statusText}`);
+  return res.json();
+}
+
 export async function createDocumentFolder(payload: {
   folder_name: string;
+  parent_id?: string | null;
   description?: string;
   volume_id?: string | null;
   default_sub_path?: string;
@@ -56,6 +131,38 @@ export async function updateDocumentFolder(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || 'Failed to update folder');
+  }
+  return res.json();
+}
+
+export async function moveDocumentFolder(
+  folderId: string,
+  targetParentId: string | null
+): Promise<DocFolder> {
+  const res = await fetch(`${API_BASE}/document-folders/${encodeURIComponent(folderId)}/move`, {
+    method: 'PUT',
+    headers: getDocHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ target_parent_id: targetParentId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to move folder');
+  }
+  return res.json();
+}
+
+export async function moveDocument(
+  docId: string,
+  targetFolderId: string | null
+): Promise<DocInfo> {
+  const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(docId)}/move`, {
+    method: 'PUT',
+    headers: getDocHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ target_folder_id: targetFolderId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Failed to move document');
   }
   return res.json();
 }
@@ -209,77 +316,5 @@ export async function deleteDocument(
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || 'Failed to delete document');
   }
-  return res.json();
-}
-
-// ----------------------------------------------------------------------------
-// CompassX Volumes Explorer API
-// ----------------------------------------------------------------------------
-
-export async function listVolumes(
-  catalog?: string,
-  schemaName?: string
-): Promise<VolumeRead[]> {
-  const query = new URLSearchParams();
-  if (catalog) query.set('catalog', catalog);
-  if (schemaName) query.set('schema_name', schemaName);
-  const res = await fetch(`${API_BASE}/documents-volume/volumes?${query.toString()}`, {
-    headers: getDocHeaders(),
-  });
-  if (!res.ok) throw new Error(`Failed to list volumes: ${res.statusText}`);
-  return res.json();
-}
-
-export async function createVolume(payload: {
-  name: string;
-  description?: string;
-  catalog_name?: string;
-  schema_name?: string;
-}): Promise<VolumeRead> {
-  const res = await fetch(`${API_BASE}/documents-volume/volumes`, {
-    method: 'POST',
-    headers: getDocHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Failed to create volume');
-  }
-  return res.json();
-}
-
-export async function createVolumeDirectory(
-  volumeId: string,
-  dirName: string,
-  subPath = ''
-): Promise<{ dir_path: string; dir_name: string; sub_path: string }> {
-  const res = await fetch(
-    `${API_BASE}/documents-volume/volumes/${encodeURIComponent(volumeId)}/directories`,
-    {
-      method: 'POST',
-      headers: getDocHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ dir_name: dirName, sub_path: subPath }),
-    }
-  );
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Failed to create directory');
-  }
-  return res.json();
-}
-
-export async function listVolumeFiles(
-  volumeId: string,
-  subPath?: string
-): Promise<VolumeFileInfo[]> {
-  const query = new URLSearchParams();
-  if (subPath) query.set('sub_path', subPath);
-  const res = await fetch(
-    `${API_BASE}/documents-volume/volumes/${encodeURIComponent(volumeId)}/files?${query.toString()}`,
-    {
-      headers: getDocHeaders(),
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to list volume files: ${res.statusText}`);
   return res.json();
 }

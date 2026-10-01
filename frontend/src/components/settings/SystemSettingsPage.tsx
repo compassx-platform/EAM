@@ -80,7 +80,7 @@ export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPag
               <span>Workspace admin</span>
             </div>
             <nav className="mt-1 space-y-0.5">
-              {navItem('storage', 'Storage & Volumes')}
+              {navItem('storage', 'Document Storage')}
               {navItem('appearance', 'Appearance')}
               {navItem('identity', 'Identity and access')}
               {navItem('security', 'Security')}
@@ -115,7 +115,7 @@ export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPag
           {activeTab === 'storage' && (
             <div>
               <div className="mb-6 border-b border-gray-100 pb-4">
-                <h1 className="text-xl font-semibold text-gray-900">Storage & Volumes</h1>
+                <h1 className="text-xl font-semibold text-gray-900">Document Storage</h1>
                 <p className="text-xs text-gray-500 mt-1">
                   Manage external storage catalogs, schemas, and blob volumes for CompassX EAM
                 </p>

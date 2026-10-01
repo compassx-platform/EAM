@@ -33,6 +33,7 @@ import {
   Compass,
   Timer,
   Save,
+  Folder,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { isItemVisible, isItemReadOnly, isTabVisible, withWorkflowStatus } from '../../lib/conditions';
@@ -52,10 +53,12 @@ import type {
   WorkflowDefinition,
   Workflow as WorkflowType,
   FormTab,
+  DocInfo,
+  AttachedFile,
 } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
 import { WorkflowInstanceVisualizer, useLiveCountdown } from './WorkflowInstanceVisualizer';
-import type { AttachedFile } from './EntityCreateForm';
+import { DocumentPickerModal } from '../documents';
 
 export interface EntityFormViewProps {
   entity?: EntityRecord | null;
@@ -79,6 +82,9 @@ interface ResolvedField {
   maxFileSizeMb?: number;
   allowMultiple?: boolean;
   maxFiles?: number;
+  allowDeviceUpload?: boolean;
+  allowDocModule?: boolean;
+  docFolderFilter?: string | null;
   referenceEntityType?: string | null;
 }
 
@@ -499,6 +505,9 @@ export function EntityFormView({
         maxFileSizeMb: it.maxFileSizeMb ?? (it as any).max_file_size_mb ?? 10,
         allowMultiple: it.allowMultiple ?? (it as any).allow_multiple ?? false,
         maxFiles: it.maxFiles ?? (it as any).max_files ?? 5,
+        allowDeviceUpload: (it as any).allowDeviceUpload ?? (it as any).allow_device_upload ?? true,
+        allowDocModule: (it as any).allowDocModule ?? (it as any).allow_doc_module ?? true,
+        docFolderFilter: (it as any).docFolderFilter ?? (it as any).doc_folder_filter ?? null,
         referenceEntityType:
           (it as any).referenceEntityType ||
           (it as any).reference_entity_type ||
@@ -2324,6 +2333,7 @@ function FileInput({
   const [files, setFiles] = useState<AttachedFile[]>(() => parseFileList(value));
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDocPickerOpen, setIsDocPickerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync internal files state when external value changes
@@ -2335,14 +2345,39 @@ function FileInput({
   const maxBytes = maxMb * 1024 * 1024;
   const allowMultiple = Boolean(def.allowMultiple);
   const maxFiles = def.maxFiles || 5;
+  const allowDevice = def.allowDeviceUpload !== false;
+  const allowDoc = def.allowDocModule !== false;
 
   const commit = (next: AttachedFile[]) => {
     setFiles(next);
     onChange(JSON.stringify(next));
   };
 
-  const processFiles = (fileList: FileList | File[]) => {
+  const handleSelectFromDocModule = (selectedDocs: DocInfo[]) => {
     if (readOnly) return;
+    setError(null);
+    const incoming: AttachedFile[] = selectedDocs.map((doc) => ({
+      name: doc.file_name || doc.title || 'document',
+      size: doc.file_size_bytes || 0,
+      type: doc.content_type || 'application/octet-stream',
+      dataUrl: doc.url_type === 'URL' ? doc.url_name : `/api/documents/${encodeURIComponent(doc.id)}/download`,
+      lastModified: doc.updated_at ? new Date(doc.updated_at).getTime() : Date.now(),
+      docId: doc.id,
+      documentCode: doc.document_code,
+      urlName: doc.url_name,
+      volumeId: doc.volume_id ?? undefined,
+      fromDocModule: true,
+    }));
+
+    if (!allowMultiple) {
+      commit(incoming.slice(0, 1));
+    } else {
+      commit([...files, ...incoming]);
+    }
+  };
+
+  const processFiles = (fileList: FileList | File[]) => {
+    if (readOnly || !allowDevice) return;
     setError(null);
     const incoming = Array.from(fileList);
     if (!incoming.length) return;
@@ -2448,24 +2483,53 @@ function FileInput({
         className="hidden"
       />
 
-      {/* Dropzone area */}
+      {/* Dropzone / Attachment Actions area */}
       {!readOnly && (!files.length || (allowMultiple && files.length < maxFiles)) && (
         <div
-          onDragEnter={handleDrag}
-          onDragOver={handleDrag}
-          onDragLeave={handleDrag}
-          onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center transition-colors ${
+          onDragEnter={allowDevice ? handleDrag : undefined}
+          onDragOver={allowDevice ? handleDrag : undefined}
+          onDragLeave={allowDevice ? handleDrag : undefined}
+          onDrop={allowDevice ? handleDrop : undefined}
+          className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-3 text-center transition-colors ${
             dragActive
               ? 'border-blue-500 bg-blue-50/80'
               : 'border-gray-300 bg-gray-50/70 hover:border-blue-400 hover:bg-gray-100/70'
           }`}
         >
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
-            <Paperclip className="h-4 w-4 shrink-0 text-blue-600" />
-            <span>{def.placeholder || 'Click or drag files to attach'}</span>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {allowDevice && (
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 hover:text-gray-900 transition-colors"
+              >
+                <Paperclip className="h-3.5 w-3.5 text-blue-600" />
+                <span>Upload from device</span>
+              </button>
+            )}
+
+            {allowDevice && allowDoc && (
+              <span className="text-[11px] font-medium text-gray-400">or</span>
+            )}
+
+            {allowDoc && (
+              <button
+                type="button"
+                onClick={() => setIsDocPickerOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50/80 px-2.5 py-1.5 text-xs font-semibold text-blue-700 shadow-2xs hover:bg-blue-100 transition-colors"
+              >
+                <Folder className="h-3.5 w-3.5 text-blue-600" />
+                <span>Attach from Documents</span>
+              </button>
+            )}
           </div>
+
+          {allowDevice && (
+            <p className="mt-1 text-[11px] text-gray-400">
+              Drag & drop files here, or click to upload
+            </p>
+          )}
+
           <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-gray-400">
             {def.accept ? (
               <span className="rounded bg-gray-200/70 px-1 font-mono text-gray-600">{def.accept}</span>
@@ -2503,6 +2567,12 @@ function FileInput({
                 <span className="truncate text-xs font-medium text-gray-800" title={f.name}>
                   {f.name}
                 </span>
+                {f.fromDocModule && (
+                  <span className="shrink-0 flex items-center gap-1 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[9px] font-medium text-gray-700">
+                    <Folder className="h-2.5 w-2.5 text-gray-500" />
+                    {f.documentCode || 'Doc Library'}
+                  </span>
+                )}
                 <span className="shrink-0 font-mono text-[10px] text-gray-400">
                   {formatFileSize(f.size)}
                 </span>
@@ -2512,10 +2582,13 @@ function FileInput({
                   <a
                     href={f.dataUrl}
                     download={f.name}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50"
                   >
-                    Download
+                    <span>{f.urlName && !f.dataUrl.startsWith('/api') ? 'Open Link' : 'Download'}</span>
+                    {f.urlName && !f.dataUrl.startsWith('/api') && <ExternalLink className="h-2.5 w-2.5" />}
                   </a>
                 )}
                 {!readOnly && (
@@ -2535,6 +2608,20 @@ function FileInput({
             </div>
           ))}
         </div>
+      )}
+
+      {isDocPickerOpen && (
+        <DocumentPickerModal
+          isOpen={isDocPickerOpen}
+          onClose={() => setIsDocPickerOpen(false)}
+          allowMultiple={allowMultiple}
+          maxSelectable={allowMultiple ? maxFiles - files.length : 1}
+          initialFolderId={def.docFolderFilter || null}
+          accept={def.accept || null}
+          maxFileSizeMb={def.maxFileSizeMb || null}
+          alreadyAttachedDocIds={files.map((f) => f.docId).filter((id): id is string => Boolean(id))}
+          onSelect={handleSelectFromDocModule}
+        />
       )}
     </div>
   );

@@ -457,6 +457,12 @@ export interface EntityFormItem {
   allow_multiple?: boolean;
   maxFiles?: number | null;
   max_files?: number | null;
+  allowDeviceUpload?: boolean;
+  allow_device_upload?: boolean;
+  allowDocModule?: boolean;
+  allow_doc_module?: boolean;
+  docFolderFilter?: string | null;
+  doc_folder_filter?: string | null;
   /** Dynamic Table configuration */
   minRows?: number | null;
   min_rows?: number | null;
@@ -468,6 +474,19 @@ export interface EntityFormItem {
   allow_delete_rows?: boolean;
   emptyStateText?: string | null;
   empty_state_text?: string | null;
+}
+
+export interface AttachedFile {
+  name: string;
+  size: number;
+  type: string;
+  dataUrl: string;
+  lastModified?: number;
+  docId?: string;
+  documentCode?: string;
+  urlName?: string;
+  volumeId?: string;
+  fromDocModule?: boolean;
 }
 
 export interface FormVersion {
@@ -1299,6 +1318,7 @@ export interface MeterReadingResponse {
 export interface DocFolder {
   id: string;
   folder_name: string;
+  parent_id?: string | null;
   description?: string | null;
   volume_id?: string | null;
   default_sub_path: string;
@@ -1307,8 +1327,15 @@ export interface DocFolder {
   is_active: boolean;
   default_print_thru_vendor: boolean;
   document_count?: number;
+  subfolder_count?: number;
+  subfolders?: DocFolder[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface DocFolderPathItem {
+  id: string;
+  folder_name: string;
 }
 
 export interface DocLink {
