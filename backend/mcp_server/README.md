@@ -26,7 +26,7 @@ Agents connect to the MCP server and can execute actions on behalf of specific u
 
 ## 2. Supported Modules & Tool Catalog
 
-The server registers 61 specialized tools across 6 platform modules:
+The server registers 73 specialized tools across 7 platform modules:
 
 ### 1. Records Module (`records_*`)
 - `records_list`: List records for an entity type with filtering by status, search keywords, and pagination.
@@ -94,6 +94,19 @@ The server registers 61 specialized tools across 6 platform modules:
 - `people_group_member_add`: Add person to group with priority sequence and default flags.
 - `people_group_member_update`: Update member sequence or defaults.
 - `people_group_member_remove`: Remove person from group.
+
+### 7. Asset Hierarchy Module (`location_*`, `asset_*`, `hierarchy_*`)
+- `location_list`: List physical/operating locations filtered by site, organization, location type, or search term.
+- `location_get`: Retrieve location record along with all installed assets.
+- `location_create`: Create a location within a site with parent hierarchy and type validation (`OPERATING`, `STOREROOM`, etc.).
+- `location_update`: Update location metadata, type, status, or re-parent in location tree with self-parenting and cycle safeguards.
+- `location_delete`: Delete a location from a site.
+- `asset_list`: List machinery equipment and assets filtered by site, location, parent asset, or operational status.
+- `asset_get`: Retrieve asset details including child sub-assembly assets.
+- `asset_create`: Create an asset record associated with a location or parent machinery asset.
+- `asset_update`: Update asset specifications, operating status, location, or sub-assembly hierarchy with cycle prevention.
+- `asset_delete`: Delete an asset record.
+- `asset_hierarchy_drilldown` / `hierarchy_drilldown`: Retrieve full multi-level nested hierarchy tree across sites (Sites &rarr; Locations &rarr; Installed Assets / Sub-assemblies + Staged Assets).
 
 ---
 

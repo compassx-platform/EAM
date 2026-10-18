@@ -145,8 +145,8 @@ app.include_router(meters_router)  # /api/meters, /api/meter-groups, /api/measur
 app.include_router(entities_router)  # Wildcard /api/{entity_type}/... MUST be last
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI
-from backend.mcp_server.server import mcp
 try:
+    from backend.mcp_server.server import mcp
     mcp.settings.transport_security.enable_dns_rebinding_protection = False
     app.mount("/mcp", mcp.sse_app())
 except Exception as mcp_err:

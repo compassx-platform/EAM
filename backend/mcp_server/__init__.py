@@ -8,6 +8,7 @@ Provides agent tools and resources across 6 platform modules:
 - entity
 - condition
 - people
+- asset_hierarchy
 and user acting context.
 """
 

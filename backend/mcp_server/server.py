@@ -23,6 +23,7 @@ from backend.models.workflow import WorkflowDefinition
 from backend.models.entities import DynamicEntity
 from backend.models.person import Person
 from backend.models.users import AppUser
+from backend.models.asset_hierarchy import Location, Asset
 
 # Import tool functions
 from backend.mcp_server.tools.records import (
@@ -100,12 +101,26 @@ from backend.mcp_server.tools.context import (
     user_list_available_actors,
     user_list_roles,
 )
+from backend.mcp_server.tools.asset_hierarchy import (
+    location_list,
+    location_get,
+    location_create,
+    location_update,
+    location_delete,
+    asset_list,
+    asset_get,
+    asset_create,
+    asset_update,
+    asset_delete,
+    asset_hierarchy_drilldown,
+    hierarchy_drilldown,
+)
 
 SERVER_INSTRUCTIONS = """
 CompassX Enterprise Asset Management (EAM) MCP Server.
 
 You are interacting with an event-sourced, CQRS-structured Enterprise Asset Management system.
-As an AI agent, you can perform actions ON BEHALF OF USERS across 6 core application modules:
+As an AI agent, you can perform actions ON BEHALF OF USERS across core application modules:
 
 1. Records Module (tools starting with 'records_'):
    - Manage entity records (e.g. work orders, permits, safety certificates).
@@ -140,7 +155,12 @@ As an AI agent, you can perform actions ON BEHALF OF USERS across 6 core applica
    - Schedule availability/unavailability windows.
    - Manage Person Groups (crew work groups, member priorities, defaults).
 
-7. User Acting Context (tools starting with 'user_'):
+7. Asset Hierarchy Module (tools starting with 'location_' and 'asset_'):
+   - Manage physical/operating Locations (facilities, buildings, rooms, storerooms) and location tree.
+   - Manage Assets with multi-level parent-child sub-assembly machinery hierarchies.
+   - Inspect complete multi-level drilldown trees (Site -> Locations -> Installed Assets / Sub-assemblies + Staged Assets).
+
+8. User Acting Context (tools starting with 'user_'):
    - Use `user_set_active_actor` to change the session's default user/actor identity.
    - Or pass `on_behalf_of` directly to any action tool (e.g. `records_create`, `records_transition`).
    - Use `user_list_available_actors` and `user_list_roles` to see who exists and what roles they possess.
@@ -224,7 +244,21 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(people_group_member_update)
     server.add_tool(people_group_member_remove)
 
-    # 7. User Context tools
+    # 7. Asset Hierarchy tools
+    server.add_tool(location_list)
+    server.add_tool(location_get)
+    server.add_tool(location_create)
+    server.add_tool(location_update)
+    server.add_tool(location_delete)
+    server.add_tool(asset_list)
+    server.add_tool(asset_get)
+    server.add_tool(asset_create)
+    server.add_tool(asset_update)
+    server.add_tool(asset_delete)
+    server.add_tool(asset_hierarchy_drilldown)
+    server.add_tool(hierarchy_drilldown)
+
+    # 8. User Context tools
     server.add_tool(user_set_active_actor)
     server.add_tool(user_get_active_actor)
     server.add_tool(user_list_available_actors)
@@ -240,6 +274,8 @@ def create_mcp_server() -> FastMCP:
             records = db.query(DynamicEntity).count()
             persons = db.query(Person).count()
             users = db.query(AppUser).count()
+            locations = db.query(Location).count()
+            assets = db.query(Asset).count()
             current_actor = get_current_actor()
 
             overview = {
@@ -248,9 +284,17 @@ def create_mcp_server() -> FastMCP:
                 "total_records_count": records,
                 "registered_persons_count": persons,
                 "active_users_count": users,
+                "total_locations_count": locations,
+                "total_assets_count": assets,
                 "current_session_actor": current_actor.actor_id,
             }
             return json.dumps(overview, indent=2)
+
+    @server.resource("compassx://assets/hierarchy")
+    def resource_asset_hierarchy() -> str:
+        """Returns full multi-level hierarchy drilldown tree across sites."""
+        res = asset_hierarchy_drilldown()
+        return json.dumps(res, indent=2)
 
     # Prompts
     @server.prompt("inspect_record")
@@ -271,6 +315,16 @@ def create_mcp_server() -> FastMCP:
             f"1. Call `records_simulate_transition('{entity_type}', '{event_type}', entity_id='{record_id}', on_behalf_of='{on_behalf_of}')`.\n"
             f"2. Verify whether condition gates (e.g. role check, thresholds) pass or block.\n"
             f"3. Report the result and any failing conditions."
+        )
+
+    @server.prompt("inspect_asset_hierarchy")
+    def prompt_inspect_asset_hierarchy(site_id: str) -> str:
+        """Guides the agent to analyze an operating site's location and asset hierarchy."""
+        return (
+            f"Please inspect the asset hierarchy for site '{site_id}'.\n"
+            f"1. Call `asset_hierarchy_drilldown(site_id='{site_id}')` to retrieve nested locations and installed equipment.\n"
+            f"2. Call `asset_list(site_id='{site_id}', status='IN_REPAIR')` to check for equipment needing attention.\n"
+            f"3. Summarize key parent machinery, installed sub-assemblies, and any unassigned spare assets."
         )
 
     return server

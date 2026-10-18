@@ -87,6 +87,20 @@ from backend.mcp_server.tools.context import (
     user_list_available_actors,
     user_list_roles,
 )
+from backend.mcp_server.tools.asset_hierarchy import (
+    location_list,
+    location_get,
+    location_create,
+    location_update,
+    location_delete,
+    asset_list,
+    asset_get,
+    asset_create,
+    asset_update,
+    asset_delete,
+    asset_hierarchy_drilldown,
+    hierarchy_drilldown,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -99,9 +113,9 @@ def setup_mcp_db(test_db, monkeypatch):
 
 
 def test_mcp_server_registration():
-    """Verify all 61 tools across all 6 modules are properly registered."""
+    """Verify all tools across modules including asset hierarchy are properly registered."""
     tools = mcp._tool_manager.list_tools()
-    assert len(tools) >= 61
+    assert len(tools) >= 73
     tool_names = {t.name for t in tools}
 
     # Core module coverage
@@ -120,6 +134,18 @@ def test_mcp_server_registration():
     assert "condition_evaluate" in tool_names
     assert "people_create" in tool_names
     assert "people_group_create" in tool_names
+    assert "location_list" in tool_names
+    assert "location_get" in tool_names
+    assert "location_create" in tool_names
+    assert "location_update" in tool_names
+    assert "location_delete" in tool_names
+    assert "asset_list" in tool_names
+    assert "asset_get" in tool_names
+    assert "asset_create" in tool_names
+    assert "asset_update" in tool_names
+    assert "asset_delete" in tool_names
+    assert "asset_hierarchy_drilldown" in tool_names
+    assert "hierarchy_drilldown" in tool_names
     assert "user_set_active_actor" in tool_names
     assert "user_get_active_actor" in tool_names
 
@@ -487,3 +513,134 @@ def test_mcp_people_module():
     act = people_activate("DANA.TECH")
     assert act["success"] is True
     assert act["status"] == "ACTIVE"
+
+
+def test_mcp_asset_hierarchy_tools(test_db):
+    """Verify MCP tools for locations, assets, sub-assemblies, and hierarchy drilldown."""
+    # 1. List seeded locations
+    locs = location_list(site_id="BEDFORD")
+    assert locs["success"] is True
+    loc_ids = [l["location_id"] for l in locs["locations"]]
+    assert "FACILITY_A" in loc_ids
+    assert "MECH_ROOM_101" in loc_ids
+
+    # 2. Create location
+    created_loc = location_create(
+        location_id="MCP_TEST_WAREHOUSE",
+        site_id="BEDFORD",
+        description="MCP Test Warehouse Location",
+        type="STOREROOM",
+        status="OPERATING",
+        gl_account="1200-99",
+    )
+    assert created_loc["success"] is True
+    assert created_loc["location"]["location_id"] == "MCP_TEST_WAREHOUSE"
+
+    # 3. Create sub-location
+    sub_loc = location_create(
+        location_id="MCP_TEST_AISLE_1",
+        site_id="BEDFORD",
+        parent_location_id="MCP_TEST_WAREHOUSE",
+        description="Aisle 1 Storage Rack",
+        type="STOREROOM",
+    )
+    assert sub_loc["success"] is True
+    assert sub_loc["location"]["parent_location_id"] == "MCP_TEST_WAREHOUSE"
+
+    # 4. Prevent self-parenting on location
+    self_loc = location_update(
+        site_id="BEDFORD",
+        location_id="MCP_TEST_WAREHOUSE",
+        parent_location_id="MCP_TEST_WAREHOUSE",
+    )
+    assert self_loc["success"] is False
+    assert "cannot be its own parent" in self_loc["error"]
+
+    # 5. Get location details (including installed assets)
+    get_loc = location_get(site_id="BEDFORD", location_id="MCP_TEST_WAREHOUSE")
+    assert get_loc["success"] is True
+    assert get_loc["location"]["location_id"] == "MCP_TEST_WAREHOUSE"
+    assert "installed_assets" in get_loc["location"]
+
+    # 6. List seeded assets
+    assets = asset_list(site_id="BEDFORD")
+    assert assets["success"] is True
+    asset_ids = [a["asset_id"] for a in assets["assets"]]
+    assert "PUMP_SYS_100" in asset_ids
+    assert "MOTOR_50HP_01" in asset_ids
+
+    # 7. Create parent machinery asset
+    created_asset = asset_create(
+        asset_id="MCP_COMPRESSOR_01",
+        site_id="BEDFORD",
+        location_id="MCP_TEST_WAREHOUSE",
+        name="Main Industrial Air Compressor",
+        description="Dual stage rotary screw compressor",
+        item_num="ROT-COMP-99",
+        serial_num="SN-MCP-9901",
+        status="OPERATING",
+        vendor="KAESER",
+        manufacturer="Kaeser Compressors",
+        model="CSD 125",
+        purchase_cost=45000.0,
+        install_date="2026-06-01T08:00:00Z",
+        priority=1,
+    )
+    assert created_asset["success"] is True
+    assert created_asset["asset"]["asset_id"] == "MCP_COMPRESSOR_01"
+
+    # 8. Create child sub-assembly asset
+    created_child = asset_create(
+        asset_id="MCP_COMP_MOTOR_01",
+        site_id="BEDFORD",
+        location_id="MCP_TEST_WAREHOUSE",
+        parent_asset_id="MCP_COMPRESSOR_01",
+        name="Compressor 75HP Drive Motor",
+        description="High efficiency electric drive motor",
+        status="OPERATING",
+        purchase_cost=12000.0,
+        priority=2,
+    )
+    assert created_child["success"] is True
+    assert created_child["asset"]["parent_asset_id"] == "MCP_COMPRESSOR_01"
+
+    # 9. Prevent self-parenting on asset
+    self_asset = asset_update(
+        site_id="BEDFORD",
+        asset_id="MCP_COMPRESSOR_01",
+        parent_asset_id="MCP_COMPRESSOR_01",
+    )
+    assert self_asset["success"] is False
+    assert "cannot be its own parent" in self_asset["error"]
+
+    # 10. Get asset details and verify sub-assembly hierarchy
+    get_ast = asset_get(site_id="BEDFORD", asset_id="MCP_COMPRESSOR_01")
+    assert get_ast["success"] is True
+    assert get_ast["asset"]["asset_id"] == "MCP_COMPRESSOR_01"
+    child_ids = [c["asset_id"] for c in get_ast["asset"]["child_assets"]]
+    assert "MCP_COMP_MOTOR_01" in child_ids
+
+    # 11. Multi-level drilldown hierarchy tree
+    drilldown = asset_hierarchy_drilldown(site_id="BEDFORD")
+    assert drilldown["success"] is True
+    assert drilldown["count"] == 1
+    site_tree = drilldown["sites"][0]
+    assert site_tree["site_id"] == "BEDFORD"
+    assert site_tree["total_locations"] >= 5
+    assert site_tree["total_assets"] >= 5
+
+    # Also test convenience alias hierarchy_drilldown
+    alias_tree = hierarchy_drilldown(site_id="BEDFORD")
+    assert alias_tree["success"] is True
+    assert len(alias_tree["sites"]) == 1
+
+    # 12. Cleanup created assets and locations
+    del_child = asset_delete(site_id="BEDFORD", asset_id="MCP_COMP_MOTOR_01")
+    assert del_child["success"] is True
+    del_parent = asset_delete(site_id="BEDFORD", asset_id="MCP_COMPRESSOR_01")
+    assert del_parent["success"] is True
+
+    del_sub_loc = location_delete(site_id="BEDFORD", location_id="MCP_TEST_AISLE_1")
+    assert del_sub_loc["success"] is True
+    del_main_loc = location_delete(site_id="BEDFORD", location_id="MCP_TEST_WAREHOUSE")
+    assert del_main_loc["success"] is True

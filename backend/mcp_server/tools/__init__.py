@@ -7,4 +7,5 @@ Includes:
 - entity: Entity types metadata, custom fields registry, relationship configuration
 - condition: Reusable business rule gates, condition evaluation, dependency tracking
 - people: People directory, profiles, availability, person groups, crew assignments
+- asset_hierarchy: Physical/operating locations, machinery assets, sub-assemblies, drilldown tree
 """
