@@ -68,6 +68,12 @@ function widgetForField(fieldType: EntityFieldType): { fieldType: GenericFieldTy
       return { fieldType: 'checklist', w: 12, h: 4 };
     case 'file':
       return { fieldType: 'file', w: 12, h: 2 };
+    case 'asset':
+      return { fieldType: 'asset', w: 12, h: 2 };
+    case 'asset_table':
+      return { fieldType: 'asset_table', w: 12, h: 3 };
+    case 'safety_plan':
+      return { fieldType: 'safety_plan', w: 12, h: 3 };
     default:
       return { fieldType: 'text', w: 6, h: 1 };
   }

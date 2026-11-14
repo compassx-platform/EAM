@@ -27,90 +27,6 @@ def _normalize_dt(dt: Any) -> Optional[datetime]:
     return dt
 
 
-def seed_default_escalations(db: Session) -> None:
-    """Idempotently seeds default system escalations into the database."""
-    default_escalations = [
-        {
-            "id": "PTW_AUTO_EXPIRY",
-            "name": "Permit to Work Auto-Expiry Watchdog",
-            "description": "Autonomous watchdog monitoring active permits. Automatically expires records when expiry_date < now and notifies safety officers.",
-            "entity_type": "permit",
-            "status": "ACTIVE",
-            "applies_to": "entity",
-            "schedule_cron": "*/5 * * * *",
-            "check_interval_seconds": 5,
-            "is_system": True,
-            "points": [
-                {
-                    "id": "point_permit_expired",
-                    "elapsed_hours": 0,
-                    "reference_date_field": "expiry_date",
-                    "filter_status": ["Active", "Suspended", "Issued", "RiskAssessed", "Approved"],
-                    "actions": [
-                        {
-                            "action_type": "TRANSITION_WORKFLOW",
-                            "event_type": "EXPIRED",
-                            "reason": "Permit auto-expired past authorized expiry date (Enterprise Escalation Engine)"
-                        },
-                        {
-                            "action_type": "SEND_NOTIFICATION",
-                            "recipient_role": "ROLE_SAFETY_OFFICER",
-                            "message": "Permit {{title}} has expired and field work authorization is revoked."
-                        }
-                    ]
-                }
-            ]
-        },
-        {
-            "id": "TASK_OVERDUE_ESCALATION",
-            "name": "Workflow Task Assignment Overdue Reassignment",
-            "description": "Monitors open workflow task assignments past their due date and reassigns them to the supervisor or active delegate.",
-            "entity_type": "*",
-            "status": "ACTIVE",
-            "applies_to": "task_assignment",
-            "schedule_cron": "*/5 * * * *",
-            "check_interval_seconds": 5,
-            "is_system": True,
-            "points": [
-                {
-                    "id": "point_task_due",
-                    "elapsed_hours": 0,
-                    "reference_date_field": "due_date",
-                    "actions": [
-                        {
-                            "action_type": "REASSIGN_TASK",
-                            "reason": "Task assignment exceeded SLA duration limit"
-                        }
-                    ]
-                }
-            ]
-        }
-    ]
-
-    for esc in default_escalations:
-        existing = db.query(EscalationDefinition).filter(EscalationDefinition.id == esc["id"]).first()
-        if not existing:
-            rec = EscalationDefinition(
-                id=esc["id"],
-                name=esc["name"],
-                description=esc["description"],
-                entity_type=esc["entity_type"],
-                status=esc["status"],
-                applies_to=esc["applies_to"],
-                schedule_cron=esc.get("schedule_cron", "*/5 * * * *"),
-                check_interval_seconds=esc.get("check_interval_seconds", 5),
-                points=esc["points"],
-                is_system=esc.get("is_system", False),
-                created_at=utc_now(),
-                updated_at=utc_now(),
-            )
-            db.add(rec)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-
-
 def execute_single_escalation(db: Session, escalation: EscalationDefinition, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
     """
     Executes a single escalation definition against target records.
@@ -323,7 +239,6 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
 
 def run_all_active_escalations(db: Session) -> List[Dict[str, Any]]:
     """Runs all active database-defined escalations."""
-    seed_default_escalations(db)
     now = utc_now()
     active_escalations = db.query(EscalationDefinition).filter(EscalationDefinition.status == "ACTIVE").all()
     all_results = []

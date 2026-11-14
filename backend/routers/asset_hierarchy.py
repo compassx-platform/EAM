@@ -23,6 +23,7 @@ class LocationCreate(BaseModel):
     type: str = "OPERATING"  # OPERATING | STOREROOM | SALVAGE | HOLDING | VENDOR | REPAIR
     status: str = "OPERATING"  # OPERATING | NOT_READY | DECOMMISSIONED
     gl_account: Optional[str] = None
+    default_safety_plan_id: Optional[str] = None
 
 
 class LocationUpdate(BaseModel):
@@ -31,6 +32,7 @@ class LocationUpdate(BaseModel):
     type: Optional[str] = None
     status: Optional[str] = None
     gl_account: Optional[str] = None
+    default_safety_plan_id: Optional[str] = None
 
 
 class AssetCreate(BaseModel):
@@ -50,6 +52,8 @@ class AssetCreate(BaseModel):
     purchase_cost: float = 0.0
     install_date: Optional[datetime] = None
     priority: int = 3
+    classstructure_id: Optional[str] = None
+    default_safety_plan_id: Optional[str] = None
 
 
 class AssetUpdate(BaseModel):
@@ -66,6 +70,8 @@ class AssetUpdate(BaseModel):
     purchase_cost: Optional[float] = None
     install_date: Optional[datetime] = None
     priority: Optional[int] = None
+    classstructure_id: Optional[str] = None
+    default_safety_plan_id: Optional[str] = None
 
 
 # ---- Location Endpoints ----
@@ -144,6 +150,7 @@ def create_location(
         type=data.type.upper(),
         status=data.status.upper(),
         gl_account=data.gl_account,
+        default_safety_plan_id=data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None,
     )
     db.add(loc)
     db.commit()
@@ -206,6 +213,8 @@ def update_location(
         loc.status = data.status.upper()
     if data.gl_account is not None:
         loc.gl_account = data.gl_account
+    if data.default_safety_plan_id is not None:
+        loc.default_safety_plan_id = data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None
 
     db.commit()
     db.refresh(loc)
@@ -240,6 +249,7 @@ def list_assets(
     org_id: Optional[str] = None,
     location_id: Optional[str] = None,
     parent_asset_id: Optional[str] = None,
+    classstructure_id: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -253,6 +263,8 @@ def list_assets(
         query = query.filter(Asset.location_id == location_id.strip().upper())
     if parent_asset_id:
         query = query.filter(Asset.parent_asset_id == parent_asset_id.strip().upper())
+    if classstructure_id:
+        query = query.filter(Asset.classstructure_id == classstructure_id.strip().upper())
     if status:
         query = query.filter(Asset.status == status.strip().upper())
     if search:
@@ -338,6 +350,8 @@ def create_asset(
         purchase_cost=data.purchase_cost,
         install_date=data.install_date,
         priority=data.priority,
+        classstructure_id=data.classstructure_id.strip().upper() if data.classstructure_id else None,
+        default_safety_plan_id=data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None,
     )
     db.add(asset)
     db.commit()
@@ -416,6 +430,10 @@ def update_asset(
         asset.install_date = data.install_date
     if data.priority is not None:
         asset.priority = data.priority
+    if data.classstructure_id is not None:
+        asset.classstructure_id = data.classstructure_id.strip().upper() if data.classstructure_id else None
+    if data.default_safety_plan_id is not None:
+        asset.default_safety_plan_id = data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None
 
     db.commit()
     db.refresh(asset)

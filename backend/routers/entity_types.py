@@ -149,6 +149,12 @@ def _widget_for_field_type(field_type: str, option_list_key: str, select_options
         return "checklist", 4, 12
     if field_type == "file":
         return "file", 2, 12
+    if field_type == "asset":
+        return "asset", 2, 12
+    if field_type == "asset_table":
+        return "asset_table", 3, 12
+    if field_type == "safety_plan":
+        return "safety_plan", 3, 12
     return "text", 1, 6
 
 @router.get("")

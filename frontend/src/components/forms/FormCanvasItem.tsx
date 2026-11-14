@@ -631,6 +631,19 @@ function ControlPreviewWidget({
     );
   }
 
+  if (type === 'asset' || type === 'asset_table' || type === 'safety_plan') {
+    const label = type === 'safety_plan' ? 'Select safety plan' : type === 'asset_table' ? 'Select assets' : 'Select asset';
+    return (
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-xs text-gray-400">{label}</div>
+        <span className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-[11px] font-medium text-gray-700">Select Value</span>
+        {type !== 'safety_plan' && (
+          <span className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-[11px] font-medium text-gray-700">Drilldown</span>
+        )}
+      </div>
+    );
+  }
+
   // 9. Standard inputs (text, number, email, phone, url, date, time)
   const valStr = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
   return (

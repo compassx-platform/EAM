@@ -14,66 +14,6 @@ from backend.config import settings
 
 logger = logging.getLogger("compassx.doc_management")
 
-DEFAULT_FOLDERS = [
-    {
-        "folder_name": "ATTACHMENTS",
-        "description": "General Work and Operational Attachments",
-        "default_sub_path": "eam/attachments",
-        "allowed_extensions": ["pdf", "png", "jpg", "jpeg", "docx", "doc", "pptx", "ppt", "pps", "ppsx", "xlsx", "xls", "csv", "txt", "zip", "rar", "7z"],
-        "max_file_size_mb": 50.0,
-        "default_print_thru_vendor": False,
-    },
-    {
-        "folder_name": "MANUALS",
-        "description": "Equipment Manuals and Standard Operating Procedures (SOPs)",
-        "default_sub_path": "eam/manuals",
-        "allowed_extensions": ["pdf", "docx", "doc", "pptx", "ppt", "epub", "txt"],
-        "max_file_size_mb": 100.0,
-        "default_print_thru_vendor": False,
-    },
-    {
-        "folder_name": "DRAWINGS",
-        "description": "Engineering CAD Drawings & Schematic Blueprints",
-        "default_sub_path": "eam/drawings",
-        "allowed_extensions": ["dwg", "dxf", "pdf", "svg", "png", "jpg", "jpeg", "tif", "tiff"],
-        "max_file_size_mb": 100.0,
-        "default_print_thru_vendor": True,
-    },
-    {
-        "folder_name": "CERTIFICATES",
-        "description": "Compliance, Safety & Calibration Certificates",
-        "default_sub_path": "eam/certificates",
-        "allowed_extensions": ["pdf", "png", "jpg", "jpeg", "docx", "doc"],
-        "max_file_size_mb": 25.0,
-        "default_print_thru_vendor": True,
-    },
-    {
-        "folder_name": "INVOICES",
-        "description": "Vendor Invoices, Receipts & Financial Documents",
-        "default_sub_path": "eam/invoices",
-        "allowed_extensions": ["pdf", "xlsx", "xls", "csv", "png", "jpg", "jpeg", "docx", "doc"],
-        "max_file_size_mb": 25.0,
-        "default_print_thru_vendor": False,
-    },
-    {
-        "folder_name": "PHOTOS",
-        "description": "Site Inspection and Equipment Condition Photos",
-        "default_sub_path": "eam/photos",
-        "allowed_extensions": ["png", "jpg", "jpeg", "webp", "heic", "gif", "bmp", "svg"],
-        "max_file_size_mb": 30.0,
-        "default_print_thru_vendor": False,
-    },
-    {
-        "folder_name": "SAFETY_PERMITS",
-        "description": "Permit-to-Work, Isolation Certificates & Hazard Assessments",
-        "default_sub_path": "eam/safety",
-        "allowed_extensions": ["pdf", "png", "jpg", "jpeg", "docx", "doc", "pptx", "ppt"],
-        "max_file_size_mb": 50.0,
-        "default_print_thru_vendor": True,
-    },
-]
-
-
 def generate_doc_code(db: Session, prefix: str = "DOC") -> str:
     """Generates a sequential human-readable document code like DOC-2026-0001"""
     year = datetime.now(timezone.utc).year
@@ -114,39 +54,6 @@ class DocManagementService:
     # -------------------------------------------------------------------------
     # 1. Folder / Category Management
     # -------------------------------------------------------------------------
-
-    def seed_default_folders(self, db: Session) -> List[DocFolder]:
-        """Seeds default document folder categories if they do not exist, and ensures current whitelists are present."""
-        created = []
-        updated = False
-        for f_def in DEFAULT_FOLDERS:
-            existing = db.query(DocFolder).filter(DocFolder.folder_name == f_def["folder_name"]).first()
-            if not existing:
-                folder = DocFolder(
-                    folder_name=f_def["folder_name"],
-                    description=f_def["description"],
-                    volume_id=None,  # Will resolve to default volume
-                    default_sub_path=f_def["default_sub_path"],
-                    allowed_extensions=f_def["allowed_extensions"],
-                    max_file_size_mb=f_def["max_file_size_mb"],
-                    is_active=True,
-                    default_print_thru_vendor=f_def["default_print_thru_vendor"],
-                )
-                db.add(folder)
-                created.append(folder)
-            else:
-                # Merge missing standard extensions (e.g. ppt, pptx) into existing database folders
-                if existing.allowed_extensions and isinstance(existing.allowed_extensions, list):
-                    current_set = set(ext.lower().strip(".") for ext in existing.allowed_extensions)
-                    to_add = [ext for ext in f_def["allowed_extensions"] if ext.lower().strip(".") not in current_set]
-                    if to_add:
-                        existing.allowed_extensions = existing.allowed_extensions + to_add
-                        updated = True
-        if created or updated:
-            db.commit()
-            for f in created:
-                db.refresh(f)
-        return created
 
     def list_folders(
         self,

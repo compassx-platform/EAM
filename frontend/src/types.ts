@@ -288,7 +288,10 @@ export type GenericFieldType =
   | 'boolean'
   | 'table'
   | 'checklist'
-  | 'file';
+  | 'file'
+  | 'asset'
+  | 'asset_table'
+  | 'safety_plan';
 
 export interface EntityField {
   entity_type: string;
@@ -323,7 +326,10 @@ export type EntityFieldType =
   | 'entity_reference'
   | 'table'
   | 'checklist'
-  | 'file';
+  | 'file'
+  | 'asset'
+  | 'asset_table'
+  | 'safety_plan';
 
 /** Field schema submitted when creating an entity via the wizard. */
 export interface EntityFieldInput {
@@ -1020,6 +1026,92 @@ export interface DrilldownAsset extends Asset {
 export interface DrilldownLocation extends Location {
   children_locations?: DrilldownLocation[];
   assets?: DrilldownAsset[];
+}
+
+export interface Hazard {
+  hazard_id: string;
+  description: string;
+  site_id?: string | null;
+  is_hazardous_material: boolean;
+  health_rating?: number | null;
+  flammability_rating?: number | null;
+  reactivity_rating?: number | null;
+  contact_rating?: number | null;
+  msds_document_id?: string | null;
+  status: string;
+  precaution_ids: string[];
+}
+
+export interface Precaution {
+  precaution_id: string;
+  description: string;
+  site_id?: string | null;
+  status: string;
+}
+
+export interface TagOut {
+  tagout_id: string;
+  hazard_id: string;
+  description: string;
+  device?: string | null;
+  site_id?: string | null;
+}
+
+export interface SafetyPlanHazardRow {
+  id: string;
+  hazard_id: string;
+  description?: string | null;
+  is_hazardous_material?: boolean;
+  related_asset_id?: string | null;
+  related_location_id?: string | null;
+  sequence: number;
+  precaution_ids: string[];
+}
+
+export interface SafetyPlanTagOutRow {
+  id: string;
+  tagout_id: string;
+  hazard_id?: string | null;
+  description?: string | null;
+  device?: string | null;
+  work_asset_id?: string | null;
+  work_location_id?: string | null;
+}
+
+export interface SafetyPlan {
+  safety_plan_id: string;
+  site_id: string;
+  description: string;
+  document_id?: string | null;
+  document_file_name?: string | null;
+  document_title?: string | null;
+  status: string;
+  hazards: SafetyPlanHazardRow[];
+  tagouts: SafetyPlanTagOutRow[];
+}
+
+export interface AppliedPrecaution {
+  id: string;
+  precaution_id?: string | null;
+  description: string;
+}
+
+export interface AppliedHazard {
+  id: string;
+  hazard_id?: string | null;
+  description: string;
+  is_hazardous_material: boolean;
+  precautions: AppliedPrecaution[];
+}
+
+export interface AppliedSafety {
+  id?: string;
+  entity_type: string;
+  entity_id: string;
+  safety_plan_id?: string | null;
+  hazards: AppliedHazard[];
+  hazardous_materials: AppliedHazard[];
+  tagouts: Array<{ id: string; tagout_id?: string | null; description: string; device?: string | null }>;
 }
 
 export interface DrilldownSite {

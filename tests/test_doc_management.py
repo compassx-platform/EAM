@@ -378,10 +378,13 @@ def test_compassx_platform_headers(monkeypatch):
 @pytest.mark.asyncio
 async def test_doc_management_service_upload_and_lifecycle(test_db):
     svc = DocManagementService()
-    svc.seed_default_folders(test_db)
-
-    # Get ATTACHMENTS folder
-    att_folder = svc.get_folder(test_db, "ATTACHMENTS")
+    att_folder = await svc.create_folder(
+        db=test_db,
+        folder_name="ATTACHMENTS",
+        description="General attachments",
+        default_sub_path="eam/attachments",
+        allowed_extensions=["pdf", "png", "jpg"],
+    )
     assert att_folder is not None
 
     # Upload document
@@ -467,12 +470,17 @@ async def test_doc_management_url_document(test_db):
 # -----------------------------------------------------------------------------
 
 def test_document_folders_api(client):
-    # 1. List folders
+    for name in ("ATTACHMENTS", "MANUALS", "DRAWINGS"):
+        created = client.post("/api/document-folders", json={
+            "folder_name": name,
+            "description": name,
+            "default_sub_path": f"eam/{name.lower()}",
+        })
+        assert created.status_code == 201
+
     resp = client.get("/api/document-folders")
     assert resp.status_code == 200
-    folders = resp.json()
-    assert len(folders) >= 5
-    folder_names = [f["folder_name"] for f in folders]
+    folder_names = [f["folder_name"] for f in resp.json()]
     assert "ATTACHMENTS" in folder_names
     assert "MANUALS" in folder_names
     assert "DRAWINGS" in folder_names

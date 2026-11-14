@@ -8,19 +8,16 @@ from backend.models.escalation import EscalationDefinition, EscalationLog
 from backend.models.entity_type import EntityTypeDefinition
 from backend.services.command_handler import create_entity, propose_transition
 from backend.services.escalation_engine import (
-    seed_default_escalations,
     run_all_active_escalations,
     execute_single_escalation,
 )
 
 
 def test_escalation_crud_and_run_api(client: TestClient, test_db: Session):
-    # 1. List escalations (auto-seeds defaults)
+    # 1. A fresh database has no escalations until one is created.
     res = client.get("/api/escalations")
     assert res.status_code == 200
-    data = res.json()
-    assert len(data) >= 1
-    assert any(e["id"] == "PTW_AUTO_EXPIRY" for e in data)
+    assert res.json() == []
 
     # 2. Create custom escalation
     custom_esc = {

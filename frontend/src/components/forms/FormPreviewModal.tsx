@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import { AssetPicker } from '../runtime/AssetPicker';
+import { SafetyPlanField } from '../runtime/SafetyPlanField';
 import {
   X,
   RotateCcw,
@@ -1050,6 +1052,26 @@ function InteractiveControl({
           </div>
         )}
       </div>
+    );
+  }
+
+  if (type === 'asset' || type === 'asset_table') {
+    return (
+      <AssetPicker
+        value={String(value || '')}
+        multiple={type === 'asset_table'}
+        readOnly={readOnly}
+        onChange={(next) => onChange(next)}
+      />
+    );
+  }
+  if (type === 'safety_plan') {
+    return (
+      <SafetyPlanField
+        value={String(value || '')}
+        readOnly={readOnly}
+        onChange={(next) => onChange(next)}
+      />
     );
   }
 

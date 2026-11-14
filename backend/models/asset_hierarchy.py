@@ -22,6 +22,7 @@ class Location(Base):
     gl_account = Column(String(100), nullable=True)
     classstructure_id = Column(String(50), nullable=True)
     classification_path = Column(String(500), nullable=True)
+    default_safety_plan_id = Column(String(50), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
@@ -48,6 +49,7 @@ class Location(Base):
             "gl_account": self.gl_account,
             "classstructure_id": self.classstructure_id,
             "classification_path": self.classification_path,
+            "default_safety_plan_id": self.default_safety_plan_id,
             "assets_count": len(self.assets) if self.assets else 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -69,6 +71,7 @@ class Asset(Base):
     parent_asset_id = Column(String(50), nullable=True)
     classstructure_id = Column(String(50), nullable=True)
     classification_path = Column(String(500), nullable=True)
+    default_safety_plan_id = Column(String(50), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     item_num = Column(String(50), nullable=True)  # Rotating inventory item reference
@@ -103,6 +106,7 @@ class Asset(Base):
             "parent_asset_id": self.parent_asset_id,
             "classstructure_id": self.classstructure_id,
             "classification_path": self.classification_path,
+            "default_safety_plan_id": self.default_safety_plan_id,
             "name": self.name,
             "description": self.description,
             "item_num": self.item_num,

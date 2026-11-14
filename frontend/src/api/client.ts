@@ -65,6 +65,11 @@ import type {
   MeterReading,
   MeasurePoint,
   MeterReadingResponse,
+  Hazard,
+  Precaution,
+  TagOut,
+  SafetyPlan,
+  AppliedSafety,
 } from '../types';
 
 
@@ -1293,6 +1298,7 @@ export const api = {
     org_id?: string;
     location_id?: string;
     parent_asset_id?: string;
+    classstructure_id?: string;
     status?: string;
     search?: string;
   }): Promise<Asset[]> {
@@ -1301,6 +1307,7 @@ export const api = {
     if (params?.org_id) sp.set('org_id', params.org_id);
     if (params?.location_id) sp.set('location_id', params.location_id);
     if (params?.parent_asset_id) sp.set('parent_asset_id', params.parent_asset_id);
+    if (params?.classstructure_id) sp.set('classstructure_id', params.classstructure_id);
     if (params?.status) sp.set('status', params.status);
     if (params?.search) sp.set('search', params.search);
     const qs = sp.toString();
@@ -1822,6 +1829,82 @@ export const api = {
     return request<void>(`/measure-points/${encodeURIComponent(pointId)}`, {
       method: 'DELETE',
     });
+  },
+
+  listHazards(siteId?: string): Promise<Hazard[]> {
+    const qs = siteId ? `?site_id=${encodeURIComponent(siteId)}` : '';
+    return request<Hazard[]>(`/hazards${qs}`);
+  },
+
+  createHazard(input: Partial<Hazard> & { hazard_id: string; description: string; precaution_ids?: string[] }): Promise<Hazard> {
+    return request<Hazard>('/hazards', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  listPrecautions(): Promise<Precaution[]> {
+    return request<Precaution[]>('/precautions');
+  },
+
+  createPrecaution(input: { precaution_id: string; description: string; site_id?: string }): Promise<Precaution> {
+    return request<Precaution>('/precautions', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  listTagOuts(): Promise<TagOut[]> {
+    return request<TagOut[]>('/tag-outs');
+  },
+
+  createTagOut(input: { tagout_id: string; hazard_id: string; description: string; device?: string }): Promise<TagOut> {
+    return request<TagOut>('/tag-outs', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  listSafetyPlans(siteId?: string): Promise<SafetyPlan[]> {
+    const qs = siteId ? `?site_id=${encodeURIComponent(siteId)}` : '';
+    return request<SafetyPlan[]>(`/safety-plans${qs}`);
+  },
+
+  createSafetyPlan(input: {
+    safety_plan_id: string;
+    site_id: string;
+    description: string;
+    document_id?: string | null;
+    hazards?: Array<{ hazard_id: string; related_asset_id?: string; related_location_id?: string }>;
+    tagouts?: Array<{ tagout_id: string; work_asset_id?: string; work_location_id?: string }>;
+  }): Promise<SafetyPlan> {
+    return request<SafetyPlan>('/safety-plans', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  applySafetyPlan(input: {
+    entity_type: string;
+    entity_id: string;
+    safety_plan_id?: string;
+    site_id?: string;
+    asset_id?: string;
+    location_id?: string;
+  }): Promise<AppliedSafety> {
+    return request<AppliedSafety>('/safety-plans/apply', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  getAppliedSafety(entityType: string, entityId: string): Promise<AppliedSafety> {
+    return request<AppliedSafety>(`/applied-safety/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`);
+  },
+
+  async uploadSafetyPlanPdf(planId: string, file: File): Promise<SafetyPlan> {
+    const body = new FormData();
+    body.append('file', file);
+    const res = await fetch(`${API_BASE}/safety-plans/${encodeURIComponent(planId)}/document`, {
+      method: 'POST',
+      body,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const payload = await res.json();
+        detail = payload.detail || detail;
+      } catch {
+        /* keep status text */
+      }
+      throw new Error(typeof detail === 'string' ? detail : 'Could not attach the PDF');
+    }
+    return res.json();
   },
 };
 

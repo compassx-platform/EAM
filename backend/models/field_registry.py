@@ -13,6 +13,7 @@ FIELD_TYPES = [
     "select", "selection", "checkbox_group",
     "entity_reference",
     "table", "checklist", "file",
+    "asset", "asset_table", "safety_plan",
 ]
 
 # Types that carry a choice set (inline options and/or a published options list).

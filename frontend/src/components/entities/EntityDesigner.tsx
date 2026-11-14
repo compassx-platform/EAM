@@ -65,6 +65,9 @@ const FIELD_TYPES: Array<{ value: EntityFieldInput['field_type']; label: string;
   { value: 'table', label: 'Table grid', hint: 'Dynamic multi-column row table (widget)' },
   { value: 'checklist', label: 'Checklist', hint: 'Operational checklist from a published Central List' },
   { value: 'file', label: 'Attachment', hint: 'Document or media upload (widget)' },
+  { value: 'asset', label: 'Asset', hint: 'One asset, chosen from a list or the location tree' },
+  { value: 'asset_table', label: 'Multiple assets', hint: 'Several assets, each chosen the same way' },
+  { value: 'safety_plan', label: 'Safety plan', hint: 'Copies hazards and precautions onto this record' },
 ];
 
 interface DesignerRow {

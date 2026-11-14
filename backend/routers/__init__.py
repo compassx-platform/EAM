@@ -18,6 +18,7 @@ from backend.routers.asset_hierarchy import router as asset_hierarchy_router
 from backend.routers.classifications import router as classifications_router
 from backend.routers.meters import router as meters_router
 from backend.routers.documents import router as documents_router
+from backend.routers.safety import router as safety_router
 
 __all__ = [
     "auth_router",
@@ -41,5 +42,6 @@ __all__ = [
     "classifications_router",
     "meters_router",
     "documents_router",
+    "safety_router",
 ]
 

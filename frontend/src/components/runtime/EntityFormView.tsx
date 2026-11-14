@@ -36,6 +36,9 @@ import {
   Folder,
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { AssetPicker } from './AssetPicker';
+import { SafetyPlanField } from './SafetyPlanField';
+import { pickerType } from '../../lib/fieldWidgets';
 import { isItemVisible, isItemReadOnly, isTabVisible, withWorkflowStatus } from '../../lib/conditions';
 import type {
   EntityField,
@@ -67,6 +70,12 @@ export interface EntityFormViewProps {
   onClose?: () => void;
   onRecordUpdated?: () => void;
   isModal?: boolean;
+}
+
+interface FieldContext {
+  entityType?: string;
+  entityId?: string | null;
+  recordValues?: Record<string, string>;
 }
 
 interface ResolvedField {
@@ -496,7 +505,7 @@ export function EntityFormView({
         key: it.i,
         name: it.fieldName || it.i,
         label: it.label ?? undefined,
-        type: it.fieldType,
+        type: pickerType(it.fieldType, byName.get(it.fieldName || '')?.field_type),
         required: Boolean(it.required),
         options,
         checklistItems,
@@ -1714,6 +1723,7 @@ export function EntityFormView({
                                 readOnly={isReadOnly}
                                 persons={persons}
                                 personGroups={personGroups}
+                                context={{ entityType, entityId: activeId, recordValues: values }}
                                 onChange={(v) => handleValueChange(it, v)}
                               />
                             );
@@ -1745,6 +1755,7 @@ export function EntityFormView({
                               value={values[f.field_name] ?? ''}
                               persons={persons}
                               personGroups={personGroups}
+                              context={{ entityType, entityId: activeId, recordValues: values }}
                               readOnly={computeFallbackReadOnly(f.field_name)}
                               onChange={(v) => handleFallbackChange(f.field_name, v)}
                             />
@@ -1778,6 +1789,7 @@ export function EntityFormView({
                           value={values[k] ?? (typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''))}
                           persons={persons}
                           personGroups={personGroups}
+                          context={{ entityType, entityId: activeId, recordValues: values }}
                           readOnly={computeFallbackReadOnly(k)}
                           onChange={(newVal) => handleFallbackChange(k, newVal)}
                         />
@@ -1913,13 +1925,14 @@ const FillCell = forwardRef<HTMLDivElement, {
   readOnly?: boolean;
   persons?: Person[];
   personGroups?: PersonGroup[];
+  context?: FieldContext;
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], onChange, className, style }, ref) {
+}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], context, onChange, className, style }, ref) {
   const id = useId();
   const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
-  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups);
+  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups, context);
   return (
     <div
       ref={ref}
@@ -1953,6 +1966,7 @@ function FieldRow({
   value,
   persons = [],
   personGroups = [],
+  context,
   readOnly = false,
   onChange,
 }: {
@@ -1960,6 +1974,7 @@ function FieldRow({
   value: string;
   persons?: Person[];
   personGroups?: PersonGroup[];
+  context?: FieldContext;
   readOnly?: boolean;
   onChange: (v: string) => void;
 }) {
@@ -1975,7 +1990,7 @@ function FieldRow({
           </span>
         )}
       </label>
-      {makeInput(def, id, value, onChange, 3, readOnly, persons, personGroups)}
+      {makeInput(def, id, value, onChange, 3, readOnly, persons, personGroups, context)}
     </div>
   );
 }
@@ -1988,7 +2003,8 @@ function makeInput(
   textareaRows?: number,
   readOnly = false,
   persons: Person[] = [],
-  personGroups: PersonGroup[] = []
+  personGroups: PersonGroup[] = [],
+  context?: FieldContext,
 ) {
   const cls = `w-full rounded-md border px-3 py-2 text-xs transition-colors shadow-2xs ${
     readOnly
@@ -2261,6 +2277,38 @@ function makeInput(
         </div>
       );
     }
+  }
+  const recordValues = context?.recordValues || {};
+  const siteId = recordValues.site_id || recordValues.site || '';
+  const locationId = recordValues.location_id || recordValues.location || '';
+  let assetId = recordValues.asset_id || recordValues.asset || '';
+  if (assetId.startsWith('{')) {
+    try { assetId = JSON.parse(assetId).asset_id || ''; } catch { /* keep raw */ }
+  }
+  if (def.type === 'asset' || def.type === 'asset_table') {
+    return (
+      <AssetPicker
+        value={value}
+        multiple={def.type === 'asset_table'}
+        siteId={siteId}
+        readOnly={readOnly}
+        onChange={onChange}
+      />
+    );
+  }
+  if (def.type === 'safety_plan') {
+    return (
+      <SafetyPlanField
+        value={value}
+        siteId={siteId}
+        assetId={assetId}
+        locationId={locationId}
+        entityType={context?.entityType}
+        entityId={context?.entityId}
+        readOnly={readOnly}
+        onChange={onChange}
+      />
+    );
   }
   const nativeType: Record<string, string> = {
     number: 'number',

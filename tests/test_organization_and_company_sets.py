@@ -2,14 +2,65 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _enterprise(client: TestClient) -> None:
+    assert client.post("/api/company-sets", json={
+        "set_id": "GLOBAL_SET",
+        "description": "Global vendor set",
+        "auto_add_companies": False,
+        "status": "ACTIVE",
+    }).status_code == 201
+    assert client.post("/api/company-sets", json={
+        "set_id": "COMMERCIAL_SET",
+        "description": "Commercial set",
+        "auto_add_companies": True,
+        "status": "ACTIVE",
+    }).status_code == 201
+    for company, name, company_type in (
+        ("GRAINGER", "W.W. Grainger, Inc.", "V"),
+        ("CATERPILLAR", "Caterpillar Inc.", "M"),
+        ("ABB", "ABB Ltd", "V"),
+        ("FASTENAL", "Fastenal Company", "V"),
+    ):
+        assert client.post("/api/company-master", json={
+            "company": company,
+            "company_set_id": "GLOBAL_SET",
+            "name": name,
+            "type": company_type,
+            "currency_code": "USD",
+        }).status_code == 201
+    assert client.post("/api/organizations", json={
+        "org_id": "EAGLENA",
+        "name": "Eagle North America",
+        "company_set_id": "GLOBAL_SET",
+        "base_currency_1": "USD",
+    }).status_code == 201
+    assert client.post("/api/organizations", json={
+        "org_id": "EAGLEEU",
+        "name": "Eagle Europe",
+        "company_set_id": "GLOBAL_SET",
+        "base_currency_1": "EUR",
+    }).status_code == 201
+    for org_id, company in (
+        ("EAGLENA", "GRAINGER"),
+        ("EAGLENA", "CATERPILLAR"),
+        ("EAGLENA", "FASTENAL"),
+        ("EAGLEEU", "GRAINGER"),
+    ):
+        assert client.post(f"/api/organizations/{org_id}/companies", json={
+            "company": company,
+            "name": company,
+        }).status_code == 201
+    assert client.put("/api/companies/EAGLEEU/GRAINGER", json={"disabled": True}).status_code == 200
+    assert client.post("/api/organizations/EAGLENA/sites", json={
+        "site_id": "BEDFORD",
+        "name": "Bedford Plant",
+    }).status_code == 201
+
+
 def test_list_and_create_company_sets(client: TestClient):
-    # 1. List seeded company sets
     res = client.get("/api/company-sets")
     assert res.status_code == 200
-    sets = res.json()
-    set_ids = [s["set_id"] for s in sets]
-    assert "GLOBAL_SET" in set_ids
-    assert "COMMERCIAL_SET" in set_ids
+    assert res.json() == []
 
     # 2. Create new company set
     create_res = client.post("/api/company-sets", json={
@@ -38,13 +89,14 @@ def test_list_and_create_company_sets(client: TestClient):
 
 
 def test_cannot_delete_company_set_with_assigned_organizations(client: TestClient):
-    # GLOBAL_SET has EAGLENA and EAGLEEU assigned
+    _enterprise(client)
     res = client.delete("/api/company-sets/GLOBAL_SET")
     assert res.status_code == 400
     assert "Cannot delete Company Set 'GLOBAL_SET' because it is assigned" in res.json()["detail"]
 
 
 def test_company_master_crud_and_add_to_orgs(client: TestClient):
+    _enterprise(client)
     # 1. List masters in GLOBAL_SET
     res = client.get("/api/company-master?company_set_id=GLOBAL_SET")
     assert res.status_code == 200
@@ -85,6 +137,7 @@ def test_company_master_crud_and_add_to_orgs(client: TestClient):
 
 
 def test_enterprise_auto_add_companies_rule(client: TestClient):
+    _enterprise(client)
     """Verifies Enterprise EAM's 'Automatically Add Companies to Company Master' rule.
 
     - When False (e.g. GLOBAL_SET): creating an unlisted company directly in an Organization
@@ -126,6 +179,7 @@ def test_enterprise_auto_add_companies_rule(client: TestClient):
 
 
 def test_organization_crud_and_sites(client: TestClient):
+    _enterprise(client)
     # 1. Create Organization
     res = client.post("/api/organizations", json={
         "org_id": "PACIFIC_OPS",
@@ -182,6 +236,7 @@ def test_organization_crud_and_sites(client: TestClient):
 
 
 def test_organization_immutable_company_set_guard(client: TestClient):
+    _enterprise(client)
     # EAGLENA has active companies (GRAINGER, CATERPILLAR, FASTENAL)
     # Attempting to switch its company_set_id to COMMERCIAL_SET must be rejected
     res = client.put("/api/organizations/EAGLENA", json={
@@ -192,6 +247,7 @@ def test_organization_immutable_company_set_guard(client: TestClient):
 
 
 def test_company_org_local_disable_flag(client: TestClient):
+    _enterprise(client)
     """Verifies that a company can be locally disabled in Org A while remaining active in Org B."""
     # In seeded data:
     # GRAINGER is active (disabled=False) in EAGLENA

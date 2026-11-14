@@ -11,6 +11,37 @@ from backend.services import list_service
 
 router = APIRouter(prefix="/forms", tags=["Entity Form Builder"])
 
+PICKER_WIDGETS = {
+    "asset": (12, 2),
+    "asset_table": (12, 3),
+    "safety_plan": (12, 3),
+}
+
+
+def _align_picker_widgets(layout, fields):
+    """A picker field saved as plain text still has to open the selector."""
+    by_name = {f.field_name: f.field_type for f in fields}
+    changed = False
+    aligned = []
+    for item in layout or []:
+        if not isinstance(item, dict):
+            aligned.append(item)
+            continue
+        name = item.get("fieldName") or item.get("field_name")
+        registered = by_name.get(name)
+        size = PICKER_WIDGETS.get(registered)
+        if size and item.get("fieldType") != registered:
+            width, height = size
+            updated = dict(item)
+            updated["fieldType"] = registered
+            updated["w"] = max(int(item.get("w") or 0), width)
+            updated["h"] = max(int(item.get("h") or 0), height)
+            aligned.append(updated)
+            changed = True
+        else:
+            aligned.append(item)
+    return aligned, changed
+
 GENERIC_FIELD_TYPES = [
     "text",
     "long_text",
@@ -30,6 +61,9 @@ GENERIC_FIELD_TYPES = [
     "file",
     "file_attachment",
     "attachment",
+    "asset",
+    "asset_table",
+    "safety_plan",
 ]
 LEGACY_FIELD_TYPES = ["number", "date", "select", "entity_reference"]
 ALLOWED_FIELD_TYPES = GENERIC_FIELD_TYPES + [t for t in LEGACY_FIELD_TYPES if t not in GENERIC_FIELD_TYPES]
@@ -167,6 +201,11 @@ def get_form(entity_type: str, db: Session = Depends(get_db)):
             "initial_state": initial_state,
         }
 
+    layout, changed = _align_picker_widgets(form.layout or [], fields)
+    if changed:
+        form.layout = layout
+        db.commit()
+        db.refresh(form)
     result = form.to_dict()
     result["tabs"] = form.tabs or []
     result["fields"] = with_fields

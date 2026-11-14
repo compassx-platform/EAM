@@ -14,10 +14,6 @@ from backend.database import (
     engine,
     Base,
     ensure_schema_compatibility,
-    seed_default_asset_hierarchy,
-    seed_default_classifications,
-    seed_default_meters,
-    seed_default_document_folders,
 )
 import backend.models
 from backend.services.expiry_worker import check_and_expire_permits
@@ -44,9 +40,8 @@ from backend.routers import (
     classifications_router,
     meters_router,
     documents_router,
+    safety_router,
 )
-from backend.services.escalation_engine import seed_default_escalations
-
 import logging
 
 logger = logging.getLogger("compassx.watchdogs")
@@ -86,11 +81,6 @@ async def lifespan(app: FastAPI):
         db = SessionLocal()
         try:
             ensure_schema_compatibility(db)
-            seed_default_escalations(db)
-            seed_default_asset_hierarchy(db)
-            seed_default_classifications(db)
-            seed_default_meters(db)
-            seed_default_document_folders(db)
         finally:
             db.close()
     except Exception as exc:
@@ -142,6 +132,7 @@ app.include_router(organizations_router)  # Includes /api/company-sets, /api/org
 app.include_router(asset_hierarchy_router)  # /api/locations, /api/assets, /api/hierarchy/drilldown
 app.include_router(classifications_router)  # /api/classifications, /api/classifications/tree, specs
 app.include_router(meters_router)  # /api/meters, /api/meter-groups, /api/measure-points, readings
+app.include_router(safety_router)  # /api/hazards, /api/safety-plans, /api/applied-safety
 app.include_router(entities_router)  # Wildcard /api/{entity_type}/... MUST be last
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI

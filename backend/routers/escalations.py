@@ -9,7 +9,6 @@ from backend.database import get_db
 from backend.models.escalation import EscalationDefinition, EscalationLog
 from backend.models.base import utc_now
 from backend.services.escalation_engine import (
-    seed_default_escalations,
     execute_single_escalation,
     run_all_active_escalations,
 )
@@ -61,7 +60,6 @@ def list_escalations(
     db: Session = Depends(get_db),
 ):
     """Lists all configured escalations with optional filters."""
-    seed_default_escalations(db)
     query = db.query(EscalationDefinition)
     if entity_type and entity_type != "*":
         query = query.filter(EscalationDefinition.entity_type.in_([entity_type.lower(), "*"]))

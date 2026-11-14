@@ -10,6 +10,7 @@ import {
   Users,
   Building2,
   AlarmClock,
+  ShieldAlert,
   Settings,
   Plus,
   PanelLeftClose,
@@ -31,6 +32,7 @@ export type MainNavTab =
   | 'conditions'
   | 'people'
   | 'organizations'
+  | 'safety'
   | 'escalations'
   | 'settings';
 
@@ -228,6 +230,7 @@ export const MainSidebar: React.FC<MainSidebarProps> = ({
 
         {navItem('people', 'People & Roles', Users)}
         {navItem('organizations', 'Asset Hierarchy', Building2)}
+        {navItem('safety', 'Safety', ShieldAlert)}
         {navItem('escalations', 'Escalations', AlarmClock)}
       </nav>
 

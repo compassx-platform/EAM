@@ -9,6 +9,9 @@ import { isItemVisible, isItemReadOnly, isTabVisible, withWorkflowStatus } from 
 import type { EntityField, EntityFormItem, FormTab, ChecklistItem, ResolvedList, VisibilityCondition, ConditionDefinition, Person, PersonGroup, AttachedFile, DocInfo } from '../../types';
 export type { AttachedFile } from '../../types';
 import { DocumentPickerModal } from '../documents';
+import { AssetPicker } from './AssetPicker';
+import { SafetyPlanField } from './SafetyPlanField';
+import { pickerType } from '../../lib/fieldWidgets';
 
 interface EntityCreateFormProps {
   entityType: string;
@@ -192,7 +195,7 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         key: it.i,
         name: it.fieldName || it.i,
         label: it.label ?? undefined,
-        type: it.fieldType,
+        type: pickerType(it.fieldType, byName.get(it.fieldName || '')?.field_type),
         required: Boolean(it.required),
         options,
         checklistItems,
@@ -515,6 +518,8 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                                 readOnly={isReadOnly}
                                 persons={persons}
                                 personGroups={personGroups}
+                                recordValues={values}
+                                entityType={entityType}
                                 onChange={(v) => handleValueChange(it, v)}
                               />
                             );
@@ -549,6 +554,8 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
                             value={values[f.field_name] ?? ''}
                             persons={persons}
                             personGroups={personGroups}
+                            recordValues={values}
+                            entityType={entityType}
                             onChange={(v) => handleFallbackChange(f.field_name, v)}
                           />
                         ))}
@@ -611,13 +618,15 @@ const FillCell = forwardRef<HTMLDivElement, {
   readOnly?: boolean;
   persons?: Person[];
   personGroups?: PersonGroup[];
+  recordValues?: Record<string, string>;
+  entityType?: string;
   onChange: (v: string) => void;
   className?: string;
   style?: CSSProperties;
-}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], onChange, className, style }, ref) {
+}>(function FillCell({ def, value, itemHeight = 1, readOnly = false, persons = [], personGroups = [], recordValues, entityType, onChange, className, style }, ref) {
   const id = useId();
   const rows = def.type === 'long_text' ? Math.max(2, Math.round((itemHeight * 40) / 24)) : 1;
-  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups);
+  const input = makeInput(def, id, value, onChange, rows, readOnly, persons, personGroups, recordValues, entityType);
   return (
     <div
       ref={ref}
@@ -651,12 +660,16 @@ function FieldRow({
   value,
   persons = [],
   personGroups = [],
+  recordValues,
+  entityType,
   onChange,
 }: {
   def: ResolvedField;
   value: string;
   persons?: Person[];
   personGroups?: PersonGroup[];
+  recordValues?: Record<string, string>;
+  entityType?: string;
   onChange: (v: string) => void;
 }) {
   const id = useId();
@@ -666,7 +679,7 @@ function FieldRow({
         {def.label || def.name}
         {def.required && <span className="text-red-500">*</span>}
       </label>
-      {makeInput(def, id, value, onChange, 3, false, persons, personGroups)}
+      {makeInput(def, id, value, onChange, 3, false, persons, personGroups, recordValues, entityType)}
     </div>
   );
 }
@@ -679,7 +692,9 @@ function makeInput(
   textareaRows?: number,
   readOnly = false,
   persons: Person[] = [],
-  personGroups: PersonGroup[] = []
+  personGroups: PersonGroup[] = [],
+  recordValues?: Record<string, string>,
+  entityType?: string,
 ) {
   const cls = `w-full rounded-md border px-3 py-2 text-xs transition-colors shadow-2xs ${
     readOnly
@@ -952,6 +967,31 @@ function makeInput(
         </div>
       );
     }
+  }
+  const siteId = recordValues?.site_id || recordValues?.site || '';
+  const locationId = recordValues?.location_id || recordValues?.location || '';
+  if (def.type === 'asset' || def.type === 'asset_table') {
+    return (
+      <AssetPicker
+        value={value}
+        multiple={def.type === 'asset_table'}
+        siteId={siteId}
+        readOnly={readOnly}
+        onChange={onChange}
+      />
+    );
+  }
+  if (def.type === 'safety_plan') {
+    return (
+      <SafetyPlanField
+        value={value}
+        siteId={siteId}
+        locationId={locationId}
+        entityType={entityType}
+        readOnly={readOnly}
+        onChange={onChange}
+      />
+    );
   }
   const nativeType: Record<string, string> = {
     number: 'number',

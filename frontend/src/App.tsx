@@ -18,6 +18,7 @@ import { RolesView } from './components/roles/RolesView';
 import { RoleEditor } from './components/roles/RoleEditor';
 import { EscalationsView } from './components/escalations';
 import { OrganizationsModule } from './components/organizations';
+import { SafetyModule } from './components/safety/SafetyModule';
 import { DocumentsModule } from './components/documents';
 import { SystemSettingsPage } from './components/settings/SystemSettingsPage';
 import { MainSidebar, type MainNavTab } from './components/navigation/MainSidebar';
@@ -50,7 +51,9 @@ function App() {
                   ? 'escalations'
                   : route.path.startsWith('/organizations')
                     ? 'organizations'
-                    : 'workflows';
+                    : route.path.startsWith('/safety')
+                      ? 'safety'
+                      : 'workflows';
 
   const switchTab = (t: MainNavTab) => {
     if (t === 'settings') navigate('/settings');
@@ -63,6 +66,7 @@ function App() {
     else if (t === 'people') navigate('/people');
     else if (t === 'escalations') navigate('/escalations');
     else if (t === 'organizations') navigate('/organizations');
+    else if (t === 'safety') navigate('/safety');
     else navigate('/workflows');
     setListTick((n) => n + 1);
   };
@@ -103,6 +107,8 @@ function App() {
             <SystemSettingsPage />
           ) : tab === 'organizations' ? (
             <OrganizationsModule />
+          ) : tab === 'safety' ? (
+            <SafetyModule />
           ) : tab === 'records' ? (
             <RuntimeWorkspace />
           ) : tab === 'documents' ? (

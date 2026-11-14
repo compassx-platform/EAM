@@ -3,49 +3,46 @@ from fastapi.testclient import TestClient
 
 
 def test_list_seeded_classifications(client: TestClient):
+    created = client.post("/api/classifications", json={
+        "classification_id": "ROTATING",
+        "description": "Rotating equipment",
+        "use_with": ["ASSET"],
+    })
+    assert created.status_code == 201
     res = client.get("/api/classifications")
     assert res.status_code == 200
-    cls_list = res.json()
-    assert len(cls_list) >= 7
-    paths = [c["hierarchy_path"] for c in cls_list]
+    paths = [c["hierarchy_path"] for c in res.json()]
     assert "ROTATING" in paths
-    assert "ROTATING \\ PUMP" in paths
-    assert "ROTATING \\ PUMP \\ CENTRIFUGAL" in paths
-    assert "FACILITY \\ BUILDING \\ MECH_ROOM" in paths
 
 
 def test_classification_tree_and_filtering(client: TestClient):
-    # Tree for ASSET
+    assert client.post("/api/classifications", json={
+        "classification_id": "ROTATING",
+        "description": "Rotating equipment",
+        "use_with": ["ASSET"],
+    }).status_code == 201
+    assert client.post("/api/classifications", json={
+        "classification_id": "FACILITY",
+        "description": "Facilities",
+        "use_with": ["LOCATIONS"],
+    }).status_code == 201
+
     res_asset = client.get("/api/classifications/tree?use_with=ASSET")
     assert res_asset.status_code == 200
-    asset_tree = res_asset.json()
-    root_ids = [n["classification_id"] for n in asset_tree]
+    root_ids = [n["classification_id"] for n in res_asset.json()]
     assert "ROTATING" in root_ids
-    assert "ELECTRICAL" in root_ids
+    assert "FACILITY" not in root_ids
 
-    # Tree for LOCATIONS
     res_loc = client.get("/api/classifications/tree?use_with=LOCATIONS")
     assert res_loc.status_code == 200
-    loc_tree = res_loc.json()
-    loc_root_ids = [n["classification_id"] for n in loc_tree]
+    loc_root_ids = [n["classification_id"] for n in res_loc.json()]
     assert "FACILITY" in loc_root_ids
 
 
 def test_master_attribute_catalog_crud_and_guards(client: TestClient):
-    # 1. List seeded master attributes
     res = client.get("/api/attributes")
     assert res.status_code == 200
-    attrs = res.json()
-    assert len(attrs) >= 20
-    attr_ids = [a["attribute_id"] for a in attrs]
-    assert "HORSEPOWER" in attr_ids
-    assert "FLOW_RATE" in attr_ids
-    assert "VOLTAGE_RATED" in attr_ids
-    assert "SQUARE_FEET" in attr_ids
-
-    # Check usage count on FLOW_RATE
-    flow_attr = next(a for a in attrs if a["attribute_id"] == "FLOW_RATE")
-    assert flow_attr["usage_count"] >= 1
+    assert res.json() == []
 
     # 2. Create new master attribute
     res_create = client.post("/api/attributes", json={
@@ -75,6 +72,18 @@ def test_master_attribute_catalog_crud_and_guards(client: TestClient):
     assert res_up.json()["description"] == "Overall Vibration Velocity (ISO 10816)"
     assert res_up.json()["unit_of_measure"] == "IN/S"
 
+    assert client.post("/api/classifications", json={
+        "classification_id": "PUMP",
+        "description": "Pumps",
+        "use_with": ["ASSET"],
+        "attributes": [{
+            "attribute_id": "FLOW_RATE",
+            "description": "Rated flow",
+            "data_type": "NUMERIC",
+            "unit_of_measure": "GPM",
+        }],
+    }).status_code == 201
+
     # 5. Prevent deleting master attribute that is referenced in ClassSpec
     res_del_fail = client.delete("/api/attributes/FLOW_RATE")
     assert res_del_fail.status_code == 400
@@ -85,7 +94,67 @@ def test_master_attribute_catalog_crud_and_guards(client: TestClient):
     assert res_del.status_code == 204
 
 
+def _site_and_asset(client: TestClient, asset_id: str = "PUMP_SYS_100") -> None:
+    assert client.post("/api/company-sets", json={
+        "set_id": "SET1", "description": "Set", "auto_add_companies": True, "status": "ACTIVE",
+    }).status_code == 201
+    assert client.post("/api/organizations", json={
+        "org_id": "ORG1", "name": "Org", "company_set_id": "SET1", "base_currency_1": "USD",
+    }).status_code == 201
+    assert client.post("/api/organizations/ORG1/sites", json={
+        "site_id": "BEDFORD", "name": "Bedford",
+    }).status_code == 201
+    assert client.post("/api/locations", json={
+        "location_id": "MECH_ROOM_101", "site_id": "BEDFORD", "description": "Mechanical room",
+        "type": "OPERATING", "status": "OPERATING",
+    }).status_code == 201
+    assert client.post("/api/assets", json={
+        "asset_id": asset_id, "site_id": "BEDFORD", "location_id": "MECH_ROOM_101",
+        "name": "Feed pump", "status": "OPERATING",
+    }).status_code == 201
+
+
 def test_cross_fleet_attribute_search(client: TestClient):
+    _site_and_asset(client)
+    created = client.post("/api/classifications", json={
+        "classification_id": "PUMP",
+        "description": "Pumps",
+        "use_with": ["ASSET"],
+        "attributes": [
+            {"attribute_id": "FLOW_RATE", "description": "Rated flow", "data_type": "NUMERIC", "unit_of_measure": "GPM"},
+            {"attribute_id": "CASING_MAT", "description": "Casing material", "data_type": "ALN"},
+        ],
+    })
+    assert created.status_code == 201
+    class_id = created.json()["classstructure_id"]
+    assert client.put("/api/assets/BEDFORD/PUMP_SYS_100/specifications", json={
+        "classstructure_id": class_id,
+        "specs": [
+            {"attribute_id": "FLOW_RATE", "section": "Hydraulics", "num_value": 450.0, "unit_of_measure": "GPM"},
+            {"attribute_id": "CASING_MAT", "section": "Mechanical", "aln_value": "316L Stainless Steel"},
+        ],
+    }).status_code == 200
+    assert client.post("/api/classifications", json={
+        "classification_id": "ROOM",
+        "description": "Rooms",
+        "use_with": ["LOCATIONS"],
+        "attributes": [
+            {"attribute_id": "SQUARE_FEET", "description": "Area", "data_type": "NUMERIC", "unit_of_measure": "SQFT"},
+        ],
+    }).status_code == 201
+    assert client.put("/api/locations/BEDFORD/MECH_ROOM_101/specifications", json={
+        "classstructure_id": "CS_ROOM",
+        "specs": [{"attribute_id": "SQUARE_FEET", "section": "Physical", "num_value": 3200.0, "unit_of_measure": "SQFT"}],
+    }).status_code == 200
+    assert client.post("/api/locations", json={
+        "location_id": "BLDG_01", "site_id": "BEDFORD", "description": "Building",
+        "type": "OPERATING", "status": "OPERATING",
+    }).status_code == 201
+    assert client.put("/api/locations/BEDFORD/BLDG_01/specifications", json={
+        "classstructure_id": "CS_ROOM",
+        "specs": [{"attribute_id": "SQUARE_FEET", "num_value": 4000.0, "unit_of_measure": "SQFT"}],
+    }).status_code == 200
+
     # 1. Search for assets with FLOW_RATE >= 400 GPM
     res = client.get("/api/attributes/FLOW_RATE/instances?min_num=400")
     assert res.status_code == 200
@@ -198,11 +267,43 @@ def test_classification_crud_and_attribute_inheritance(client: TestClient):
 
 
 def test_asset_and_location_specification_values(client: TestClient):
-    # 1. Fetch specifications for seeded pump asset
+    _site_and_asset(client)
+    created = client.post("/api/classifications", json={
+        "classification_id": "PUMP",
+        "description": "Pumps",
+        "use_with": ["ASSET", "LOCATIONS"],
+        "attributes": [
+            {"attribute_id": "FLOW_RATE", "description": "Rated flow", "data_type": "NUMERIC", "unit_of_measure": "GPM"},
+            {"attribute_id": "CASING_MAT", "description": "Casing material", "data_type": "ALN"},
+            {"attribute_id": "RPM_RATED", "description": "Rated speed", "data_type": "NUMERIC", "unit_of_measure": "RPM"},
+            {"attribute_id": "SQUARE_FEET", "description": "Area", "data_type": "NUMERIC", "unit_of_measure": "SQFT"},
+            {"attribute_id": "EXPLOSION_VENT", "description": "Explosion vent", "data_type": "ALN"},
+            {"attribute_id": "MAX_OCCUPANCY", "description": "Occupancy", "data_type": "NUMERIC"},
+        ],
+    })
+    assert created.status_code == 201
+    class_id = created.json()["classstructure_id"]
+    assert client.put("/api/assets/BEDFORD/PUMP_SYS_100/specifications", json={
+        "classstructure_id": class_id,
+        "specs": [
+            {"attribute_id": "FLOW_RATE", "section": "Hydraulics", "num_value": 450.0, "unit_of_measure": "GPM"},
+            {"attribute_id": "CASING_MAT", "section": "Mechanical", "aln_value": "316L Stainless Steel"},
+            {"attribute_id": "RPM_RATED", "section": "Mechanical", "num_value": 3550.0, "unit_of_measure": "RPM"},
+        ],
+    }).status_code == 200
+    assert client.put("/api/locations/BEDFORD/MECH_ROOM_101/specifications", json={
+        "classstructure_id": class_id,
+        "specs": [
+            {"attribute_id": "SQUARE_FEET", "section": "Physical Dimension", "num_value": 3200.0, "unit_of_measure": "SQFT"},
+            {"attribute_id": "EXPLOSION_VENT", "section": "Safety", "aln_value": "YES"},
+        ],
+    }).status_code == 200
+
+    # 1. Fetch specifications for the pump asset
     res_pump = client.get("/api/assets/BEDFORD/PUMP_SYS_100/specifications")
     assert res_pump.status_code == 200
     pump_data = res_pump.json()
-    assert pump_data["classstructure_id"] == "CS_PUMP_CENT"
+    assert pump_data["classstructure_id"] == "CS_PUMP"
     specs = {s["attribute_id"]: s for s in pump_data["specifications"]}
     assert "FLOW_RATE" in specs
     assert specs["FLOW_RATE"]["num_value"] == 450.0
@@ -238,7 +339,7 @@ def test_asset_and_location_specification_values(client: TestClient):
     res_loc = client.get("/api/locations/BEDFORD/MECH_ROOM_101/specifications")
     assert res_loc.status_code == 200
     loc_data = res_loc.json()
-    assert loc_data["classstructure_id"] == "CS_MECH_ROOM"
+    assert loc_data["classstructure_id"] == "CS_PUMP"
     loc_specs = {s["attribute_id"]: s for s in loc_data["specifications"]}
     assert "SQUARE_FEET" in loc_specs
     assert loc_specs["SQUARE_FEET"]["num_value"] == 3200.0

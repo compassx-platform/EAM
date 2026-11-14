@@ -55,6 +55,19 @@ from backend.models.doclink import (
     DocLink,
     DocAppFolder,
 )
+from backend.models.safety import (
+    Hazard,
+    Precaution,
+    HazardPrecaution,
+    TagOut,
+    SafetyPlan,
+    SafetyPlanHazard,
+    SafetyPlanTagOut,
+    AppliedSafety,
+    AppliedHazard,
+    AppliedPrecaution,
+    AppliedTagOut,
+)
 from backend.models.system_setting import SystemSetting
 
 __all__ = [
@@ -113,5 +126,16 @@ __all__ = [
     "DocLink",
     "DocAppFolder",
     "SystemSetting",
+    "Hazard",
+    "Precaution",
+    "HazardPrecaution",
+    "TagOut",
+    "SafetyPlan",
+    "SafetyPlanHazard",
+    "SafetyPlanTagOut",
+    "AppliedSafety",
+    "AppliedHazard",
+    "AppliedPrecaution",
+    "AppliedTagOut",
 ]
 

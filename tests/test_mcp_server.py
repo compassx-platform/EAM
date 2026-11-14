@@ -517,12 +517,15 @@ def test_mcp_people_module():
 
 def test_mcp_asset_hierarchy_tools(test_db):
     """Verify MCP tools for locations, assets, sub-assemblies, and hierarchy drilldown."""
-    # 1. List seeded locations
+    from backend.models.organization import CompanySet, Organization, Site
+    test_db.add(CompanySet(set_id="SET1", description="Set", auto_add_companies=True, status="ACTIVE"))
+    test_db.add(Organization(org_id="ORG1", name="Org", company_set_id="SET1", base_currency_1="USD", status="ACTIVE"))
+    test_db.add(Site(site_id="BEDFORD", org_id="ORG1", name="Bedford", status="ACTIVE"))
+    test_db.commit()
+
     locs = location_list(site_id="BEDFORD")
     assert locs["success"] is True
-    loc_ids = [l["location_id"] for l in locs["locations"]]
-    assert "FACILITY_A" in loc_ids
-    assert "MECH_ROOM_101" in loc_ids
+    assert locs["locations"] == []
 
     # 2. Create location
     created_loc = location_create(
@@ -562,12 +565,9 @@ def test_mcp_asset_hierarchy_tools(test_db):
     assert get_loc["location"]["location_id"] == "MCP_TEST_WAREHOUSE"
     assert "installed_assets" in get_loc["location"]
 
-    # 6. List seeded assets
     assets = asset_list(site_id="BEDFORD")
     assert assets["success"] is True
-    asset_ids = [a["asset_id"] for a in assets["assets"]]
-    assert "PUMP_SYS_100" in asset_ids
-    assert "MOTOR_50HP_01" in asset_ids
+    assert assets["assets"] == []
 
     # 7. Create parent machinery asset
     created_asset = asset_create(
@@ -626,8 +626,8 @@ def test_mcp_asset_hierarchy_tools(test_db):
     assert drilldown["count"] == 1
     site_tree = drilldown["sites"][0]
     assert site_tree["site_id"] == "BEDFORD"
-    assert site_tree["total_locations"] >= 5
-    assert site_tree["total_assets"] >= 5
+    assert site_tree["total_locations"] >= 1
+    assert site_tree["total_assets"] >= 1
 
     # Also test convenience alias hierarchy_drilldown
     alias_tree = hierarchy_drilldown(site_id="BEDFORD")

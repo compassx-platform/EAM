@@ -9,15 +9,17 @@ export default defineConfig({
     watch: {
       ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.cache/**'],
     },
-    hmr: { clientPort: 443 },
+    hmr: process.env.VITE_HMR_CLIENT_PORT
+      ? { clientPort: Number(process.env.VITE_HMR_CLIENT_PORT) }
+      : undefined,
     port: 8080,
     proxy: {
       '/mcp': {
-        target: 'http://localhost:8000',
+        target: process.env.EAM_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.EAM_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },
     },
