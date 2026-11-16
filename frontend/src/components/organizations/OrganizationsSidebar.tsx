@@ -12,6 +12,7 @@ import {
   FolderTree,
   Tag,
   Gauge,
+  ListTree,
 } from 'lucide-react';
 
 interface OrganizationsSidebarProps {
@@ -60,8 +61,9 @@ export const OrganizationsSidebar: React.FC<OrganizationsSidebarProps> = ({
   const isLocations = currentPath.startsWith('/organizations/locations');
   const isAssets = currentPath.startsWith('/organizations/assets');
   const isClassifications = currentPath.startsWith('/organizations/classifications');
+  const isFailureCodes = currentPath.startsWith('/organizations/failure-codes');
   const isMeters = currentPath.startsWith('/organizations/meters');
-  const isOrgs = !isCompanySets && !isCompanies && !isLocations && !isAssets && !isClassifications && !isMeters;
+  const isOrgs = !isCompanySets && !isCompanies && !isLocations && !isAssets && !isClassifications && !isFailureCodes && !isMeters;
 
   const coreNavItems = [
     {
@@ -98,6 +100,13 @@ export const OrganizationsSidebar: React.FC<OrganizationsSidebarProps> = ({
       icon: Tag,
       path: '/organizations/classifications',
       active: isClassifications,
+    },
+    {
+      id: 'failure-codes',
+      label: 'Failure codes',
+      icon: ListTree,
+      path: '/organizations/failure-codes',
+      active: isFailureCodes,
     },
     {
       id: 'company-sets',

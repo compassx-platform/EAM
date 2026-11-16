@@ -5,6 +5,7 @@ from backend.routers.workflows import router as workflows_router
 from backend.routers.entities import router as entities_router
 from backend.routers.system import router as system_router
 from backend.routers.forms import router as forms_router
+from backend.routers.reports import router as reports_router
 from backend.routers.actions import router as actions_router
 from backend.routers.lists import router as lists_router
 from backend.routers.entity_types import router as entity_types_router
@@ -19,6 +20,7 @@ from backend.routers.classifications import router as classifications_router
 from backend.routers.meters import router as meters_router
 from backend.routers.documents import router as documents_router
 from backend.routers.safety import router as safety_router
+from backend.routers.failures import router as failures_router
 
 __all__ = [
     "auth_router",
@@ -28,6 +30,7 @@ __all__ = [
     "entities_router",
     "system_router",
     "forms_router",
+    "reports_router",
     "actions_router",
     "lists_router",
     "entity_types_router",
@@ -43,5 +46,6 @@ __all__ = [
     "meters_router",
     "documents_router",
     "safety_router",
+    "failures_router",
 ]
 

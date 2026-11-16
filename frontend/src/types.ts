@@ -304,6 +304,10 @@ export interface EntityField {
   /** Central published list referenced for a select field's options. */
   option_list_key?: string | null;
   reference_entity_type?: string | null;
+  /** Sequence whose next value fills this text field on create. */
+  autonumber_sequence?: string | null;
+  /** organization uses the organization row; site uses the record's site row. */
+  autonumber_level?: 'organization' | 'site' | null;
   /** Active references (in forms, workflows, conditions) blocking field deletion */
   blockers?: string[];
 }
@@ -340,6 +344,18 @@ export interface EntityFieldInput {
   select_options?: string[];
   option_list_key?: string | null;
   reference_entity_type?: string | null;
+  autonumber_sequence?: string | null;
+  autonumber_level?: 'organization' | 'site' | null;
+}
+
+export interface AutonumberSequence {
+  org_id: string;
+  sequence_name: string;
+  site_id?: string | null;
+  level: 'organization' | 'site';
+  prefix: string;
+  seed: number;
+  next_value: string;
 }
 
 export interface EntityRecord {
@@ -525,6 +541,34 @@ export interface EntityForm {
   workflow_states?: string[];
   /** The workflow stage a new record starts in (used by the create form). */
   initial_state?: string | null;
+}
+
+export type ReportBlockKind = 'heading' | 'text' | 'field' | 'row' | 'section' | 'header' | 'choices' | 'yes_no' | 'signoff' | 'table';
+
+export interface ReportBlock {
+  id: string;
+  kind: ReportBlockKind;
+  text?: string | null;
+  field_name?: string | null;
+  fields?: string[];
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  left?: string | null;
+  right?: string | null;
+  columns?: number | null;
+  headers?: string[];
+  row_count?: number | null;
+}
+
+export interface ReportLayout {
+  id: string;
+  entity_type: string;
+  name: string;
+  is_default: boolean;
+  blocks: ReportBlock[];
+  updated_at?: string | null;
 }
 
 export type ListKind = 'options' | 'checklist';
@@ -988,6 +1032,7 @@ export interface Location {
   gl_account?: string | null;
   classstructure_id?: string | null;
   classification_path?: string | null;
+  failure_class_code?: string | null;
   installed_assets?: Asset[];
   created_at?: string;
   updated_at?: string;
@@ -1003,6 +1048,7 @@ export interface Asset {
   parent_asset_id?: string | null;
   classstructure_id?: string | null;
   classification_path?: string | null;
+  failure_class_code?: string | null;
   name: string;
   description?: string | null;
   item_num?: string | null;
@@ -1017,6 +1063,21 @@ export interface Asset {
   child_assets?: Asset[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface FailureNode {
+  id: string;
+  org_id: string;
+  parent_id?: string | null;
+  code: string;
+  node_type: 'class' | 'problem' | 'cause' | 'remedy';
+  description: string;
+}
+
+export interface ApplicableFailureClass {
+  code: string | null;
+  description: string | null;
+  source: 'asset' | 'location' | null;
 }
 
 export interface DrilldownAsset extends Asset {

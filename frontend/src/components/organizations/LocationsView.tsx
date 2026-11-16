@@ -17,7 +17,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import type { Location, Site, Organization, LocationType, LocationStatus } from '../../types';
+import type { Location, Site, Organization, LocationType, LocationStatus, FailureNode } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
 import { InstanceSpecificationsInspector } from './InstanceSpecificationsInspector';
 
@@ -371,9 +371,19 @@ const LocationDirectModal: React.FC<LocationDirectModalProps> = ({
   const [type, setType] = useState<LocationType>(initialData.type || 'OPERATING');
   const [status, setStatus] = useState<LocationStatus>(initialData.status || 'OPERATING');
   const [glAccount, setGlAccount] = useState(initialData.gl_account || '');
+  const [failureClass, setFailureClass] = useState(initialData.failure_class_code || '');
+  const [failureClasses, setFailureClasses] = useState<FailureNode[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const orgId = sites.find((site) => site.site_id === siteId)?.org_id;
+
+  useEffect(() => {
+    if (!orgId) return;
+    api.listFailureNodes(orgId)
+      .then((rows) => setFailureClasses(rows.filter((row) => row.node_type === 'class')))
+      .catch(() => setFailureClasses([]));
+  }, [orgId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,6 +401,7 @@ const LocationDirectModal: React.FC<LocationDirectModalProps> = ({
           type,
           status,
           gl_account: glAccount.trim() || undefined,
+          failure_class_code: type === 'OPERATING' ? (failureClass || null) : null,
         });
       } else {
         await api.updateLocation(initialData.site_id!, initialData.location_id!, {
@@ -399,6 +410,7 @@ const LocationDirectModal: React.FC<LocationDirectModalProps> = ({
           type,
           status,
           gl_account: glAccount.trim() || undefined,
+          failure_class_code: type === 'OPERATING' ? (failureClass || '') : '',
         });
       }
       onSaved();
@@ -517,6 +529,16 @@ const LocationDirectModal: React.FC<LocationDirectModalProps> = ({
               </select>
             </div>
           </div>
+
+          {type === 'OPERATING' && (
+            <div>
+              <label className="block font-semibold text-gray-700 mb-1">Failure class</label>
+              <select value={failureClass} onChange={(e) => setFailureClass(e.target.value)} className="h-8 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-800 focus:border-sky-500 focus:outline-none">
+                <option value="">None</option>
+                {failureClasses.map((row) => <option key={row.id} value={row.code}>{row.code} — {row.description}</option>)}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

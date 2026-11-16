@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Database,
   Folder,
+  ListTree,
 } from 'lucide-react';
 import type {
   EntityFormItem,
@@ -631,15 +632,21 @@ function ControlPreviewWidget({
     );
   }
 
-  if (type === 'asset' || type === 'asset_table' || type === 'safety_plan') {
-    const label = type === 'safety_plan' ? 'Select safety plan' : type === 'asset_table' ? 'Select assets' : 'Select asset';
+  if (type === 'safety_plan') {
     return (
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-xs text-gray-400">{label}</div>
-        <span className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-[11px] font-medium text-gray-700">Select Value</span>
-        {type !== 'safety_plan' && (
-          <span className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-[11px] font-medium text-gray-700">Drilldown</span>
-        )}
+      <div className="min-w-0 flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 text-xs text-gray-400">Select safety plan</div>
+    );
+  }
+
+  if (type === 'asset' || type === 'asset_table') {
+    return (
+      <div className="flex w-full overflow-hidden rounded-md border border-gray-300 bg-white">
+        <div className="min-w-0 flex-1 truncate px-3 py-2 text-xs text-gray-400">
+          {type === 'asset_table' ? 'Type to add an asset' : 'Type to search assets'}
+        </div>
+        <span className="inline-flex items-center border-l border-gray-200 px-2.5 text-gray-400">
+          <ListTree className="h-3.5 w-3.5" />
+        </span>
       </div>
     );
   }

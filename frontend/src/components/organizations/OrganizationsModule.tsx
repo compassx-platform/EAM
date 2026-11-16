@@ -11,6 +11,7 @@ import { CompaniesView } from './CompaniesView';
 import { LocationsView } from './LocationsView';
 import { AssetDrilldownView } from './AssetDrilldownView';
 import { ClassificationsView } from './ClassificationsView';
+import { FailureCodesView } from './FailureCodesView';
 import { MetersView } from './MetersView';
 
 export const OrganizationsModule: React.FC = () => {
@@ -23,8 +24,9 @@ export const OrganizationsModule: React.FC = () => {
   const isLocations = route.path.startsWith('/organizations/locations');
   const isAssets = route.path.startsWith('/organizations/assets');
   const isClassifications = route.path.startsWith('/organizations/classifications');
+  const isFailureCodes = route.path.startsWith('/organizations/failure-codes');
   const isMeters = route.path.startsWith('/organizations/meters');
-  const isOrgs = !isCompanySets && !isCompanies && !isLocations && !isAssets && !isClassifications && !isMeters;
+  const isOrgs = !isCompanySets && !isCompanies && !isLocations && !isAssets && !isClassifications && !isFailureCodes && !isMeters;
 
   // IDs
   const companySetId = isCompanySets && route.path !== '/organizations/company-sets' ? route.id : undefined;
@@ -43,6 +45,13 @@ export const OrganizationsModule: React.FC = () => {
       return {
         section: 'Classifications & Specifications',
         path: '/organizations/classifications',
+        detail: null,
+      };
+    }
+    if (isFailureCodes) {
+      return {
+        section: 'Failure codes',
+        path: '/organizations/failure-codes',
         detail: null,
       };
     }
@@ -141,6 +150,8 @@ export const OrganizationsModule: React.FC = () => {
         <div className="flex-1 overflow-hidden min-h-0 bg-white">
           {isMeters ? (
             <MetersView />
+          ) : isFailureCodes ? (
+            <FailureCodesView />
           ) : isClassifications ? (
             <ClassificationsView
               onNavigateToAsset={(siteId, assetId) => navigate('/organizations/assets')}

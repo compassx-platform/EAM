@@ -12,6 +12,10 @@ import type {
   EntityEvent,
   ValidTransition,
   EntityForm,
+  ReportLayout,
+  FailureNode,
+  ApplicableFailureClass,
+  ReportBlock,
   EntityFormItem,
   FormTab,
   FormVersion,
@@ -44,6 +48,7 @@ import type {
   CompanySet,
   CompanyMaster,
   Organization,
+  AutonumberSequence,
   Site,
   CompanyOrg,
   CompanyContact,
@@ -255,6 +260,8 @@ export const api = {
     select_options?: string[];
     option_list_key?: string | null;
     reference_entity_type?: string | null;
+    autonumber_sequence?: string | null;
+    autonumber_level?: 'organization' | 'site' | null;
   }): Promise<EntityField> {
     return request<EntityField>('/fields', { method: 'POST', body: JSON.stringify(input) });
   },
@@ -265,6 +272,38 @@ export const api = {
 
   listForms(): Promise<Array<{ entity_type: string; cols: number; row_height: number; item_count: number; updated_at?: string | null }>> {
     return request('/forms');
+  },
+
+  listReports(entityType?: string): Promise<ReportLayout[]> {
+    const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : '';
+    return request<ReportLayout[]>(`/reports${q}`);
+  },
+
+  getReport(id: string): Promise<ReportLayout> {
+    return request<ReportLayout>(`/reports/${encodeURIComponent(id)}`);
+  },
+
+  saveReport(input: {
+    id?: string;
+    entity_type: string;
+    name: string;
+    is_default: boolean;
+    blocks: ReportBlock[];
+  }): Promise<ReportLayout> {
+    const body = JSON.stringify({
+      entity_type: input.entity_type,
+      name: input.name,
+      is_default: input.is_default,
+      blocks: input.blocks,
+    });
+    if (input.id) {
+      return request<ReportLayout>(`/reports/${encodeURIComponent(input.id)}`, { method: 'PUT', body });
+    }
+    return request<ReportLayout>('/reports', { method: 'POST', body });
+  },
+
+  deleteReport(id: string): Promise<{ deleted: boolean }> {
+    return request(`/reports/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   getForm(entityType: string): Promise<EntityForm & { fields: EntityField[] }> {
@@ -1098,6 +1137,30 @@ export const api = {
     return request<Organization>(`/organizations/${encodeURIComponent(orgId)}`);
   },
 
+  listAutonumbers(): Promise<AutonumberSequence[]> {
+    return request<AutonumberSequence[]>('/autonumbers');
+  },
+
+  listOrgAutonumbers(orgId: string): Promise<AutonumberSequence[]> {
+    return request<AutonumberSequence[]>(`/organizations/${encodeURIComponent(orgId)}/autonumbers`);
+  },
+
+  saveAutonumber(orgId: string, sequenceName: string, input: {
+    organization: { prefix: string; seed: number };
+    sites: Array<{ site_id: string; prefix: string; seed: number }>;
+  }): Promise<AutonumberSequence[]> {
+    return request<AutonumberSequence[]>(
+      `/organizations/${encodeURIComponent(orgId)}/autonumbers/${encodeURIComponent(sequenceName)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    );
+  },
+
+  deleteAutonumber(orgId: string, sequenceName: string): Promise<{ deleted: boolean }> {
+    return request(`/organizations/${encodeURIComponent(orgId)}/autonumbers/${encodeURIComponent(sequenceName)}`, {
+      method: 'DELETE',
+    });
+  },
+
   createOrganization(input: Partial<Organization>): Promise<Organization> {
     return request<Organization>('/organizations', {
       method: 'POST',
@@ -1359,6 +1422,36 @@ export const api = {
     if (params?.org_id) sp.set('org_id', params.org_id);
     const qs = sp.toString();
     return request<DrilldownSite[]>(`/hierarchy/drilldown${qs ? `?${qs}` : ''}`);
+  },
+
+  listFailureNodes(orgId: string): Promise<FailureNode[]> {
+    return request<FailureNode[]>(`/failure-nodes?org_id=${encodeURIComponent(orgId)}`);
+  },
+
+  createFailureNode(input: {
+    org_id: string;
+    code: string;
+    description: string;
+    node_type: FailureNode['node_type'];
+    parent_id?: string | null;
+  }): Promise<FailureNode> {
+    return request<FailureNode>('/failure-nodes', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  deleteFailureNode(nodeId: string): Promise<{ deleted: boolean }> {
+    return request(`/failure-nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
+  },
+
+  updateFailureCode(orgId: string, code: string, description: string): Promise<{ code: string; description: string }> {
+    return request(`/failure-codes/${encodeURIComponent(orgId)}/${encodeURIComponent(code)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ description }),
+    });
+  },
+
+  applicableFailureClass(siteId: string, assetId: string): Promise<ApplicableFailureClass> {
+    const params = new URLSearchParams({ site_id: siteId, asset_id: assetId });
+    return request(`/failure-classes/applicable?${params.toString()}`);
   },
 
   listClassifications(params?: {

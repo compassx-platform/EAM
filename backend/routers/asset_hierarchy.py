@@ -8,8 +8,16 @@ from sqlalchemy import func, and_, or_
 from backend.database import get_db
 from backend.models.organization import Site, Organization
 from backend.models.asset_hierarchy import Location, Asset
+from backend.services.failure_service import FailureError, require_failure_class
 
 router = APIRouter(prefix="/api", tags=["Asset Hierarchy & Locations"])
+
+
+def _failure_class(db: Session, org_id: str, code: Optional[str]) -> Optional[str]:
+    try:
+        return require_failure_class(db, org_id, code)
+    except FailureError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
 
 
 # ---- Pydantic Schemas ----
@@ -24,6 +32,7 @@ class LocationCreate(BaseModel):
     status: str = "OPERATING"  # OPERATING | NOT_READY | DECOMMISSIONED
     gl_account: Optional[str] = None
     default_safety_plan_id: Optional[str] = None
+    failure_class_code: Optional[str] = None
 
 
 class LocationUpdate(BaseModel):
@@ -33,6 +42,7 @@ class LocationUpdate(BaseModel):
     status: Optional[str] = None
     gl_account: Optional[str] = None
     default_safety_plan_id: Optional[str] = None
+    failure_class_code: Optional[str] = None
 
 
 class AssetCreate(BaseModel):
@@ -54,6 +64,7 @@ class AssetCreate(BaseModel):
     priority: int = 3
     classstructure_id: Optional[str] = None
     default_safety_plan_id: Optional[str] = None
+    failure_class_code: Optional[str] = None
 
 
 class AssetUpdate(BaseModel):
@@ -72,6 +83,7 @@ class AssetUpdate(BaseModel):
     priority: Optional[int] = None
     classstructure_id: Optional[str] = None
     default_safety_plan_id: Optional[str] = None
+    failure_class_code: Optional[str] = None
 
 
 # ---- Location Endpoints ----
@@ -141,16 +153,21 @@ def create_location(
                 detail=f"Parent location '{ploc_id}' does not exist in Site '{sid}'.",
             )
 
+    loc_type = data.type.upper()
+    failure_class = _failure_class(db, data.org_id or site.org_id, data.failure_class_code)
+    if loc_type != "OPERATING" and failure_class:
+        raise HTTPException(status_code=400, detail="Only an operating location can have a failure class.")
     loc = Location(
         location_id=lid,
         site_id=sid,
         org_id=data.org_id or site.org_id,
         parent_location_id=ploc_id,
         description=data.description,
-        type=data.type.upper(),
+        type=loc_type,
         status=data.status.upper(),
         gl_account=data.gl_account,
         default_safety_plan_id=data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None,
+        failure_class_code=failure_class if loc_type == "OPERATING" else None,
     )
     db.add(loc)
     db.commit()
@@ -215,6 +232,12 @@ def update_location(
         loc.gl_account = data.gl_account
     if data.default_safety_plan_id is not None:
         loc.default_safety_plan_id = data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None
+    if loc.type != "OPERATING":
+        if data.failure_class_code and data.failure_class_code.strip():
+            raise HTTPException(status_code=400, detail="Only an operating location can have a failure class.")
+        loc.failure_class_code = None
+    elif data.failure_class_code is not None:
+        loc.failure_class_code = _failure_class(db, loc.org_id, data.failure_class_code)
 
     db.commit()
     db.refresh(loc)
@@ -352,6 +375,7 @@ def create_asset(
         priority=data.priority,
         classstructure_id=data.classstructure_id.strip().upper() if data.classstructure_id else None,
         default_safety_plan_id=data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None,
+        failure_class_code=_failure_class(db, data.org_id or site.org_id, data.failure_class_code),
     )
     db.add(asset)
     db.commit()
@@ -434,6 +458,8 @@ def update_asset(
         asset.classstructure_id = data.classstructure_id.strip().upper() if data.classstructure_id else None
     if data.default_safety_plan_id is not None:
         asset.default_safety_plan_id = data.default_safety_plan_id.strip().upper() if data.default_safety_plan_id else None
+    if data.failure_class_code is not None:
+        asset.failure_class_code = _failure_class(db, asset.org_id, data.failure_class_code)
 
     db.commit()
     db.refresh(asset)

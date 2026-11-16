@@ -26,6 +26,7 @@ from backend.routers import (
     entities_router,
     system_router,
     forms_router,
+    reports_router,
     actions_router,
     lists_router,
     entity_types_router,
@@ -41,6 +42,7 @@ from backend.routers import (
     meters_router,
     documents_router,
     safety_router,
+    failures_router,
 )
 import logging
 
@@ -117,6 +119,7 @@ app.include_router(fields_router, prefix=settings.API_PREFIX)
 app.include_router(conditions_router, prefix=settings.API_PREFIX)
 app.include_router(workflows_router, prefix=settings.API_PREFIX)
 app.include_router(forms_router, prefix=settings.API_PREFIX)
+app.include_router(reports_router, prefix=settings.API_PREFIX)
 app.include_router(actions_router, prefix=settings.API_PREFIX)
 app.include_router(lists_router, prefix=settings.API_PREFIX)
 app.include_router(entity_types_router, prefix=settings.API_PREFIX)
@@ -133,6 +136,7 @@ app.include_router(asset_hierarchy_router)  # /api/locations, /api/assets, /api/
 app.include_router(classifications_router)  # /api/classifications, /api/classifications/tree, specs
 app.include_router(meters_router)  # /api/meters, /api/meter-groups, /api/measure-points, readings
 app.include_router(safety_router)  # /api/hazards, /api/safety-plans, /api/applied-safety
+app.include_router(failures_router)  # /api/failure-nodes, /api/failure-codes
 app.include_router(entities_router)  # Wildcard /api/{entity_type}/... MUST be last
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI

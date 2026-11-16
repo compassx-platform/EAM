@@ -5,6 +5,7 @@ import {
   MapPin,
   Store,
   Sliders,
+  Hash,
   Plus,
   Trash2,
   Edit2,
@@ -17,6 +18,7 @@ import {
 import { api } from '../../api/client';
 import type { Organization, Site, CompanyOrg, CompanySet } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
+import { AutonumberPanel } from './AutonumberPanel';
 
 interface OrganizationEditorProps {
   orgId: string;
@@ -35,7 +37,7 @@ export const OrganizationEditor: React.FC<OrganizationEditorProps> = ({
   const [companies, setCompanies] = useState<CompanyOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'sites' | 'options' | 'companies'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'sites' | 'autonumber' | 'options' | 'companies'>('general');
 
   // General Form
   const [name, setName] = useState('');
@@ -275,6 +277,18 @@ export const OrganizationEditor: React.FC<OrganizationEditorProps> = ({
             >
               <MapPin className="h-3.5 w-3.5" />
               <span>Sites ({sites.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('autonumber')}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                activeTab === 'autonumber'
+                  ? 'bg-white font-semibold text-gray-900 shadow-2xs'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              <Hash className="h-3.5 w-3.5" />
+              <span>Autonumber</span>
             </button>
             <button
               type="button"
@@ -559,6 +573,8 @@ export const OrganizationEditor: React.FC<OrganizationEditorProps> = ({
         )}
 
         {/* Tab 3: Organization Options (Enterprise Select Action Rules) */}
+        {activeTab === 'autonumber' && <AutonumberPanel orgId={orgId} sites={sites} />}
+
         {activeTab === 'options' && (
           <div className="max-w-3xl space-y-6">
             <div>

@@ -3,6 +3,7 @@ from backend.models.users import AppUser, AppRole, app_user_role
 from backend.models.field_registry import EntityField
 from backend.models.workflow import WorkflowDefinition, GateInstance
 from backend.models.forms import EntityForm
+from backend.models.report import ReportLayout
 from backend.models.lists import ListDefinition
 from backend.models.entity_type import EntityTypeDefinition
 from backend.models.entities import (
@@ -24,6 +25,7 @@ from backend.models.task_assignment import TaskAssignment
 from backend.models.conditions import ConditionDefinition, ConditionVersion
 from backend.models.notification import InAppNotification
 from backend.models.escalation import EscalationDefinition, EscalationLog
+from backend.models.autonumber import AutonumberSequence
 from backend.models.organization import (
     CompanySet,
     CompanyMaster,
@@ -33,6 +35,7 @@ from backend.models.organization import (
     CompanyContact,
 )
 from backend.models.asset_hierarchy import Location, Asset
+from backend.models.failure import FailureCode, FailureList
 from backend.models.classification import (
     AssetAttribute,
     Classification,
@@ -87,6 +90,7 @@ __all__ = [
     "EntityInstance",
     "EntityEvent",
     "EntityForm",
+    "ReportLayout",
     "ListDefinition",
     "get_entity_models",
     "Person",
@@ -107,8 +111,11 @@ __all__ = [
     "Site",
     "CompanyOrg",
     "CompanyContact",
+    "AutonumberSequence",
     "Location",
     "Asset",
+    "FailureCode",
+    "FailureList",
     "AssetAttribute",
     "Classification",
     "ClassSpec",

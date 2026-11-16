@@ -40,6 +40,8 @@ import type {
   LocationType,
   LocationStatus,
   AssetStatus,
+  FailureNode,
+  ApplicableFailureClass,
 } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
 import { InstanceSpecificationsInspector } from './InstanceSpecificationsInspector';
@@ -1099,6 +1101,19 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
   onAddSubAsset,
   onSelectChildNode,
 }) => {
+  const assetNode = selectedNode.kind === 'asset' ? selectedNode.data : null;
+  const [appliedFailure, setAppliedFailure] = useState<ApplicableFailureClass | null>(null);
+  useEffect(() => {
+    if (!assetNode) {
+      setAppliedFailure(null);
+      return;
+    }
+    let alive = true;
+    api.applicableFailureClass(assetNode.site_id, assetNode.asset_id)
+      .then((row) => { if (alive) setAppliedFailure(row); })
+      .catch(() => { if (alive) setAppliedFailure(null); });
+    return () => { alive = false; };
+  }, [assetNode?.site_id, assetNode?.asset_id, assetNode?.failure_class_code, assetNode?.location_id]);
   if (selectedNode.kind === 'site') {
     const site = selectedNode.data;
     return (
@@ -1454,6 +1469,15 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
               <dt className="text-gray-400 text-[10px]">Current Location</dt>
               <dd className="font-mono font-medium text-sky-800">
                 {asset.location_id || 'Unassigned / Staging'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-gray-400 text-[10px]">Failure class</dt>
+              <dd className="font-mono font-medium text-gray-800">
+                {asset.failure_class_code || '—'}
+                {appliedFailure?.source === 'location' && appliedFailure.code && (
+                  <span className="ml-1 font-sans text-[10px] text-gray-500">Applies from location: {appliedFailure.code}</span>
+                )}
               </dd>
             </div>
             <div>
@@ -1824,6 +1848,8 @@ const AssetModal: React.FC<AssetModalProps> = ({
   const [model, setModel] = useState(initialData.model || '');
   const [purchaseCost, setPurchaseCost] = useState<number>(initialData.purchase_cost || 0);
   const [priority, setPriority] = useState<number>(initialData.priority || 3);
+  const [failureClass, setFailureClass] = useState(initialData.failure_class_code || '');
+  const [failureClasses, setFailureClasses] = useState<FailureNode[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1843,6 +1869,14 @@ const AssetModal: React.FC<AssetModalProps> = ({
       });
     }
   }, [siteId, assetId]);
+
+  const orgId = sites.find((site) => site.site_id === siteId)?.org_id;
+  useEffect(() => {
+    if (!orgId) return;
+    api.listFailureNodes(orgId)
+      .then((rows) => setFailureClasses(rows.filter((row) => row.node_type === 'class')))
+      .catch(() => setFailureClasses([]));
+  }, [orgId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1867,6 +1901,7 @@ const AssetModal: React.FC<AssetModalProps> = ({
           model: model.trim() || undefined,
           purchase_cost: Number(purchaseCost) || 0,
           priority: Number(priority) || 3,
+          failure_class_code: failureClass || null,
         });
       } else {
         await api.updateAsset(initialData.site_id!, initialData.asset_id!, {
@@ -1882,6 +1917,7 @@ const AssetModal: React.FC<AssetModalProps> = ({
           model: model.trim() || undefined,
           purchase_cost: Number(purchaseCost) || 0,
           priority: Number(priority) || 3,
+          failure_class_code: failureClass || '',
         });
       }
       onSaved();
@@ -2125,6 +2161,15 @@ const AssetModal: React.FC<AssetModalProps> = ({
                 className="h-8 w-full font-mono rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-800 focus:border-sky-500 focus:outline-none"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-gray-700 mb-1">Failure class</label>
+            <select value={failureClass} onChange={(e) => setFailureClass(e.target.value)} className="h-8 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-800 focus:border-sky-500 focus:outline-none">
+              <option value="">None</option>
+              {failureClasses.map((row) => <option key={row.id} value={row.code}>{row.code} — {row.description}</option>)}
+            </select>
+            <p className="mt-1 text-[10px] text-gray-400">Separate from the equipment classification. The location class applies only when this is empty.</p>
           </div>
 
           <div>

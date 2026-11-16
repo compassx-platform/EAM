@@ -1,3 +1,4 @@
+import re
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -5,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from backend.database import get_db
+from backend.models.autonumber import AutonumberSequence
 from backend.models.organization import (
     CompanySet,
     CompanyMaster,
@@ -601,6 +603,109 @@ def get_organization(org_id: str, db: Session = Depends(get_db)):
     res["sites"] = [s.to_dict() for s in org.sites]
     res["companies"] = [c.to_dict() for c in org.companies]
     return res
+
+
+class AutonumberLevelInput(BaseModel):
+    prefix: str = ""
+    seed: int = Field(0, ge=0)
+
+
+class AutonumberSiteInput(BaseModel):
+    site_id: str
+    prefix: str = ""
+    seed: int = Field(0, ge=0)
+
+
+class AutonumberWrite(BaseModel):
+    organization: AutonumberLevelInput
+    sites: List[AutonumberSiteInput] = []
+
+
+def _sequence_name(name: str) -> str:
+    cleaned = (name or "").strip().upper()
+    if not re.match(r"^[A-Z][A-Z0-9_]{0,49}$", cleaned):
+        raise HTTPException(status_code=400, detail="Sequence name must start with a letter and use only letters, numbers, and underscores.")
+    return cleaned
+
+
+def _prefix(value: str) -> str:
+    text = (value or "").strip()
+    if len(text) > 30:
+        raise HTTPException(status_code=400, detail="Prefix must be 30 characters or fewer.")
+    return text
+
+
+@router.get("/autonumbers")
+def list_autonumbers(db: Session = Depends(get_db)):
+    rows = db.query(AutonumberSequence).order_by(
+        AutonumberSequence.org_id, AutonumberSequence.sequence_name, AutonumberSequence.site_id
+    ).all()
+    return [row.to_dict() for row in rows]
+
+
+@router.get("/organizations/{org_id}/autonumbers")
+def list_org_autonumbers(org_id: str, db: Session = Depends(get_db)):
+    oid = org_id.strip().upper()
+    if not db.query(Organization).filter(Organization.org_id == oid).first():
+        raise HTTPException(status_code=404, detail=f"Organization '{oid}' not found.")
+    rows = db.query(AutonumberSequence).filter(AutonumberSequence.org_id == oid).order_by(
+        AutonumberSequence.sequence_name, AutonumberSequence.site_id
+    ).all()
+    return [row.to_dict() for row in rows]
+
+
+@router.put("/organizations/{org_id}/autonumbers/{sequence_name}")
+def save_autonumber(org_id: str, sequence_name: str, payload: AutonumberWrite, db: Session = Depends(get_db)):
+    oid = org_id.strip().upper()
+    org = db.query(Organization).filter(Organization.org_id == oid).first()
+    if not org:
+        raise HTTPException(status_code=404, detail=f"Organization '{oid}' not found.")
+    name = _sequence_name(sequence_name)
+    known_sites = {site.site_id for site in org.sites}
+    wanted = {"": payload.organization}
+    for site in payload.sites:
+        sid = site.site_id.strip().upper()
+        if sid not in known_sites:
+            raise HTTPException(status_code=400, detail=f"Site '{sid}' is not in organization '{oid}'.")
+        wanted[sid] = site
+
+    existing = db.query(AutonumberSequence).filter(
+        AutonumberSequence.org_id == oid,
+        AutonumberSequence.sequence_name == name,
+    ).all()
+    by_site = {row.site_id or "": row for row in existing}
+    for site_id in list(by_site):
+        if site_id not in wanted:
+            db.delete(by_site[site_id])
+    for site_id, item in wanted.items():
+        row = by_site.get(site_id)
+        if row is None:
+            row = AutonumberSequence(org_id=oid, sequence_name=name, site_id=site_id)
+            db.add(row)
+        row.prefix = _prefix(item.prefix)
+        row.seed = int(item.seed)
+    db.commit()
+    rows = db.query(AutonumberSequence).filter(
+        AutonumberSequence.org_id == oid,
+        AutonumberSequence.sequence_name == name,
+    ).order_by(AutonumberSequence.site_id).all()
+    return [row.to_dict() for row in rows]
+
+
+@router.delete("/organizations/{org_id}/autonumbers/{sequence_name}")
+def delete_autonumber(org_id: str, sequence_name: str, db: Session = Depends(get_db)):
+    oid = org_id.strip().upper()
+    name = _sequence_name(sequence_name)
+    rows = db.query(AutonumberSequence).filter(
+        AutonumberSequence.org_id == oid,
+        AutonumberSequence.sequence_name == name,
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Sequence '{name}' was not found.")
+    for row in rows:
+        db.delete(row)
+    db.commit()
+    return {"deleted": True, "org_id": oid, "sequence_name": name}
 
 
 @router.put("/organizations/{org_id}")

@@ -5,6 +5,7 @@ import {
   FolderClosed,
   Layers,
   PenTool,
+  Printer,
   ListChecks,
   ShieldCheck,
   Users,
@@ -28,6 +29,7 @@ export type MainNavTab =
   | 'workflows'
   | 'entities'
   | 'forms'
+  | 'reports'
   | 'lists'
   | 'conditions'
   | 'people'
@@ -214,6 +216,7 @@ export const MainSidebar: React.FC<MainSidebarProps> = ({
 
         {navItem('entities', 'Entities', Layers)}
         {navItem('forms', 'Forms', PenTool)}
+        {navItem('reports', 'Reports', Printer)}
         {navItem('lists', 'Lists', ListChecks)}
         {navItem('conditions', 'Conditions', ShieldCheck)}
 

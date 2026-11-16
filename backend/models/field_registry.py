@@ -33,6 +33,8 @@ class EntityField(Base):
     select_options = Column(JSON, nullable=True)  # List of string options for 'select'
     option_list_key = Column(String(100), nullable=True)  # Central list reference (published snapshot)
     reference_entity_type = Column(String(50), nullable=True)  # Target entity_type for 'entity_reference'
+    autonumber_sequence = Column(String(50), nullable=True)
+    autonumber_level = Column(String(20), nullable=True)  # organization | site
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     def to_dict(self):
@@ -45,5 +47,7 @@ class EntityField(Base):
             "select_options": self.select_options or [],
             "option_list_key": self.option_list_key,
             "reference_entity_type": self.reference_entity_type,
+            "autonumber_sequence": self.autonumber_sequence,
+            "autonumber_level": self.autonumber_level,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

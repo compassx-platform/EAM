@@ -30,6 +30,22 @@ class EntityFieldRequest(BaseModel):
     select_options: Optional[List[str]] = []
     option_list_key: Optional[str] = None
     reference_entity_type: Optional[str] = None
+    autonumber_sequence: Optional[str] = None
+    autonumber_level: Optional[str] = None
+
+def _autonumber_binding(field_type: str, sequence: Optional[str], level: Optional[str]):
+    name = (sequence or "").strip().upper()
+    chosen = (level or "").strip().lower()
+    if not name and not chosen:
+        return None, None
+    if field_type != "text":
+        raise HTTPException(status_code=400, detail="Only a text field can follow a number sequence.")
+    if not name or chosen not in ("organization", "site"):
+        raise HTTPException(status_code=400, detail="Choose a sequence and whether it follows the organization or the site.")
+    if not re.match(r"^[A-Z][A-Z0-9_]{0,49}$", name):
+        raise HTTPException(status_code=400, detail="Sequence name must start with a letter and use only letters, numbers, and underscores.")
+    return name, chosen
+
 
 def _field_refs_in(obj: Any, field_name: str, refs: List[str], where: str) -> None:
     """Recursively finds explicit ``field`` references to ``field_name`` in a JSON tree."""
@@ -119,6 +135,7 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
         raise HTTPException(status_code=400, detail=f"Field name '{field_name}' is reserved by the platform and cannot be used.")
 
     option_list_key = (req.option_list_key or "").strip().lower() or None
+    sequence, level = _autonumber_binding(req.field_type, req.autonumber_sequence, req.autonumber_level)
 
     entity_type = req.entity_type.lower()
     req.field_name = field_name
@@ -139,6 +156,8 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
         field.select_options = req.select_options if not option_list_key else None
         field.option_list_key = option_list_key
         field.reference_entity_type = req.reference_entity_type
+        field.autonumber_sequence = sequence
+        field.autonumber_level = level
     else:
         field = EntityField(
             entity_type=entity_type,
@@ -149,6 +168,8 @@ def create_or_update_field(req: EntityFieldRequest, db: Session = Depends(get_db
             select_options=req.select_options if not option_list_key else None,
             option_list_key=option_list_key,
             reference_entity_type=req.reference_entity_type,
+            autonumber_sequence=sequence,
+            autonumber_level=level,
         )
         db.add(field)
 

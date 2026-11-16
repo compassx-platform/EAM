@@ -566,12 +566,6 @@ export const WorkflowInstanceVisualizer: React.FC<WorkflowInstanceVisualizerProp
           const enteredMs = new Date(enteredTime).getTime();
           const dueMs = enteredMs + Number(timeLimitHours) * 3600 * 1000;
           targetDueTime = new Date(dueMs).toISOString();
-        } else if (entity.custom_fields || ((entity as any).data && typeof (entity as any).data === 'object')) {
-          const customFields = entity.custom_fields || (entity as any).data || {};
-          const expiryField = customFields.valid_to || customFields.expires_at || customFields.due_date;
-          if (expiryField) {
-            targetDueTime = new Date(expiryField).toISOString();
-          }
         }
       }
 
@@ -850,7 +844,7 @@ export const WorkflowInstanceVisualizer: React.FC<WorkflowInstanceVisualizerProp
             </div>
 
             {/* Timer & SLA Expiry Card */}
-            {selectedNodeData && (selectedNodeData.timeLimitHours || selectedNodeData.kind === 'wait' || (selectedNodeId === entity.status && (selectedNodeData.targetDueTime || (entity.custom_fields as any)?.valid_to || (entity.custom_fields as any)?.expires_at))) && (
+            {selectedNodeData && (selectedNodeData.timeLimitHours || selectedNodeData.kind === 'wait') && (
               <InspectorTimerCard
                 nodeData={selectedNodeData}
                 isCurrentActive={selectedNodeId === entity.status}

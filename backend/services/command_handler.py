@@ -175,7 +175,12 @@ def create_entity(
     """
     EntityModel, EventModel = get_entity_models(entity_type)
 
-    # 1. Validate custom fields against schema registry
+    # 1. Fill autonumber fields, then validate custom fields against the schema registry
+    from backend.services.autonumber_service import AutonumberError, apply_autonumbers
+    try:
+        custom_fields = apply_autonumbers(db, entity_type, custom_fields or {})
+    except AutonumberError as exc:
+        raise CommandError("autonumber", exc.message)
     cleaned_fields = validate_custom_fields(
         db=db,
         entity_type=entity_type,

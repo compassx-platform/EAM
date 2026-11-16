@@ -1,7 +1,4 @@
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { GridLayout, verticalCompactor } from 'react-grid-layout';
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
 import {
   ArrowRight,
   Check,
@@ -31,11 +28,14 @@ import {
   ExternalLink,
   Play,
   Compass,
-  Timer,
   Save,
   Folder,
+  Copy,
+  Printer,
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { navigate } from '../../lib/router';
+import { RECORD_NOTICE_KEY, cloneFieldValues } from '../../lib/cloneRecord';
 import { AssetPicker } from './AssetPicker';
 import { SafetyPlanField } from './SafetyPlanField';
 import { pickerType } from '../../lib/fieldWidgets';
@@ -58,9 +58,10 @@ import type {
   FormTab,
   DocInfo,
   AttachedFile,
+  ReportLayout,
 } from '../../types';
 import { InfoTooltip } from '../people/InfoTooltip';
-import { WorkflowInstanceVisualizer, useLiveCountdown } from './WorkflowInstanceVisualizer';
+import { WorkflowInstanceVisualizer } from './WorkflowInstanceVisualizer';
 import { DocumentPickerModal } from '../documents';
 
 export interface EntityFormViewProps {
@@ -128,26 +129,16 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function useContainerSize(active: boolean) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node || !active) return;
-    const update = () => {
-      setWidth(Math.round(node.getBoundingClientRect().width));
-      setMounted(true);
-    };
-    update();
-    if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(update);
-      ro.observe(node);
-      return () => ro.disconnect();
-    }
-    return undefined;
-  }, [active]);
-  return { width, mounted, containerRef };
+function flowRows(items: EntityFormItem[]): EntityFormItem[][] {
+  const sorted = [...items].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+  const rows: EntityFormItem[][] = [];
+  for (const item of sorted) {
+    const y = item.y ?? 0;
+    const last = rows[rows.length - 1];
+    if (last && (last[0].y ?? 0) === y) last.push(item);
+    else rows.push([item]);
+  }
+  return rows;
 }
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
@@ -239,7 +230,6 @@ export function EntityFormView({
   const [escalatingTaskId, setEscalatingTaskId] = useState<string | null>(null);
   const [scanningEscalations, setScanningEscalations] = useState(false);
   const [cols, setCols] = useState(12);
-  const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -247,6 +237,9 @@ export function EntityFormView({
   const [visualizerOpen, setVisualizerOpen] = useState(false);
   const [firingEvent, setFiringEvent] = useState<string | null>(null);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  const [recordNotice, setRecordNotice] = useState<string | null>(null);
+  const [printLayouts, setPrintLayouts] = useState<ReportLayout[]>([]);
+  const [printChoices, setPrintChoices] = useState<ReportLayout[] | null>(null);
   const [hasPublishedWorkflow, setHasPublishedWorkflow] = useState<boolean>(true);
   const [noWorkflowMessage, setNoWorkflowMessage] = useState<string | null>(null);
   const [subprocessData, setSubprocessData] = useState<any>(null);
@@ -262,7 +255,14 @@ export function EntityFormView({
   const activeId = initialRecordId || initialEntity?.id || '';
   const entityType = propType || initialEntity?.entity_type || (entityRecord as any)?.entity_type || '';
 
-  const { width, mounted, containerRef } = useContainerSize(loaded);
+  useEffect(() => {
+    if (!entityType) return;
+    let alive = true;
+    api.listReports(entityType)
+      .then((rows) => { if (alive) setPrintLayouts(rows); })
+      .catch(() => { if (alive) setPrintLayouts([]); });
+    return () => { alive = false; };
+  }, [entityType]);
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -335,7 +335,6 @@ export function EntityFormView({
       });
       setItems(layout);
       setCols(formRes.cols || 12);
-      setRowHeight(formRes.row_height || 40);
 
       const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
       const fieldKeys = (formRes.fields || fieldsRes || [])
@@ -381,21 +380,7 @@ export function EntityFormView({
         setNoWorkflowMessage((validRes as any).message || (!hasPub ? `No published workflow is available for "${entityType}". Please publish a workflow in Workflow Studio.` : null));
       }
 
-      const initialVals: Record<string, string> = {};
-      for (const [k, v] of Object.entries(loadedCustomFields)) {
-        if (v === null || v === undefined) {
-          initialVals[k] = '';
-        } else if (typeof v === 'boolean') {
-          initialVals[k] = v ? 'yes' : 'no';
-        } else if (typeof v === 'object') {
-          initialVals[k] = JSON.stringify(v);
-        } else if (typeof v === 'string' && (v.trim().toLowerCase() === 'true' || v.trim().toLowerCase() === 'false')) {
-          initialVals[k] = v.trim().toLowerCase() === 'true' ? 'yes' : 'no';
-        } else {
-          initialVals[k] = String(v);
-        }
-      }
-      setValues(initialVals);
+      setValues(cloneFieldValues(loadedCustomFields));
       setIsDirty(false);
     } catch (e: any) {
       setErr(e.message || 'Failed to load record');
@@ -409,6 +394,13 @@ export function EntityFormView({
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const text = sessionStorage.getItem(RECORD_NOTICE_KEY);
+    if (!text) return;
+    sessionStorage.removeItem(RECORD_NOTICE_KEY);
+    setRecordNotice(text);
+  }, [activeId]);
+
   // Current entity custom fields + workflow status
   const currentEntity = entityRecord || initialEntity;
   const customFields: Record<string, unknown> = currentEntity?.custom_fields || {};
@@ -420,67 +412,11 @@ export function EntityFormView({
   }, [currentStatus]);
 
   const conditionValues = useMemo(() => {
-    const baseConditionValues: Record<string, string> = {};
-    for (const [k, v] of Object.entries(customFields)) {
-      if (v === null || v === undefined) {
-        baseConditionValues[k] = '';
-      } else if (typeof v === 'boolean') {
-        baseConditionValues[k] = v ? 'yes' : 'no';
-      } else if (typeof v === 'object') {
-        baseConditionValues[k] = JSON.stringify(v);
-      } else if (typeof v === 'string' && (v.trim().toLowerCase() === 'true' || v.trim().toLowerCase() === 'false')) {
-        baseConditionValues[k] = v.trim().toLowerCase() === 'true' ? 'yes' : 'no';
-      } else {
-        baseConditionValues[k] = String(v);
-      }
-    }
-    const merged = { ...baseConditionValues, ...values };
+    const merged = { ...cloneFieldValues(customFields), ...values };
     return withWorkflowStatus(merged, currentStatus, currentStage);
   }, [customFields, values, currentStatus, currentStage]);
 
   const valuesForCondition = conditionValues;
-
-  // Workflow Stage Timer / Expiry calculation
-  const currentNodeMeta = useMemo(() => {
-    if (!workflowDef || !currentStage) return null;
-    return (workflowDef.nodes || []).find((n) => n.name === currentStage || n.name === currentEntity?.status) || null;
-  }, [workflowDef, currentStage, currentEntity?.status]);
-
-  const timeLimitHours = currentNodeMeta?.time_limit_hours ?? null;
-
-  const targetDueTime = useMemo(() => {
-    if (!currentStage) return null;
-    const entryEvent = events.filter((e) => e.to_state === currentStage || e.to_state === currentEntity?.status).slice(-1)[0];
-    const enteredTime = entryEvent?.transaction_time || currentEntity?.updated_at || currentEntity?.created_at || new Date().toISOString();
-
-    if (timeLimitHours && Number(timeLimitHours) > 0) {
-      const enteredMs = new Date(enteredTime).getTime();
-      return new Date(enteredMs + Number(timeLimitHours) * 3600 * 1000).toISOString();
-    }
-    const cf = currentEntity?.custom_fields || (currentEntity as any)?.data || {};
-    const expiryField = cf.valid_to || cf.expires_at || cf.due_date;
-    if (expiryField) {
-      return new Date(expiryField).toISOString();
-    }
-    return null;
-  }, [currentEntity, events, timeLimitHours, currentStage]);
-
-  const enteredTime = useMemo(() => {
-    if (!currentStage) return null;
-    const entryEvent = events.filter((e) => e.to_state === currentStage || e.to_state === currentEntity?.status).slice(-1)[0];
-    return entryEvent?.transaction_time || currentEntity?.updated_at || currentEntity?.created_at || null;
-  }, [currentEntity, events, currentStage]);
-
-  const stageCountdown = useLiveCountdown(targetDueTime, enteredTime);
-
-  useEffect(() => {
-    if (stageCountdown.isExpired && stageCountdown.hasTimer) {
-      const timer = setTimeout(() => {
-        loadData(true);
-      }, 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [stageCountdown.isExpired, stageCountdown.hasTimer, loadData]);
 
   const byName = useMemo(() => new Map(fields.map((f) => [f.field_name, f])), [fields]);
 
@@ -862,24 +798,6 @@ export function EntityFormView({
 
   const entityTitleStr = getEntityTitle(currentEntity);
 
-  const expiryValue =
-    currentEntity?.custom_fields?.expiry_date ||
-    currentEntity?.custom_fields?.valid_until ||
-    currentEntity?.custom_fields?.valid_to ||
-    currentEntity?.custom_fields?.expires_at ||
-    currentEntity?.custom_fields?.due_date ||
-    currentEntity?.custom_fields?.expiry;
-  const isExpiredStatus = currentEntity?.status?.toLowerCase() === 'expired';
-  const isPastExpiryDate = useMemo(() => {
-    if (!expiryValue) return false;
-    try {
-      const exp = new Date(String(expiryValue).replace('Z', '+00:00'));
-      return !isNaN(exp.getTime()) && exp.getTime() < Date.now();
-    } catch {
-      return false;
-    }
-  }, [expiryValue]);
-
   const content = (
     <div className="flex h-full w-full flex-col min-h-0 overflow-hidden bg-slate-50/50">
       {/* Surface Navigation & Record Header */}
@@ -939,6 +857,61 @@ export function EntityFormView({
           </button>
 
           {/* Audit Timeline Sidebar Toggle Button */}
+          {currentEntity && (
+            <button
+              type="button"
+              onClick={() => navigate('/create', { type: entityType, from: currentEntity.id })}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-2xs transition-colors"
+              title="Start a new record filled from this one"
+            >
+              <Copy className="h-3.5 w-3.5 text-gray-500" />
+              <span>Clone</span>
+            </button>
+          )}
+
+          {currentEntity && (
+            <button
+              type="button"
+              onClick={() => {
+                if (printLayouts.length === 0) {
+                  setRecordNotice('This entity has no print view yet. Add one under Reports.');
+                  setPrintChoices(null);
+                  return;
+                }
+                const preferred = printLayouts.length === 1 ? printLayouts[0] : printLayouts.find((layout) => layout.is_default);
+                if (preferred) {
+                  navigate('/print', { type: entityType, id: currentEntity.id, report: preferred.id });
+                  return;
+                }
+                setPrintChoices(printLayouts);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-gray-900 shadow-2xs transition-colors"
+              title="Print this record"
+            >
+              <Printer className="h-3.5 w-3.5 text-gray-500" />
+              <span>Print</span>
+            </button>
+          )}
+          {printChoices && currentEntity && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setPrintChoices(null)}>
+              <div className="w-72 rounded-xl border border-gray-200 bg-white p-4 shadow-lg" onClick={(event) => event.stopPropagation()}>
+                <p className="mb-2 text-xs font-semibold text-gray-900">Choose a print view</p>
+                <div className="space-y-1">
+                  {printChoices.map((layout) => (
+                    <button
+                      key={layout.id}
+                      type="button"
+                      onClick={() => navigate('/print', { type: entityType, id: currentEntity.id, report: layout.id })}
+                      className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-gray-800 hover:bg-gray-50"
+                    >
+                      {layout.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => setAuditLogOpen(true)}
@@ -975,29 +948,6 @@ export function EntityFormView({
         </div>
       </header>
 
-      {/* Expiry Status Notice Banners */}
-      {isExpiredStatus && (
-        <div className="flex items-center justify-between gap-3 border-b border-orange-200 bg-orange-50/90 px-6 py-2.5 text-xs text-orange-900 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0" />
-            <span>
-              <strong>Permit Expired:</strong> This permit has exceeded its validity limit{expiryValue ? ` (${new Date(String(expiryValue)).toLocaleString()})` : ''}. Hazardous work on site is suspended until re-validated with updated atmospheric gas tests or closed.
-            </span>
-          </div>
-        </div>
-      )}
-
-      {!isExpiredStatus && isPastExpiryDate && (currentEntity?.status === 'Active' || currentEntity?.status === 'Suspended') && (
-        <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/90 px-6 py-2.5 text-xs text-amber-900 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-amber-600 shrink-0" />
-            <span>
-              <strong>Validity Limit Exceeded:</strong> Scheduled expiry limit ({new Date(String(expiryValue)).toLocaleString()}) has passed. This record is queued for automated system expiry.
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Main Form Body Surface */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-8 min-h-0 bg-slate-100/60">
         {!loaded ? (
@@ -1016,6 +966,21 @@ export function EntityFormView({
           </div>
         ) : (
           <div className="mx-auto max-w-4xl space-y-6">
+            {recordNotice && (
+              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                  <span>{recordNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecordNotice(null)}
+                  className="rounded p-1 text-amber-500 hover:bg-amber-100 hover:text-amber-800"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {/* Top Workflow Actions Banner: Drive workflow directly from full-page form */}
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200/80 bg-white p-4 sm:p-5 shadow-xs">
               <div className="flex flex-wrap items-center gap-4">
@@ -1032,30 +997,6 @@ export function EntityFormView({
                       : `This record is currently in state "${currentStage || currentEntity.status}".`}
                   </p>
                 </div>
-
-                {/* Live Active Countdown Timer Badge */}
-                {stageCountdown.hasTimer && (
-                  <div className="flex items-center gap-2.5 rounded-lg border border-teal-200 bg-teal-50/90 px-3 py-1.5 text-teal-950 shadow-2xs">
-                    <div className="flex items-center gap-1.5 font-bold text-xs">
-                      <Timer className={`h-4 w-4 text-teal-600 ${stageCountdown.isExpired ? '' : 'animate-spin'}`} />
-                      <span className="text-teal-900">
-                        {stageCountdown.isExpired ? 'Timer Elapsed' : 'Timer Running:'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 font-mono text-xs font-bold text-teal-950">
-                      <span>{stageCountdown.isExpired ? '00:00' : stageCountdown.formattedDigital}</span>
-                      <span className="font-sans text-[11px] font-normal text-teal-700">
-                        ({stageCountdown.isExpired ? 'Auto-advancing…' : `${stageCountdown.formatted} left`})
-                      </span>
-                    </div>
-                    <div className="w-16 h-1.5 bg-teal-200/80 rounded-full overflow-hidden hidden sm:block">
-                      <div
-                        className="h-full bg-teal-600 rounded-full transition-all duration-1000 ease-linear"
-                        style={{ width: `${stageCountdown.progressPct}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Action Buttons: Directly fire the event on 1 click */}
@@ -1605,50 +1546,38 @@ export function EntityFormView({
 
               {/* Master Form Tab Strip */}
               {visibleTabs.length > 1 && (
-                <div className="mb-6 flex items-center justify-between border-b border-gray-200">
-                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                    {visibleTabs.map((tab) => {
-                      const isActive = tab.id === activeTabId;
-                      const fallbackTab = tabs[0]?.id || 'general';
-                      const count = currentlyVisibleItems.filter(
-                        (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === tab.id
-                      ).length;
-                      const isInteractionTarget =
-                        isInteractionState &&
-                        currentStateNode?.interaction_tab &&
-                        (currentStateNode.interaction_tab.toLowerCase() === tab.id.toLowerCase() ||
-                          currentStateNode.interaction_tab.toLowerCase() === tab.label.toLowerCase());
+                <nav className="mb-6 flex flex-wrap gap-1" aria-label="Form sections">
+                  {visibleTabs.map((tab) => {
+                    const isActive = tab.id === activeTabId;
+                    const isInteractionTarget =
+                      isInteractionState &&
+                      currentStateNode?.interaction_tab &&
+                      (currentStateNode.interaction_tab.toLowerCase() === tab.id.toLowerCase() ||
+                        currentStateNode.interaction_tab.toLowerCase() === tab.label.toLowerCase());
 
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setActiveTabId(tab.id)}
-                          className={`relative flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer select-none ${
-                            isActive
-                              ? 'border-blue-600 text-blue-700 bg-blue-50/20'
-                              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
-                          }`}
-                        >
-                          <span>{tab.label}</span>
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        aria-current={isActive ? 'page' : undefined}
+                        onClick={() => setActiveTabId(tab.id)}
+                        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-gray-100 text-gray-900'
+                            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                        }`}
+                      >
+                        {tab.label}
+                        {isInteractionTarget && (
                           <span
-                            className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
-                              isActive ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
-                            }`}
-                          >
-                            {count}
-                          </span>
-                          {isInteractionTarget && (
-                            <span
-                              className="flex h-2 w-2 rounded-full bg-sky-500 animate-ping"
-                              title="Target of current interaction step"
-                            />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                            className="h-1.5 w-1.5 rounded-full bg-gray-400"
+                            title="Target of current interaction step"
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </nav>
               )}
 
               {hasLayout ? (
@@ -1660,28 +1589,21 @@ export function EntityFormView({
                   </div>
                 ) : (
                   <div>
-                    <div ref={containerRef}>
-                      {mounted && (
-                        <GridLayout
-                          width={width}
-                          layout={tabFilteredVisibleItems}
-                          compactor={verticalCompactor}
-                          gridConfig={{
-                            cols,
-                            rowHeight,
-                            margin: [16, 16],
-                            containerPadding: [0, 0],
-                          }}
-                          dragConfig={{ enabled: false }}
-                          resizeConfig={{ enabled: false }}
-                          className="rounded-lg"
+                    <div className="flex flex-col gap-5">
+                      {flowRows(tabFilteredVisibleItems).map((row) => (
+                        <div
+                          key={row.map((it) => it.i).join('|')}
+                          className="grid items-start gap-x-6"
+                          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
                         >
-                          {tabFilteredVisibleItems.map((it) => {
+                          {row.map((it) => {
+                            const span = Math.max(1, Math.min(it.w || cols, cols));
                             if (it.isGroup) {
                               return (
                                 <div
                                   key={it.i}
-                                  className="flex h-full w-full flex-col justify-center rounded-xl border border-gray-200 bg-slate-50/50 p-4 shadow-2xs"
+                                  style={{ gridColumn: `span ${span}` }}
+                                  className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
                                 >
                                   <div className="flex items-center gap-2">
                                     <Layers className="h-4 w-4 shrink-0 text-gray-500" />
@@ -1690,7 +1612,7 @@ export function EntityFormView({
                                     </span>
                                   </div>
                                   {it.placeholder && (
-                                    <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
+                                    <p className="mt-1 text-xs text-gray-500">{it.placeholder}</p>
                                   )}
                                 </div>
                               );
@@ -1699,13 +1621,14 @@ export function EntityFormView({
                               return (
                                 <div
                                   key={it.i}
-                                  className="flex h-full w-full flex-col justify-center pt-2 pb-1 border-b border-gray-100"
+                                  style={{ gridColumn: `span ${span}` }}
+                                  className="min-w-0 border-b border-gray-100 pb-1"
                                 >
-                                  <h3 className="text-sm sm:text-base font-bold text-gray-900">
+                                  <h3 className="text-sm font-semibold text-gray-900 sm:text-base">
                                     {it.label || 'Section Header'}
                                   </h3>
                                   {it.placeholder && (
-                                    <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
+                                    <p className="mt-0.5 text-xs text-gray-500">{it.placeholder}</p>
                                   )}
                                 </div>
                               );
@@ -1715,21 +1638,22 @@ export function EntityFormView({
                             const isReadOnly = computeItemReadOnly(it);
                             const currentVal = values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? '';
                             return (
-                              <FillCell
-                                key={it.i}
-                                def={fieldDef}
-                                value={currentVal}
-                                itemHeight={it.h}
-                                readOnly={isReadOnly}
-                                persons={persons}
-                                personGroups={personGroups}
-                                context={{ entityType, entityId: activeId, recordValues: values }}
-                                onChange={(v) => handleValueChange(it, v)}
-                              />
+                              <div key={it.i} style={{ gridColumn: `span ${span}` }} className="min-w-0">
+                                <FillCell
+                                  def={fieldDef}
+                                  value={currentVal}
+                                  itemHeight={it.h}
+                                  readOnly={isReadOnly}
+                                  persons={persons}
+                                  personGroups={personGroups}
+                                  context={{ entityType, entityId: activeId, recordValues: values }}
+                                  onChange={(v) => handleValueChange(it, v)}
+                                />
+                              </div>
                             );
                           })}
-                        </GridLayout>
-                      )}
+                        </div>
+                      ))}
                     </div>
 
                     {fallbackFields.length > 0 && (
@@ -1937,11 +1861,11 @@ const FillCell = forwardRef<HTMLDivElement, {
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1 ${
+      className={`${className ?? ''} flex w-full flex-col gap-1.5 ${
         readOnly ? 'opacity-90' : ''
       }`}
     >
-      <label htmlFor={id} className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
+      <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-semibold text-gray-900">
         <span className="truncate" title={def.label || def.name}>{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
         {def.placeholder && (
@@ -1949,13 +1873,8 @@ const FillCell = forwardRef<HTMLDivElement, {
             <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
           </span>
         )}
-        {readOnly && (
-          <span className="rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
-            Read-only
-          </span>
-        )}
       </label>
-      <div className="min-w-0 flex-1">{input}</div>
+      <div className="min-w-0">{input}</div>
     </div>
   );
 });
@@ -1984,11 +1903,6 @@ function FieldRow({
       <label htmlFor={id} className="flex items-center gap-1 text-xs font-semibold text-gray-900">
         {def.label || def.name}
         {def.required && <span className="text-red-500">*</span>}
-        {readOnly && (
-          <span className="ml-auto rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
-            Read-only
-          </span>
-        )}
       </label>
       {makeInput(def, id, value, onChange, 3, readOnly, persons, personGroups, context)}
     </div>
@@ -2022,7 +1936,7 @@ function makeInput(
         readOnly={readOnly}
         rows={textareaRows ?? 3}
         placeholder={def.placeholder || ''}
-        className={`${cls} h-full min-h-[36px] resize-none leading-relaxed`}
+        className={`${cls} min-h-[36px] resize-none leading-relaxed`}
       />
     );
   }
@@ -2073,7 +1987,7 @@ function makeInput(
   }
   if (def.type === 'checkbox_group') {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
+      <div className="flex w-full flex-col">
         {def.options.length === 0 ? (
           <span className="text-xs text-gray-400">No options defined</span>
         ) : (
@@ -2086,28 +2000,19 @@ function makeInput(
             return (
               <label
                 key={o}
-                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
-                  checked
-                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
-                    : 'border-gray-300 bg-white hover:border-gray-400'
-                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
+                title={desc || undefined}
+                className={`flex items-center gap-2 py-0.5 text-xs text-gray-900 ${
+                  readOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                }`}
               >
-                <div className="flex items-center justify-between gap-3 w-full">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
-                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={readOnly}
-                    onChange={() => !readOnly && onChange(toggleMulti(value, o))}
-                    className="accent-blue-600 h-4 w-4 rounded"
-                  />
-                </div>
-                {desc && (
-                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
-                )}
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={readOnly}
+                  onChange={() => !readOnly && onChange(toggleMulti(value, o))}
+                  className="h-3.5 w-3.5 shrink-0 accent-blue-600"
+                />
+                <span>{title}</span>
               </label>
             );
           })
@@ -2821,7 +2726,7 @@ function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): 
       const low = trimmed.toLowerCase();
       out[name] = low === 'yes' || low === 'true' || low === '1';
     } else if (def.type === 'checkbox_group') {
-      out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+      out[name] = trimmed;
     } else if (def.type === 'table') {
       out[name] = parseTableRows(trimmed);
     } else if (def.type === 'checklist') {

@@ -92,19 +92,16 @@ def execute_single_escalation(db: Session, escalation: EscalationDefinition, now
         transitions = definition.get("transitions", []) or []
 
         for pt in points:
-            date_field = pt.get("reference_date_field") or "expiry_date"
+            date_field = str(pt.get("reference_date_field") or "").strip()
             filter_status = pt.get("filter_status") or []
             if filter_status and (p.status not in filter_status and stage not in filter_status):
                 continue
+            if not date_field:
+                continue
 
-            # Read date value from custom_fields or entity columns
-            raw_date = fields.get(date_field) or getattr(p, date_field, None)
-            if not raw_date:
-                # Fallback to alternative date field keys
-                for alt_key in ("expiry_date", "valid_until", "valid_to", "expires_at", "expiry", "due_date", "expiryDate", "validTo", "validUntil"):
-                    if fields.get(alt_key):
-                        raw_date = fields.get(alt_key)
-                        break
+            raw_date = fields.get(date_field)
+            if raw_date is None:
+                raw_date = getattr(p, date_field, None)
 
             target_dt = _normalize_dt(raw_date)
             if not target_dt:

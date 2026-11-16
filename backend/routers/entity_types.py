@@ -36,6 +36,8 @@ class EntityFieldIn(BaseModel):
     select_options: Optional[List[str]] = []
     option_list_key: Optional[str] = None
     reference_entity_type: Optional[str] = None
+    autonumber_sequence: Optional[str] = None
+    autonumber_level: Optional[str] = None
 
 class CreateEntityTypeRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=50, description="Slug identifier, e.g. 'incident_report'")
@@ -86,6 +88,10 @@ def _validate_field_input(req: EntityFieldIn, db: Session) -> EntityFieldIn:
     req.select_options = [str(o).strip() for o in (req.select_options or []) if str(o).strip()]
 
     req.label = (req.label or _humanize(key)).strip() or None
+    from backend.routers.fields import _autonumber_binding
+    req.autonumber_sequence, req.autonumber_level = _autonumber_binding(
+        req.field_type, req.autonumber_sequence, req.autonumber_level
+    )
     return req
 
 def _default_form_layout(fields: List[EntityFieldIn]) -> List[dict]:
@@ -276,6 +282,8 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
                 select_options=v.select_options,
                 option_list_key=v.option_list_key,
                 reference_entity_type=v.reference_entity_type,
+                autonumber_sequence=v.autonumber_sequence,
+                autonumber_level=v.autonumber_level,
             ))
         db.add(EntityForm(
             entity_type=key,

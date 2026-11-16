@@ -7,6 +7,9 @@ import { RuntimeWorkspace } from './components/runtime/RuntimeWorkspace';
 import { EntityCreateForm } from './components/runtime/EntityCreateForm';
 import { FormList } from './components/forms/FormList';
 import { FormBuilder } from './components/forms/FormBuilder';
+import { ReportsList } from './components/reports/ReportsList';
+import { ReportComposer } from './components/reports/ReportComposer';
+import { PrintPage } from './components/reports/PrintPage';
 import { ListsView } from './components/lists/ListsView';
 import { ListEditor } from './components/lists/ListEditor';
 import { ConditionList } from './components/conditions/ConditionList';
@@ -41,8 +44,10 @@ function App() {
         ? 'entities'
         : route.path.startsWith('/forms')
           ? 'forms'
-          : route.path.startsWith('/lists')
-            ? 'lists'
+          : route.path.startsWith('/reports')
+            ? 'reports'
+            : route.path.startsWith('/lists')
+              ? 'lists'
             : route.path.startsWith('/conditions')
               ? 'conditions'
               : route.path.startsWith('/people') || route.path.startsWith('/roles')
@@ -61,6 +66,7 @@ function App() {
     else if (t === 'documents') navigate('/documents');
     else if (t === 'entities') navigate('/entities');
     else if (t === 'forms') navigate('/forms');
+    else if (t === 'reports') navigate('/reports');
     else if (t === 'lists') navigate('/lists');
     else if (t === 'conditions') navigate('/conditions');
     else if (t === 'people') navigate('/people');
@@ -73,6 +79,7 @@ function App() {
 
   const builderId = route.path === '/workflows/new' ? null : route.path.startsWith('/workflows/') ? route.id : undefined;
   const formType = route.path.startsWith('/forms/') ? route.id : null;
+  const reportId = route.path.startsWith('/reports/') ? route.id : null;
   const listKey = route.path.startsWith('/lists/') ? route.id : null;
   const designerEntity = route.path === '/entities/design' ? null : route.path.startsWith('/entities/design/') ? route.id : undefined;
 
@@ -84,6 +91,17 @@ function App() {
   const personId = !isPeopleRoles && !roleId && !isPeopleGroups && !peopleGroupId && route.path.startsWith('/people/') ? route.id : undefined;
 
   const createType = route.path === '/create' ? route.query.get('type') : null;
+  const createFrom = route.path === '/create' ? route.query.get('from') : null;
+
+  if (route.path === '/print') {
+    return (
+      <PrintPage
+        entityType={route.query.get('type') || ''}
+        recordId={route.query.get('id') || ''}
+        reportId={route.query.get('report') || ''}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen flex-row overflow-hidden bg-[#F7F7F7] text-gray-900">
@@ -101,6 +119,7 @@ function App() {
           {createType !== null ? (
             <EntityCreateForm
               entityType={createType}
+              sourceId={createFrom}
               onBack={() => navigate('/records', { type: createType })}
             />
           ) : tab === 'settings' ? (
@@ -129,6 +148,26 @@ function App() {
               />
             ) : (
               <FormList onBuild={(t) => navigate(`/forms/${encodeURIComponent(t)}`)} />
+            )
+          ) : tab === 'reports' ? (
+            reportId === 'new' ? (
+              <ReportComposer
+                reportId={null}
+                entityType={route.query.get('entity') || ''}
+                onBack={() => navigate('/reports')}
+              />
+            ) : reportId ? (
+              <ReportComposer
+                key={reportId}
+                reportId={reportId}
+                entityType=""
+                onBack={() => navigate('/reports')}
+              />
+            ) : (
+              <ReportsList
+                onCreate={(entity) => navigate('/reports/new', { entity })}
+                onEdit={(id) => navigate(`/reports/${id}`)}
+              />
             )
           ) : tab === 'lists' ? (
             listKey !== null ? (

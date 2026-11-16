@@ -63,6 +63,8 @@ def _ensure_column(db: Session, table: str, column: str, ddl: str) -> None:
 def ensure_schema_compatibility(db: Session) -> None:
     """Idempotently ensures backward compatibility schema columns exist without altering or dropping any data."""
     _ensure_column(db, "entity_field", "label", "label VARCHAR(100)")
+    _ensure_column(db, "entity_field", "autonumber_sequence", "autonumber_sequence VARCHAR(50)")
+    _ensure_column(db, "entity_field", "autonumber_level", "autonumber_level VARCHAR(20)")
     _ensure_column(db, "app_user", "person_id", "person_id VARCHAR(50)")
     _ensure_column(db, "entity_form", "version_number", "version_number INTEGER DEFAULT 1")
     _ensure_column(db, "entity_form", "version_label", "version_label VARCHAR(50) DEFAULT 'v1'")
@@ -88,3 +90,5 @@ def ensure_schema_compatibility(db: Session) -> None:
     _ensure_column(db, "doc_folder", "parent_id", "parent_id VARCHAR(36)")
     _ensure_column(db, "location", "default_safety_plan_id", "default_safety_plan_id VARCHAR(50)")
     _ensure_column(db, "asset", "default_safety_plan_id", "default_safety_plan_id VARCHAR(50)")
+    _ensure_column(db, "asset", "failure_class_code", "failure_class_code VARCHAR(50)")
+    _ensure_column(db, "location", "failure_class_code", "failure_class_code VARCHAR(50)")

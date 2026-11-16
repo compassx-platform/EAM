@@ -1,11 +1,10 @@
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { GridLayout, verticalCompactor } from 'react-grid-layout';
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
 import { ArrowLeft, CheckCircle2, Loader2, Heading, Layers, Paperclip, Plus, X, Zap, Info, ChevronDown, Database, Users, Folder, ExternalLink } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
 import { isItemVisible, isItemReadOnly, isTabVisible, withWorkflowStatus } from '../../lib/conditions';
+import { cloneFieldValues, withoutStatusVisibility, RECORD_NOTICE_KEY } from '../../lib/cloneRecord';
+import { parseAssetValue } from './AssetPicker';
 import type { EntityField, EntityFormItem, FormTab, ChecklistItem, ResolvedList, VisibilityCondition, ConditionDefinition, Person, PersonGroup, AttachedFile, DocInfo } from '../../types';
 export type { AttachedFile } from '../../types';
 import { DocumentPickerModal } from '../documents';
@@ -16,6 +15,8 @@ import { pickerType } from '../../lib/fieldWidgets';
 interface EntityCreateFormProps {
   entityType: string;
   onBack: () => void;
+  /** Record whose field values fill this form. Saving still creates a new record. */
+  sourceId?: string | null;
 }
 
 interface ResolvedField {
@@ -41,33 +42,20 @@ interface ResolvedField {
   referenceEntityType?: string | null;
 }
 
-// The layout container only mounts once the form definition is loaded, so
-// react-grid-layout's built-in hook (which measures on mount) would miss it.
-// Measure explicitly once the container is available, and keep an eye on
-// viewport resizes so the grid fits its canvas width.
-function useContainerSize(active: boolean) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node || !active) return;
-    const update = () => {
-      setWidth(Math.round(node.getBoundingClientRect().width));
-      setMounted(true);
-    };
-    update();
-    if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(update);
-      ro.observe(node);
-      return () => ro.disconnect();
-    }
-    return undefined;
-  }, [active]);
-  return { width, mounted, containerRef };
+/** Fields that share a layout row stay side by side. Rows stack with an even gap. */
+function flowRows(items: EntityFormItem[]): EntityFormItem[][] {
+  const sorted = [...items].sort((a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0));
+  const rows: EntityFormItem[][] = [];
+  for (const item of sorted) {
+    const y = item.y ?? 0;
+    const last = rows[rows.length - 1];
+    if (last && (last[0].y ?? 0) === y) last.push(item);
+    else rows.push([item]);
+  }
+  return rows;
 }
 
-export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) {
+export function EntityCreateForm({ entityType, onBack, sourceId }: EntityCreateFormProps) {
   const [items, setItems] = useState<EntityFormItem[]>([]);
   const [tabs, setTabs] = useState<FormTab[]>([
     { id: 'general', label: 'General Details', is_default: true },
@@ -79,15 +67,12 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
   const [persons, setPersons] = useState<Person[]>([]);
   const [personGroups, setPersonGroups] = useState<PersonGroup[]>([]);
   const [cols, setCols] = useState(12);
-  const [rowHeight, setRowHeight] = useState(40);
   const [loaded, setLoaded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [initialState, setInitialState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-
-  const { width, mounted, containerRef } = useContainerSize(loaded);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +134,6 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
         setItems(layout);
         setFields(formFields);
         setCols(form.cols || 12);
-        setRowHeight(form.row_height || 40);
         setInitialState(((form as any).initial_state as string) || null);
         const layoutKeys = layout.map((it) => it.optionsList).filter((k): k is string => Boolean(k));
         const fieldKeys = formFields
@@ -171,6 +155,23 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       cancelled = true;
     };
   }, [entityType]);
+
+  useEffect(() => {
+    if (!sourceId) return;
+    let cancelled = false;
+    api.getEntity(entityType, sourceId)
+      .then((res) => {
+        if (cancelled) return;
+        setValues(cloneFieldValues(res.entity?.custom_fields));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setErr('The source record could not be loaded. You can still fill in a new record.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entityType, sourceId]);
 
   const byName = new Map(fields.map((f) => [f.field_name, f]));
 
@@ -251,16 +252,32 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
     () => withWorkflowStatus(values, initialState),
     [values, initialState]
   );
-  const currentlyVisibleItems = items.filter((it) => {
+  const reviewItems = useMemo(() => {
+    if (!sourceId) return items;
+    return items.map((it) => ({
+      ...it,
+      visibilityCondition: withoutStatusVisibility(it.visibilityCondition ?? it.visibility_condition),
+    }));
+  }, [items, sourceId]);
+
+  const reviewTabs = useMemo(() => {
+    if (!sourceId) return tabs;
+    return tabs.map((tab) => ({
+      ...tab,
+      visibility_condition: withoutStatusVisibility(tab.visibility_condition),
+    }));
+  }, [tabs, sourceId]);
+
+  const currentlyVisibleItems = reviewItems.filter((it) => {
     if (!it.isHeader && !it.isGroup && resolveItem(it) === null) {
       return false;
     }
-    return isItemVisible(it, items, conditionValues, conditions);
+    return isItemVisible(it, reviewItems, conditionValues, conditions);
   });
 
   const visibleTabs = useMemo(() => {
-    return tabs.filter((tab) => isTabVisible(tab, conditionValues, conditions));
-  }, [tabs, conditionValues, conditions]);
+    return reviewTabs.filter((tab) => isTabVisible(tab, conditionValues, conditions));
+  }, [reviewTabs, conditionValues, conditions]);
 
   useEffect(() => {
     if (visibleTabs.length > 0 && !visibleTabs.some((t) => t.id === activeTabId)) {
@@ -358,6 +375,28 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
       }
       const custom = toCustomFields(values, activeDefs);
       const res = await api.createEntity(entityType, { custom_fields: custom });
+      const planId = typeof custom.safety_plan === 'string' ? custom.safety_plan.trim() : '';
+      if (planId) {
+        const asset = parseAssetValue(typeof custom.asset === 'string' ? custom.asset : '');
+        const siteId = typeof custom.site_id === 'string' && custom.site_id.trim()
+          ? custom.site_id.trim()
+          : asset?.site_id || undefined;
+        try {
+          await api.applySafetyPlan({
+            entity_type: entityType,
+            entity_id: res.entity_id,
+            safety_plan_id: planId,
+            site_id: siteId,
+            asset_id: asset?.asset_id || undefined,
+            location_id: asset?.location_id || undefined,
+          });
+        } catch (applyErr: any) {
+          sessionStorage.setItem(
+            RECORD_NOTICE_KEY,
+            applyErr?.message || 'The record was created. The safety plan could not be applied.'
+          );
+        }
+      }
       setSuccess(true);
       window.setTimeout(
         () => navigate('/records', { type: entityType, selected: res.entity_id }),
@@ -384,7 +423,9 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
           <div>
             <h1 className="text-lg font-bold text-gray-900">New {entityType} record</h1>
             <p className="mt-0.5 text-xs text-gray-500">
-              Form fill-in based on layout defined in Form Builder. Creating the record initializes workflow state.
+              {sourceId
+                ? 'Copied from an existing record. Change what you need, then save. This creates a new record.'
+                : 'Form fill-in based on layout defined in Form Builder. Creating the record initializes workflow state.'}
             </p>
           </div>
         </div>
@@ -416,121 +457,105 @@ export function EntityCreateForm({ entityType, onBack }: EntityCreateFormProps) 
 
               {/* Master Form Tab Strip */}
               {visibleTabs.length > 1 && (
-                <div className="mb-6 flex items-center justify-between border-b border-gray-200">
-                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                    {visibleTabs.map((tab) => {
-                      const isActive = tab.id === activeTabId;
-                      const fallbackTab = tabs[0]?.id || 'general';
-                      const count = currentlyVisibleItems.filter(
-                        (it) => (it.tabId ?? (it as any).tab_id ?? fallbackTab) === tab.id
-                      ).length;
+                <nav className="mb-6 flex flex-wrap gap-1" aria-label="Form sections">
+                  {visibleTabs.map((tab) => {
+                    const isActive = tab.id === activeTabId;
 
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setActiveTabId(tab.id)}
-                          className={`relative flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition-all cursor-pointer select-none ${
-                            isActive
-                              ? 'border-blue-600 text-blue-700 bg-blue-50/20'
-                              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
-                          }`}
-                        >
-                          <span>{tab.label}</span>
-                          <span
-                            className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
-                              isActive ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
-                            }`}
-                          >
-                            {count}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        aria-current={isActive ? 'page' : undefined}
+                        onClick={() => setActiveTabId(tab.id)}
+                        className={`whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-gray-100 text-gray-900'
+                            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </nav>
               )}
 
               {hasLayout || fallbackFields.length > 0 ? (
                 <div>
-                  <div ref={containerRef}>
-                    {mounted && hasLayout && (
-                      tabFilteredVisibleItems.length === 0 ? (
-                        <div className="py-12 text-center text-xs text-gray-400">
-                          No fields on "{visibleTabs.find((t) => t.id === activeTabId)?.label || 'this tab'}".
-                        </div>
-                      ) : (
-                        <GridLayout
-                          width={width}
-                          layout={tabFilteredVisibleItems}
-                          compactor={verticalCompactor}
-                          gridConfig={{
-                            cols,
-                            rowHeight,
-                            margin: [16, 16],
-                            containerPadding: [0, 0],
-                          }}
-                          dragConfig={{ enabled: false }}
-                          resizeConfig={{ enabled: false }}
-                          className="rounded-lg"
-                        >
-                          {tabFilteredVisibleItems.map((it) => {
-                            if (it.isGroup) {
-                              return (
-                                <div
-                                  key={it.i}
-                                  className="flex h-full w-full flex-col justify-center rounded-lg border border-gray-200 bg-white p-4 shadow-2xs"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Layers className="h-4 w-4 shrink-0 text-gray-500" />
-                                    <span className="text-sm font-semibold text-gray-900">
-                                      {it.label || it.groupTitle || 'Group'}
-                                    </span>
+                  {hasLayout && (
+                    tabFilteredVisibleItems.length === 0 ? (
+                      <div className="py-12 text-center text-xs text-gray-400">
+                        No fields on "{visibleTabs.find((t) => t.id === activeTabId)?.label || 'this tab'}".
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-5">
+                        {flowRows(tabFilteredVisibleItems).map((row) => (
+                          <div
+                            key={row.map((it) => it.i).join('|')}
+                            className="grid items-start gap-x-6"
+                            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+                          >
+                            {row.map((it) => {
+                              const span = Math.max(1, Math.min(it.w || cols, cols));
+                              if (it.isGroup) {
+                                return (
+                                  <div
+                                    key={it.i}
+                                    style={{ gridColumn: `span ${span}` }}
+                                    className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Layers className="h-4 w-4 shrink-0 text-gray-500" />
+                                      <span className="text-sm font-semibold text-gray-900">
+                                        {it.label || it.groupTitle || 'Group'}
+                                      </span>
+                                    </div>
+                                    {it.placeholder && (
+                                      <p className="mt-1 text-xs text-gray-500">{it.placeholder}</p>
+                                    )}
                                   </div>
-                                  {it.placeholder && (
-                                    <p className="text-xs text-gray-500 mt-1">{it.placeholder}</p>
-                                  )}
-                                </div>
-                              );
-                            }
-                            if (it.isHeader) {
+                                );
+                              }
+                              if (it.isHeader) {
+                                return (
+                                  <div
+                                    key={it.i}
+                                    style={{ gridColumn: `span ${span}` }}
+                                    className="min-w-0 border-b border-gray-100 pb-1"
+                                  >
+                                    <h2 className="text-sm font-semibold text-gray-900 sm:text-base">
+                                      {it.label || 'Section Header'}
+                                    </h2>
+                                    {it.placeholder && (
+                                      <p className="mt-0.5 text-xs text-gray-500">{it.placeholder}</p>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              const isReadOnly = isItemReadOnly(it, items, conditionValues, conditions, tabs);
+                              const def = resolveItem(it);
+                              if (!def) return null;
                               return (
-                                <div
-                                  key={it.i}
-                                  className="flex h-full w-full flex-col justify-center pt-2 pb-1"
-                                >
-                                  <h2 className="text-sm sm:text-base font-semibold text-gray-900">
-                                    {it.label || 'Section Header'}
-                                  </h2>
-                                  {it.placeholder && (
-                                    <p className="text-xs text-gray-500 mt-0.5">{it.placeholder}</p>
-                                  )}
+                                <div key={it.i} style={{ gridColumn: `span ${span}` }} className="min-w-0">
+                                  <FillCell
+                                    def={def}
+                                    value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
+                                    itemHeight={it.h}
+                                    readOnly={isReadOnly}
+                                    persons={persons}
+                                    personGroups={personGroups}
+                                    recordValues={values}
+                                    entityType={entityType}
+                                    onChange={(v) => handleValueChange(it, v)}
+                                  />
                                 </div>
                               );
-                            }
-                            const isReadOnly = isItemReadOnly(it, items, conditionValues, conditions, tabs);
-                            return (
-                              <FillCell
-                                key={it.i}
-                                def={resolveItem(it)!}
-                                value={values[it.i] ?? (it.fieldName ? values[it.fieldName] : '') ?? ''}
-                                itemHeight={it.h}
-                                readOnly={isReadOnly}
-                                persons={persons}
-                                personGroups={personGroups}
-                                recordValues={values}
-                                entityType={entityType}
-                                onChange={(v) => handleValueChange(it, v)}
-                              />
-                            );
-                          })}
-                        </GridLayout>
-                      )
-                    )}
-                    {mounted && !hasLayout && fallbackFields.length === 0 && (
-                      <div className="py-6 text-center text-xs text-gray-400">Layout not visible yet — measuring…</div>
-                    )}
-                  </div>
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  )}
 
                   {fallbackFields.length > 0 && (
                     <div className="mt-8 flex flex-col gap-4 pt-4">
@@ -631,11 +656,11 @@ const FillCell = forwardRef<HTMLDivElement, {
     <div
       ref={ref}
       style={style}
-      className={`${className ?? ''} flex h-full w-full flex-col justify-center py-1 ${
+      className={`${className ?? ''} flex w-full flex-col gap-1.5 ${
         readOnly ? 'opacity-90' : ''
       }`}
     >
-      <label htmlFor={id} className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900">
+      <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-semibold text-gray-900">
         <span className="truncate">{def.label || def.name}</span>
         {def.required && <span className="text-red-500">*</span>}
         {def.placeholder && (
@@ -643,13 +668,8 @@ const FillCell = forwardRef<HTMLDivElement, {
             <Info className="h-3.5 w-3.5 text-gray-400 cursor-help" />
           </span>
         )}
-        {readOnly && (
-          <span className="rounded bg-amber-50 border border-amber-200 px-1 font-mono text-[9px] font-semibold text-amber-700">
-            Read-only
-          </span>
-        )}
       </label>
-      <div className="min-w-0 flex-1">{input}</div>
+      <div className="min-w-0">{input}</div>
     </div>
   );
 });
@@ -763,7 +783,7 @@ function makeInput(
   }
   if (def.type === 'checkbox_group') {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
+      <div className="flex w-full flex-col">
         {def.options.length === 0 ? (
           <span className="text-xs text-gray-400">No options defined</span>
         ) : (
@@ -776,28 +796,19 @@ function makeInput(
             return (
               <label
                 key={o}
-                className={`rounded-lg border p-4 text-left flex flex-col justify-between transition-all cursor-pointer ${
-                  checked
-                    ? 'border-gray-300 bg-white ring-1 ring-blue-600/40 shadow-xs'
-                    : 'border-gray-300 bg-white hover:border-gray-400'
-                } ${readOnly ? 'cursor-not-allowed opacity-60' : ''}`}
+                title={desc || undefined}
+                className={`flex items-center gap-2 py-0.5 text-xs text-gray-900 ${
+                  readOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                }`}
               >
-                <div className="flex items-center justify-between gap-3 w-full">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-semibold text-gray-900 truncate">{title}</span>
-                    <Info className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={readOnly}
-                    onChange={() => !readOnly && onChange(toggleMulti(value, o))}
-                    className="accent-blue-600 h-4 w-4 rounded"
-                  />
-                </div>
-                {desc && (
-                  <p className="mt-1.5 text-xs text-gray-500 leading-normal">{desc}</p>
-                )}
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={readOnly}
+                  onChange={() => !readOnly && onChange(toggleMulti(value, o))}
+                  className="h-3.5 w-3.5 shrink-0 accent-blue-600"
+                />
+                <span>{title}</span>
               </label>
             );
           })
@@ -1044,8 +1055,11 @@ function parseFileList(value: string): AttachedFile[] {
     if (Array.isArray(parsed)) {
       return parsed.filter((f) => f && typeof f === 'object' && f.name);
     }
+    if (typeof parsed === 'string' && parsed.trim()) {
+      return [{ name: parsed.trim(), size: 0, type: '', dataUrl: '' }];
+    }
   } catch {
-    /* fall through */
+    if (value.trim()) return [{ name: value.trim(), size: 0, type: '', dataUrl: '' }];
   }
   return [];
 }
@@ -1500,7 +1514,7 @@ function toCustomFields(values: Record<string, string>, defs: ResolvedField[]): 
       const low = trimmed.toLowerCase();
       out[name] = low === 'yes' || low === 'true' || low === '1';
     } else if (def.type === 'checkbox_group') {
-      out[name] = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+      out[name] = trimmed;
     } else if (def.type === 'table') {
       out[name] = parseTableRows(trimmed);
     } else if (def.type === 'checklist') {

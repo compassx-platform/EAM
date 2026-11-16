@@ -20,7 +20,7 @@ router = APIRouter(prefix="/escalations", tags=["escalations"])
 class EscalationPointInput(BaseModel):
     id: Optional[str] = None
     elapsed_hours: float = 0.0
-    reference_date_field: str = "expiry_date"
+    reference_date_field: str = ""
     filter_status: Optional[List[str]] = None
     condition_id: Optional[str] = None
     actions: List[Dict[str, Any]] = Field(default_factory=list)

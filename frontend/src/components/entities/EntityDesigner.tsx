@@ -78,6 +78,8 @@ interface DesignerRow {
   required: boolean;
   pinned: boolean;
   blockers?: string[];
+  autonumber_sequence: string | null;
+  autonumber_level: 'organization' | 'site' | null;
 }
 
 const RESERVED = new Set([
@@ -129,11 +131,14 @@ function humanize(name: string): string {
 
 function rowToInput(r: DesignerRow): EntityFieldInput {
   const cleanName = cleanFieldSlug(r.field_name);
+  const follows = r.field_type === 'text' && r.autonumber_sequence ? r.autonumber_sequence : null;
   return {
     field_name: cleanName,
     field_type: r.field_type,
     label: (r.label || '').trim() || humanize(cleanName),
     required: r.required,
+    autonumber_sequence: follows,
+    autonumber_level: follows ? (r.autonumber_level || 'organization') : null,
   };
 }
 
@@ -141,7 +146,9 @@ function fieldChanged(existing: EntityField, inp: EntityFieldInput): boolean {
   return (
     existing.field_type !== inp.field_type ||
     Boolean(existing.required) !== Boolean(inp.required) ||
-    (existing.label ?? '') !== (inp.label ?? '')
+    (existing.label ?? '') !== (inp.label ?? '') ||
+    (existing.autonumber_sequence ?? null) !== (inp.autonumber_sequence ?? null) ||
+    (existing.autonumber_level ?? null) !== (inp.autonumber_level ?? null)
   );
 }
 
@@ -155,6 +162,8 @@ function fieldFromRegistry(f: EntityField): DesignerRow {
     required: f.required,
     pinned: isPinned,
     blockers: f.blockers || [],
+    autonumber_sequence: f.autonumber_sequence || null,
+    autonumber_level: f.autonumber_level === 'site' ? 'site' : f.autonumber_level === 'organization' ? 'organization' : null,
   };
 }
 
@@ -168,6 +177,8 @@ function baselineRows(): DesignerRow[] {
       required: true,
       pinned: true,
       blockers: [],
+      autonumber_sequence: null,
+      autonumber_level: null,
     },
     {
       localId: 'description',
@@ -177,6 +188,8 @@ function baselineRows(): DesignerRow[] {
       required: false,
       pinned: true,
       blockers: [],
+      autonumber_sequence: null,
+      autonumber_level: null,
     },
   ];
 }
@@ -210,6 +223,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const [loadingVersions, setLoadingVersions] = useState(false);
 
   const [knownTypes, setKnownTypes] = useState<EntityTypeDefinition[]>([]);
+  const [sequenceNames, setSequenceNames] = useState<string[]>([]);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
   const flash = useCallback((kind: 'ok' | 'err', text: string) => {
@@ -246,6 +260,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           required: Boolean(f.required),
           pinned: f.field_name === 'title' || f.field_name === 'description',
           blockers: [],
+          autonumber_sequence: f.autonumber_sequence || null,
+          autonumber_level: f.autonumber_level === 'site' ? 'site' : f.autonumber_level === 'organization' ? 'organization' : null,
         }))
       );
     }
@@ -262,9 +278,13 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
     let alive = true;
     const load = async () => {
       try {
-        const types = await api.listEntityTypes().catch(() => []);
+        const [types, sequences] = await Promise.all([
+          api.listEntityTypes().catch(() => []),
+          api.listAutonumbers().catch(() => []),
+        ]);
         if (!alive) return;
         setKnownTypes(types);
+        setSequenceNames([...new Set(sequences.map((row) => row.sequence_name))].sort());
 
         if (isEdit && entityName) {
           const [et, fields] = await Promise.all([
@@ -321,6 +341,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
         required: false,
         pinned: false,
         blockers: [],
+        autonumber_sequence: null,
+        autonumber_level: null,
       },
     ]);
   };
@@ -584,6 +606,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             knownTypes={knownTypes}
             errors={rowErrors}
             currentType={isEdit ? entityName : (autoSlug ? slugify(displayName) : slugify(name)) || undefined}
+            sequenceNames={sequenceNames}
           />
         ) : (
           <Step3
@@ -935,6 +958,7 @@ function Step2(p: {
   knownTypes: EntityTypeDefinition[];
   errors: Record<string, string>;
   currentType?: string;
+  sequenceNames: string[];
 }) {
   return (
     <div className="mx-auto max-w-5xl">
@@ -957,6 +981,7 @@ function Step2(p: {
                 key={r.localId}
                 row={r}
                 error={p.errors[r.localId]}
+                sequenceNames={p.sequenceNames}
                 onPatch={(patch) => p.onPatch(r.localId, patch)}
                 onRemove={() => p.onRemove(r.localId)}
               />
@@ -980,6 +1005,7 @@ function Step2(p: {
 function FieldRow(p: {
   row: DesignerRow;
   error?: string;
+  sequenceNames: string[];
   onPatch: (patch: Partial<DesignerRow>) => void;
   onRemove: () => void;
 }) {
@@ -1030,7 +1056,12 @@ function FieldRow(p: {
         <td className="px-3 py-2 align-middle">
           <select
             value={r.field_type}
-            onChange={(e) => p.onPatch({ field_type: e.target.value as DesignerRow['field_type'] })}
+            onChange={(e) => {
+              const field_type = e.target.value as DesignerRow['field_type'];
+              p.onPatch(field_type === 'text'
+                ? { field_type }
+                : { field_type, autonumber_sequence: null, autonumber_level: null });
+            }}
             disabled={r.pinned && r.field_name === 'description'}
             className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500"
           >
@@ -1090,6 +1121,43 @@ function FieldRow(p: {
           )}
         </td>
       </tr>
+      {r.field_type === 'text' && (
+        <tr className="bg-gray-50/40">
+          <td colSpan={5} className="px-3 pb-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-gray-500">Number sequence</span>
+              <select
+                value={r.autonumber_sequence || ''}
+                onChange={(e) => {
+                  const autonumber_sequence = e.target.value || null;
+                  p.onPatch({
+                    autonumber_sequence,
+                    autonumber_level: autonumber_sequence ? (r.autonumber_level || 'organization') : null,
+                  });
+                }}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
+              >
+                <option value="">None</option>
+                {r.autonumber_sequence && !p.sequenceNames.includes(r.autonumber_sequence) && (
+                  <option value={r.autonumber_sequence}>{r.autonumber_sequence}</option>
+                )}
+                {p.sequenceNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <select
+                value={r.autonumber_level || 'organization'}
+                disabled={!r.autonumber_sequence}
+                onChange={(e) => p.onPatch({ autonumber_level: e.target.value as 'organization' | 'site' })}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                <option value="organization">Organization sequence</option>
+                <option value="site">Site sequence</option>
+              </select>
+            </div>
+          </td>
+        </tr>
+      )}
       {p.error && (
         <tr className="bg-red-50/40">
           <td colSpan={5} className="px-4 py-1.5 text-[11px] font-medium text-red-700">
