@@ -31,6 +31,8 @@ import { useHashRoute, navigate } from './lib/router';
 function App() {
   const route = useHashRoute();
   const [listTick, setListTick] = useState(0);
+  const embedded = new URLSearchParams(window.location.search).get('embed') === '1'
+    || new URLSearchParams(window.location.search).get('sidebar') === 'false';
 
   const refreshList = useCallback(() => setListTick((t) => t + 1), []);
 
@@ -104,17 +106,18 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-row overflow-hidden bg-[#F7F7F7] text-gray-900">
-      {/* 1. Main Primary Sidebar (Full Height on Left, bg-[#F7F7F7]) */}
-      <MainSidebar activeTab={tab} onNavigate={switchTab} />
+    <div className={`flex h-screen w-screen flex-row overflow-hidden text-gray-900 ${embedded ? 'bg-white' : 'bg-[#F7F7F7]'}`}>
+      {!embedded && <MainSidebar activeTab={tab} onNavigate={switchTab} />}
 
-      {/* 2. Main Surface Container: bit of gap/padding around the rounded surface card */}
-      <div className="flex-1 min-w-0 h-full p-2 sm:p-2.5 flex flex-col overflow-hidden bg-[#F7F7F7]">
-        {/* The Single Unified Rounded Surface Card (Hosts secondary sidebars & content directly) */}
+      <div className={embedded
+        ? 'flex-1 min-w-0 h-full flex flex-col overflow-hidden bg-white'
+        : 'flex-1 min-w-0 h-full p-2 sm:p-2.5 flex flex-col overflow-hidden bg-[#F7F7F7]'}>
         <main
           id="workspace-surface"
           data-testid="workspace-surface"
-          className="h-full w-full overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-2xs flex flex-col min-h-0"
+          className={embedded
+            ? 'h-full w-full overflow-hidden bg-white flex flex-col min-h-0'
+            : 'h-full w-full overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-2xs flex flex-col min-h-0'}
         >
           {createType !== null ? (
             <EntityCreateForm
