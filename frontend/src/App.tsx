@@ -106,18 +106,14 @@ function App() {
   }
 
   return (
-    <div className={`flex h-screen w-screen flex-row overflow-hidden text-gray-900 ${embedded ? 'bg-white' : 'bg-[#F7F7F7]'}`}>
+    <div className="flex h-screen w-screen flex-row overflow-hidden bg-[#F7F7F7] text-gray-900">
       {!embedded && <MainSidebar activeTab={tab} onNavigate={switchTab} />}
 
-      <div className={embedded
-        ? 'flex-1 min-w-0 h-full flex flex-col overflow-hidden bg-white'
-        : 'flex-1 min-w-0 h-full p-2 sm:p-2.5 flex flex-col overflow-hidden bg-[#F7F7F7]'}>
+      <div className="flex-1 min-w-0 h-full p-2 sm:p-2.5 flex flex-col overflow-hidden bg-[#F7F7F7]">
         <main
           id="workspace-surface"
           data-testid="workspace-surface"
-          className={embedded
-            ? 'h-full w-full overflow-hidden bg-white flex flex-col min-h-0'
-            : 'h-full w-full overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-2xs flex flex-col min-h-0'}
+          className="h-full w-full overflow-hidden rounded-xl border border-[#E5E7EB] bg-white shadow-2xs flex flex-col min-h-0"
         >
           {createType !== null ? (
             <EntityCreateForm
