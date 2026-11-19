@@ -1,3 +1,5 @@
+import { compassxRequestHeaders } from '../lib/compassxSession';
+
 export interface CompassXSchema {
   id: string;
   name: string;
@@ -71,6 +73,7 @@ export function getCompassXCatalogBaseUrl(): string {
 export function getSystemHeaders(customBaseUrl?: string, customToken?: string): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...compassxRequestHeaders(),
   };
   if (customBaseUrl) {
     headers['X-CompassX-Catalog-Url'] = customBaseUrl;

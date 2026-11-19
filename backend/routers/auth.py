@@ -6,6 +6,12 @@ from backend.database import get_db
 from backend.models.users import AppUser, AppRole, app_user_role
 from backend.models.person import Person
 from backend.models.base import generate_uuid
+from backend.services.compassx_users import (
+    CompassxUserError,
+    actor_from_compassx,
+    fetch_workspace_members,
+    user_token_from_header,
+)
 
 router = APIRouter(prefix="/auth", tags=["Auth & RBAC"])
 
@@ -45,8 +51,45 @@ def _ensure_person_for_user(db: Session, email: str, display_name: str) -> Perso
         db.flush()
     return person
 
+def _compassx_or_http(
+    token: Optional[str],
+    workspace_id: Optional[str],
+    workspace_slug: Optional[str],
+):
+    try:
+        return actor_from_compassx(token, workspace_id, workspace_slug)
+    except CompassxUserError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.get("/users", response_model=List[UserResponse])
-def list_users(db: Session = Depends(get_db)):
+def list_users(
+    db: Session = Depends(get_db),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
+):
+    token = user_token_from_header(x_user_token)
+    if token and x_workspace_id:
+        try:
+            members = fetch_workspace_members(token, x_workspace_id, x_workspace_slug)
+        except CompassxUserError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        directory = []
+        for member in members:
+            if member.get("principal_type") != "user":
+                continue
+            email = member.get("email") or ""
+            directory.append(UserResponse(
+                id=str(member.get("user_id") or member.get("principal_id") or email),
+                email=email,
+                display_name=member.get("display_name") or email or "User",
+                person_id=None,
+                active=True,
+                roles=[str(member["role_id"])] if member.get("role_id") else [],
+            ))
+        return directory
+
     users = db.query(AppUser).all()
     return [
         UserResponse(
@@ -114,12 +157,30 @@ def create_user(req: UserCreateRequest, db: Session = Depends(get_db)):
 def get_current_actor(
     x_actor_id: Optional[str] = Header(None, alias="X-Actor-Id"),
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db)
 ):
     """
-    Returns active actor info based on request headers (or default user).
-    Allows easy multi-persona simulation in the UI.
+    Returns the signed-in CompassX user when the portal passed a user token.
+    Otherwise falls back to the local actor header.
     """
+    compassx = _compassx_or_http(x_user_token, x_workspace_id, x_workspace_slug)
+    if compassx is not None:
+        actor_id, roles, user = compassx
+        if x_actor_role and x_actor_role not in roles:
+            roles.append(x_actor_role)
+        return {
+            "id": user.get("id"),
+            "email": user.get("email"),
+            "actor_id": actor_id,
+            "display_name": user.get("display_name") or actor_id,
+            "person_id": None,
+            "roles": roles,
+            "active": user.get("status", "active") == "active",
+        }
+
     actor_id = x_actor_id or "admin@compassx.io"
     user = db.query(AppUser).filter((AppUser.email == actor_id) | (AppUser.id == actor_id)).first()
     

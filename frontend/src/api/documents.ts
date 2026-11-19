@@ -3,10 +3,12 @@ import type {
   DocInfo,
   PresignedUrlResponse,
 } from '../types';
+import { compassxRequestHeaders } from '../lib/compassxSession';
 const API_BASE = '/api';
 
 function getDocHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
+    ...compassxRequestHeaders(),
     ...(extra || {}),
   };
   if (typeof window !== 'undefined') {

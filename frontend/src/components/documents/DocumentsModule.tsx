@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useCompassxProfile } from '../../lib/compassxSession';
 import {
   Folder,
   FolderOpen,
@@ -128,22 +129,10 @@ export const DocumentsModule: React.FC = () => {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Current logged in user info (Databricks style default)
-  const defaultUser = useMemo(() => {
-    return (
-      localStorage.getItem('compassx_user_name') ||
-      localStorage.getItem('user_email') ||
-      'Vishalkumar Vora'
-    );
-  }, []);
-
-  const currentUserEmail = useMemo(() => {
-    return (
-      localStorage.getItem('user_email') ||
-      localStorage.getItem('compassx_user_email') ||
-      'vishalkumar.vora@jsw.in'
-    );
-  }, []);
+  const compassxProfile = useCompassxProfile();
+  const currentUserEmail = compassxProfile?.email || compassxProfile?.id || '';
+  const defaultUser = currentUserEmail || compassxProfile?.displayName || 'Unknown user';
+  const currentUserLabel = compassxProfile?.displayName || defaultUser;
 
   // 1. Load Folder Tree & Flat Folders
   const loadFolderHierarchy = useCallback(async () => {
@@ -848,7 +837,7 @@ export const DocumentsModule: React.FC = () => {
                 <div className="absolute left-0 top-full mt-1 w-48 rounded-md border border-gray-200 bg-white py-1 shadow-lg z-30 text-[13px]">
                   {[
                     { key: 'all', label: 'All Owners' },
-                    { key: defaultUser, label: `${defaultUser} (Me)` },
+                    { key: defaultUser, label: `${currentUserLabel} (Me)` },
                     { key: 'system', label: 'system' },
                   ].map((o) => (
                     <button

@@ -78,11 +78,17 @@ import type {
 } from '../types';
 
 
+import { compassxRequestHeaders } from '../lib/compassxSession';
+
 const API_BASE = '/api';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...compassxRequestHeaders(),
+      ...(options.headers || {}),
+    },
     ...options,
   });
 
@@ -124,6 +130,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  listDirectoryUsers(): Promise<Array<{
+    id: string;
+    email: string;
+    display_name: string;
+    person_id?: string | null;
+    active: boolean;
+    roles: string[];
+  }>> {
+    return request('/auth/users');
+  },
+
   listWorkflows(entityType?: string): Promise<Workflow[]> {
     const q = entityType ? `?entity_type=${encodeURIComponent(entityType)}` : '';
     return request<Workflow[]>(`/workflows${q}`);

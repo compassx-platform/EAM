@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   HardDrive,
   Sliders,
@@ -44,6 +44,26 @@ interface SystemSettingsPageProps {
 export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingSection>(initialTab);
 
+  const [directoryUsers, setDirectoryUsers] = useState<Array<{ id: string; email: string; display_name: string }>>([]);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'identity') return;
+    let cancelled = false;
+    api.listDirectoryUsers()
+      .then((users) => {
+        if (!cancelled) {
+          setDirectoryUsers(users);
+          setDirectoryError(null);
+        }
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setDirectoryError(err.message || 'Could not load CompassX users');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
   // Helper for rendering secondary sidebar buttons
   const navItem = (id: SettingSection, label: string) => {
     const isActive = activeTab === id;
@@ -180,9 +200,13 @@ export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPag
                   </div>
                   <div className="md:col-span-8 flex flex-wrap gap-2">
                     {['admin@compassx.io', 'vishalkumar.vora@jsw.in', 'alice.safety@compassx.io', 'bob.supervisor@compassx.io', 'charlie.tech@compassx.io'].map((u) => (
-                      <span key={u} className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-mono text-gray-700">
-                        {u}
-                      </span>
+                    {directoryError ? (
+                      <span className="text-xs text-red-600">{directoryError}</span>
+                    ) : directoryUsers.length === 0 ? (
+                      <span className="text-xs text-gray-500">No users yet. Open EAM from CompassX to list the workspace members.</span>
+                    ) : directoryUsers.map((user) => (
+                      <span key={user.id} className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-700">
+                        {user.display_name}{user.email ? ` (${user.email})` : ''}
                     ))}
                   </div>
                 </div>

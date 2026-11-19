@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Form, Query, status, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -15,8 +15,30 @@ from backend.routers.system import (
     resolve_workload_identity,
     resolve_workspace_id,
 )
+from backend.services.compassx_users import CompassxUserError, actor_from_compassx
 
 router = APIRouter(prefix="", tags=["Document Management (Doclinks & Volumes)"])
+
+
+def _created_by_actor(
+    created_by: Optional[str],
+    user_token: Optional[str],
+    workspace_id: Optional[str],
+    workspace_slug: Optional[str],
+) -> str:
+    """Use the signed-in CompassX user when the caller did not name a real person."""
+    named = (created_by or "").strip()
+    if named and named not in ("current_user", "system"):
+        return named
+    try:
+        compassx = actor_from_compassx(user_token, workspace_id, workspace_slug)
+    except CompassxUserError as exc:
+        if named == "current_user":
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        compassx = None
+    if compassx is not None:
+        return compassx[0]
+    return named or "system"
 
 
 # -----------------------------------------------------------------------------
@@ -413,6 +435,9 @@ async def upload_document(
     tags: Optional[str] = Form(None),
     version: Optional[str] = Form("1.0"),
     created_by: Optional[str] = Form("system"),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db),
 ):
     """Uploads a file directly to CompassX volume storage and creates DocInfo metadata."""
@@ -421,6 +446,7 @@ async def upload_document(
     workload_identity = resolve_workload_identity(request, db)
     workspace_id = resolve_workspace_id(request, db)
     effective_vol_id = resolve_effective_volume_id(db, volume_id)
+    owner = _created_by_actor(created_by, x_user_token, x_workspace_id, x_workspace_slug)
     try:
         content = await file.read()
         parsed_tags = []
@@ -442,7 +468,7 @@ async def upload_document(
             sub_path=sub_path,
             volume_id=effective_vol_id,
             tags=parsed_tags,
-            created_by=created_by,
+            created_by=owner,
             version=version or "1.0",
             base_url=base_url,
             auth_token=auth_token,
@@ -459,9 +485,13 @@ async def upload_document(
 @router.post("/documents/url", status_code=status.HTTP_201_CREATED)
 def create_url_document(
     payload: DocUrlCreate,
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db),
 ):
     """Registers an external web document or cloud URL link."""
+    owner = _created_by_actor(payload.created_by, x_user_token, x_workspace_id, x_workspace_slug)
     try:
         doc = doc_management_service.create_url_document(
             db=db,
@@ -471,7 +501,7 @@ def create_url_document(
             folder_id=payload.folder_id,
             tags=payload.tags,
             custom_metadata=payload.custom_metadata,
-            created_by=payload.created_by,
+            created_by=owner,
         )
         return doc.to_dict(include_links=True)
     except ValueError as err:

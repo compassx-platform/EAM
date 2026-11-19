@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { DocFolder, DocInfo } from '../../types';
 import { uploadDocument, createUrlDocument } from '../../api/documents';
+import { compassxActorId } from '../../lib/compassxSession';
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
@@ -114,7 +115,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         if (folderId) formData.append('folder_id', folderId);
         if (tagsInput.trim()) formData.append('tags', tagsInput.trim());
         if (version.trim()) formData.append('version', version.trim());
-        formData.append('created_by', 'current_user');
+        formData.append('created_by', compassxActorId() || 'current_user');
 
         const selectedFolder = folders.find((f) => f.id === folderId);
         const effectiveVol = selectedFolder?.volume_id || volumeId;

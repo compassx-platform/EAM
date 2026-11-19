@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { compassxActorId } from '../../lib/compassxSession';
 import {
   X,
   Upload,
@@ -180,7 +181,7 @@ export function TemplateImportModal({
       import_roles: importRoles,
       import_fields_and_forms: importFieldsAndForms,
       activate_immediately: activateImmediately,
-      created_by: 'admin@compassx.io',
+      created_by: compassxActorId() || 'admin@compassx.io',
     };
 
     try {

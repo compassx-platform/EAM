@@ -19,7 +19,8 @@ from backend.models.base import utc_now
 from backend.services.field_validator import FieldValidationError, validate_custom_fields
 from backend.services.simulator import simulate_transition
 from backend.services.projector import rebuild_entity_from_events
-from backend.services.actor import resolve_actor_roles, resolve_actor
+from backend.services.actor import resolve_actor_roles
+from backend.services.compassx_users import CompassxUserError, actor_from_compassx
 
 router = APIRouter(tags=["Entities (Command & Query API)"])
 
@@ -66,8 +67,24 @@ def resolve_actor(
     explicit_roles: Optional[List[str]],
     header_actor_id: Optional[str],
     header_role: Optional[str],
-    db: Session
+    db: Session,
+    user_token: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    workspace_slug: Optional[str] = None,
 ) -> tuple[str, list[str]]:
+    if not explicit_actor_id and not header_actor_id:
+        try:
+            compassx = actor_from_compassx(user_token, workspace_id, workspace_slug)
+        except CompassxUserError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        if compassx is not None:
+            actor_id, roles, _user = compassx
+            if explicit_roles:
+                roles = list(explicit_roles)
+            if header_role and header_role not in roles:
+                roles.append(header_role)
+            return actor_id, roles
+
     actor_id = explicit_actor_id or header_actor_id or "admin@compassx.io"
     roles = list(resolve_actor_roles(db, actor_id, explicit_roles))
 
@@ -84,11 +101,16 @@ def create_entity_endpoint(
     req: CreateEntityRequest,
     x_actor_id: Optional[str] = Header(None, alias="X-Actor-Id"),
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db)
 ):
     key = _verify_entity_type(db, entity_type)
     try:
-        actor_id, roles = resolve_actor(None, None, x_actor_id, x_actor_role, db)
+        actor_id, roles = resolve_actor(
+            None, None, x_actor_id, x_actor_role, db, x_user_token, x_workspace_id, x_workspace_slug,
+        )
         result = create_entity(
             db=db,
             entity_type=key,
@@ -100,6 +122,8 @@ def create_entity_endpoint(
             workflow_version=req.workflow_version,
         )
         return result
+    except HTTPException:
+        raise
     except CommandError as ce:
         raise HTTPException(status_code=400, detail={"error_code": ce.code, "message": ce.message, "details": ce.details})
     except FieldValidationError as fve:
@@ -114,11 +138,17 @@ def propose_transition_endpoint(
     req: TransitionRequest,
     x_actor_id: Optional[str] = Header(None, alias="X-Actor-Id"),
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db)
 ):
     key = _verify_entity_type(db, entity_type)
     try:
-        actor_id, roles = resolve_actor(req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db)
+        actor_id, roles = resolve_actor(
+            req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db,
+            x_user_token, x_workspace_id, x_workspace_slug,
+        )
         result = propose_transition(
             db=db,
             entity_type=key,
@@ -132,6 +162,8 @@ def propose_transition_endpoint(
             expected_last_event_id=req.expected_last_event_id,
         )
         return result
+    except HTTPException:
+        raise
     except StaleWriteError as swe:
         raise HTTPException(status_code=409, detail={"error_code": "stale_write", "message": swe.message})
     except ConditionFailedError as gfe:
@@ -152,10 +184,16 @@ def simulate_transition_endpoint(
     req: SimulateRequest,
     x_actor_id: Optional[str] = Header(None, alias="X-Actor-Id"),
     x_actor_role: Optional[str] = Header(None, alias="X-Actor-Role"),
+    x_user_token: Optional[str] = Header(None, alias="X-Compassx-User-Token"),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
+    x_workspace_slug: Optional[str] = Header(None, alias="X-Workspace-Slug"),
     db: Session = Depends(get_db)
 ):
     key = _verify_entity_type(db, entity_type)
-    actor_id, roles = resolve_actor(req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db)
+    actor_id, roles = resolve_actor(
+        req.actor_id, req.actor_roles, x_actor_id, x_actor_role, db,
+        x_user_token, x_workspace_id, x_workspace_slug,
+    )
     result = simulate_transition(
         db=db,
         entity_type=key,
