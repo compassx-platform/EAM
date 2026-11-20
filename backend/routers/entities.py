@@ -273,6 +273,36 @@ def get_entity_detail(entity_type: str, id: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/api/{entity_type}/{id}/children")
+def list_child_records(entity_type: str, id: str, db: Session = Depends(get_db)):
+    """Child records declared on the entity type, each able to run its own workflow."""
+    from backend.services.record_lines import children_of
+
+    key = _verify_entity_type(db, entity_type)
+    EntityModel, _ = get_entity_models(key)
+    query = db.query(EntityModel).filter(EntityModel.id == id)
+    if EntityModel == DynamicEntity:
+        query = query.filter(DynamicEntity.entity_type == key)
+    parent = query.first()
+    if not parent:
+        raise HTTPException(status_code=404, detail=f"{key} '{id}' not found")
+
+    definition = db.query(EntityTypeDefinition).filter(EntityTypeDefinition.name == key).first()
+    groups = []
+    for spec in (definition.children or []) if definition else []:
+        child_type = str(spec.get("entity_type") or "").strip().lower()
+        link_field = str(spec.get("link_field") or "").strip()
+        if not child_type or not link_field:
+            continue
+        rows = children_of(db, child_type, link_field, parent.id)
+        groups.append({
+            "entity_type": child_type,
+            "link_field": link_field,
+            "items": [row.to_dict() for row in rows],
+        })
+    return {"parent_id": parent.id, "groups": groups}
+
+
 @router.patch("/api/{entity_type}/{id}")
 @router.put("/api/{entity_type}/{id}")
 def update_entity_fields_endpoint(

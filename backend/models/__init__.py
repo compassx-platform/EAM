@@ -72,6 +72,7 @@ from backend.models.safety import (
     AppliedTagOut,
 )
 from backend.models.system_setting import SystemSetting
+from backend.models.stock import StockItem, Storeroom, StockBalance, StockReservation
 
 __all__ = [
     "EntityBaseMixin",
@@ -144,5 +145,9 @@ __all__ = [
     "AppliedHazard",
     "AppliedPrecaution",
     "AppliedTagOut",
+    "StockItem",
+    "Storeroom",
+    "StockBalance",
+    "StockReservation",
 ]
 

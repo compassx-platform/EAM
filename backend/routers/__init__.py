@@ -21,6 +21,7 @@ from backend.routers.meters import router as meters_router
 from backend.routers.documents import router as documents_router
 from backend.routers.safety import router as safety_router
 from backend.routers.failures import router as failures_router
+from backend.routers.stock import router as stock_router
 
 __all__ = [
     "auth_router",
@@ -47,5 +48,6 @@ __all__ = [
     "documents_router",
     "safety_router",
     "failures_router",
+    "stock_router",
 ]
 

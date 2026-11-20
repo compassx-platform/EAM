@@ -457,6 +457,13 @@ export const api = {
     return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}`);
   },
 
+  listChildRecords(
+    entityType: string,
+    id: string
+  ): Promise<{ parent_id: string; groups: Array<{ entity_type: string; link_field: string; items: EntityRecord[] }> }> {
+    return request(`/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}/children`);
+  },
+
   updateEntityFields(
     entityType: string,
     id: string,
@@ -525,6 +532,7 @@ export const api = {
     icon?: string;
     fields?: EntityFieldInput[];
     statuses?: EntityLifecycleStatus[];
+    children?: Array<{ entity_type: string; link_field: string }>;
   }): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>('/entity-types', {
       method: 'POST',
@@ -539,6 +547,7 @@ export const api = {
       description?: string;
       icon?: string;
       statuses?: EntityLifecycleStatus[];
+      children?: Array<{ entity_type: string; link_field: string }>;
     }
   ): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`, {

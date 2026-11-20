@@ -51,6 +51,26 @@ ATOM_TYPES_CATALOG = [
         "name": "Person Group member",
         "description": "Checks if the person in a relationship field is an active member of a specified Person Group.",
     },
+    {
+        "type": "children",
+        "name": "Child records",
+        "description": "Checks all, any, or none of the child records. Use it for every labor line complete, or any actual recorded.",
+    },
+    {
+        "type": "due_window",
+        "name": "Due inside lead window",
+        "description": "Passes when a due date is on or before today plus the lead days.",
+    },
+    {
+        "type": "asset_operating",
+        "name": "Asset or location is operating",
+        "description": "Passes when the named asset, or the named location, is operating.",
+    },
+    {
+        "type": "no_open_record",
+        "name": "No open matching record",
+        "description": "Passes when no open record of the target type matches the named fields.",
+    },
 ]
 
 OPERATORS_CATALOG = {

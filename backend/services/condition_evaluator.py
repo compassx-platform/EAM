@@ -316,6 +316,77 @@ def evaluate_atom(atom: Dict[str, Any], db: Session, custom_fields: Dict[str, An
         except Exception as ex:
             return False, f"Error evaluating person_group rule: {str(ex)}"
 
+    if atom_type == "children":
+        from backend.services.record_lines import children_of
+        entity_id = custom_fields.get("_entity_id")
+        child_type = atom.get("child_entity_type")
+        link_field = atom.get("link_field")
+        quantifier = str(atom.get("quantifier") or "all").strip().lower()
+        if not entity_id or not child_type or not link_field:
+            return False, "A child condition needs the current record, a child type, and a link field."
+        rows = children_of(db, str(child_type), str(link_field), str(entity_id))
+        field = atom.get("field")
+        op = str(atom.get("operator") or "eq").lower()
+        expected = atom.get("value")
+        status_expected = atom.get("status")
+
+        def matches(row) -> bool:
+            if status_expected is not None and str(row.status or "") != str(status_expected):
+                return False
+            if not field:
+                return status_expected is not None or True
+            val = (row.custom_fields or {}).get(field)
+            empty = val is None or (isinstance(val, str) and not val.strip()) or val == [] or val == {}
+            if op == "is_empty":
+                return empty
+            if op == "is_not_empty":
+                return not empty
+            return str(val if val is not None else "") == str(expected if expected is not None else "")
+
+        hits = [matches(row) for row in rows]
+        if quantifier == "all":
+            passed = len(rows) > 0 and all(hits)
+        elif quantifier == "none":
+            passed = not any(hits)
+        else:
+            passed = any(hits)
+        return passed, f"{quantifier} of {len(rows)} {child_type} rows matched"
+
+    if atom_type == "due_window":
+        from backend.services.record_lines import is_due
+        due_field = atom.get("due_field") or atom.get("field")
+        lead = custom_fields.get(atom["lead_days_field"]) if atom.get("lead_days_field") else atom.get("lead_days")
+        try:
+            lead_days = float(lead or 0)
+        except (TypeError, ValueError):
+            lead_days = 0
+        if not due_field:
+            return False, "A due window needs a due date field."
+        passed = is_due(custom_fields, str(due_field), lead_days)
+        return passed, "The due date is inside the lead window." if passed else "The due date is outside the lead window."
+
+    if atom_type == "asset_operating":
+        from backend.services.record_lines import asset_is_operating
+        site = custom_fields.get(atom.get("site_field") or "site_id")
+        asset = custom_fields.get(atom["asset_field"]) if atom.get("asset_field") else None
+        location = custom_fields.get(atom["location_field"]) if atom.get("location_field") else None
+        passed = asset_is_operating(db, site, asset, location)
+        return passed, "The asset or location is operating." if passed else "The asset or location is not operating."
+
+    if atom_type == "no_open_record":
+        from backend.services.record_lines import find_open_record
+        target = atom.get("target_entity_type") or custom_fields.get("_entity_type")
+        match_fields = atom.get("match_fields") or []
+        if not target or not match_fields:
+            return False, "An open-record check needs a target type and the fields to match."
+        match = {name: custom_fields.get(name) for name in match_fields}
+        existing = find_open_record(
+            db, str(target), match, atom.get("closed_statuses") or [], exclude_id=custom_fields.get("_entity_id"),
+        )
+        if existing:
+            return False, f"An open record already exists ({existing.id})."
+        return True, "No open record matches."
+
     return False, f"Unknown rule type '{atom_type}'"
 
 

@@ -18,6 +18,7 @@ class EntityTypeDefinition(Base):
     version_number = Column(Integer, nullable=False, default=1)
     version_label = Column(String(50), nullable=False, default="v1")
     statuses = Column(JSON, nullable=False, default=list)  # Lifecycle Status Domain e.g. [{'id': 'DRAFT', 'label': 'Draft', 'category': 'draft'}]
+    children = Column(JSON, nullable=False, default=list)  # [{entity_type, link_field}] child records edited on this record
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -31,6 +32,7 @@ class EntityTypeDefinition(Base):
             "version_number": self.version_number or 1,
             "version_label": self.version_label or f"v{self.version_number or 1}",
             "statuses": self.statuses or [],
+            "children": self.children or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

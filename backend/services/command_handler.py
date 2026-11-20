@@ -168,6 +168,7 @@ def create_entity(
     custom_fields: Optional[Dict[str, Any]] = None,
     payload: Optional[Dict[str, Any]] = None,
     workflow_version: Optional[str] = None,
+    commit: bool = True,
 ) -> Dict[str, Any]:
     """
     Creates a new entity instance (Section 5: POST /api/{entity_type}/create).
@@ -262,20 +263,24 @@ def create_entity(
             workflow_version=workflow_version,
         )
 
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         db.refresh(new_entity)
 
-        # Handle subprocess entry if initial_state is a subprocess node
-        from backend.services.subprocess_service import handle_subprocess_state_entry
-        sub_res = handle_subprocess_state_entry(
-            db=db,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            state_name=initial_state,
-            definition=definition,
-            custom_fields=cleaned_fields,
-            workflow_version=workflow_version,
-        )
+        sub_res = None
+        if commit:
+            from backend.services.subprocess_service import handle_subprocess_state_entry
+            sub_res = handle_subprocess_state_entry(
+                db=db,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                state_name=initial_state,
+                definition=definition,
+                custom_fields=cleaned_fields,
+                workflow_version=workflow_version,
+            )
 
         result = {
             "accepted": True,
@@ -288,17 +293,18 @@ def create_entity(
         if sub_res:
             result["subprocess"] = sub_res
 
-        # 5. Automatic conditional routing may immediately advance the entity
-        settled = _settle_workflow(db, entity_type, entity_id, definition, workflow_version)
-        if settled:
-            result["settled"] = settled
-            db.refresh(new_entity)
-            result["status"] = new_entity.status
-            result["entity"] = new_entity.to_dict()
+        if commit:
+            settled = _settle_workflow(db, entity_type, entity_id, definition, workflow_version)
+            if settled:
+                result["settled"] = settled
+                db.refresh(new_entity)
+                result["status"] = new_entity.status
+                result["entity"] = new_entity.to_dict()
 
         return result
     except Exception as ex:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise ex
 
 
@@ -314,6 +320,7 @@ def propose_transition(
     custom_fields_delta: Optional[Dict[str, Any]] = None,
     expected_last_event_id: Optional[str] = None,
     run_post_pipeline: bool = True,
+    commit: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes a transition through the single command path (Section 5: POST /api/{entity_type}/transition).
@@ -381,6 +388,8 @@ def propose_transition(
     eval_custom_fields["workflow_stage"] = current_stage
     eval_custom_fields["stage"] = current_stage
     eval_custom_fields["status"] = current_status
+    eval_custom_fields["_entity_id"] = entity_id
+    eval_custom_fields["_entity_type"] = entity_type
 
     # Step 4 & 5: Evaluate transition-level conditions (blocking checks)
     all_passed, results, failing = evaluate_condition_ids(
@@ -428,6 +437,7 @@ def propose_transition(
     target_node = nodes_meta.get(to_state)
     target_entity_status = (target_node.get("entity_status") if target_node else None) or to_state
 
+    reject_results: List[Dict[str, Any]] = []
     try:
         # Optimistic concurrency check: UPDATE ... WHERE id = entity_id AND last_event_id = current_last_event_id
         stmt = (
@@ -445,7 +455,8 @@ def propose_transition(
         result = db.execute(stmt)
 
         if result.rowcount == 0:
-            db.rollback()
+            if commit:
+                db.rollback()
             raise StaleWriteError(f"Conflict on entity '{entity_id}': last_event_id changed concurrently")
 
         # Append to event log
@@ -461,6 +472,23 @@ def propose_transition(
             payload=event_payload,
         )
         db.add(event_row)
+
+        rejecting = [item for item in (on_after or []) if item.get("reject_on_failure")]
+        on_after = [item for item in (on_after or []) if not item.get("reject_on_failure")]
+        if rejecting:
+            from backend.services.actions import execute_actions
+            db.flush()
+            fresh = db.query(EntityModel).populate_existing().filter(EntityModel.id == entity_id).first()
+            reject_results = execute_actions(
+                db,
+                entity_type,
+                entity_id,
+                dict(fresh.custom_fields or {}) if fresh else current_custom_fields,
+                rejecting,
+                commit=False,
+                raise_on_failure=True,
+                event_type=event_type,
+            )
 
         # Complete previous task assignments and create new ones for destination state if task node
         complete_task_assignments_for_state(
@@ -480,19 +508,23 @@ def propose_transition(
             workflow_version=workflow_version,
         )
 
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
 
-        # Handle subprocess entry if destination state is a subprocess node
-        from backend.services.subprocess_service import handle_subprocess_state_entry
-        sub_res = handle_subprocess_state_entry(
-            db=db,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            state_name=to_state,
-            definition=definition,
-            custom_fields=current_custom_fields,
-            workflow_version=workflow_version,
-        )
+        sub_res = None
+        if commit:
+            from backend.services.subprocess_service import handle_subprocess_state_entry
+            sub_res = handle_subprocess_state_entry(
+                db=db,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                state_name=to_state,
+                definition=definition,
+                custom_fields=current_custom_fields,
+                workflow_version=workflow_version,
+            )
 
         response: Dict[str, Any] = {
             "accepted": True,
@@ -511,11 +543,12 @@ def propose_transition(
                 "choices": choice_trace,
             }
     except Exception as ex:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise ex
 
     # Step 7 (post-commit): side effects + automatic conditional routing
-    if run_post_pipeline:
+    if commit and run_post_pipeline:
         side_effects, settled = _run_post_pipeline(
             db=db,
             entity_type=entity_type,
@@ -523,11 +556,14 @@ def propose_transition(
             definition=definition,
             workflow_version=workflow_version,
             on_after=on_after,
+            event_type=event_type,
         )
-        if side_effects:
-            response["side_effects"] = side_effects
+        if reject_results or side_effects:
+            response["side_effects"] = reject_results + side_effects
         if settled:
             response["settled"] = settled
+    elif reject_results:
+        response["side_effects"] = reject_results
 
     return response
 
@@ -539,6 +575,7 @@ def _run_post_pipeline(
     definition: Dict[str, Any],
     workflow_version: str,
     on_after: Optional[List[Dict[str, Any]]],
+    event_type: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Post-commit: execute declarative side effects, settle auto routing, and sync parent workflows."""
     side_effects: List[Dict[str, Any]] = []
@@ -547,7 +584,7 @@ def _run_post_pipeline(
         EntityModel, _ = get_entity_models(entity_type)
         entity = db.query(EntityModel).filter(EntityModel.id == entity_id).first()
         custom_fields = dict(entity.custom_fields or {}) if entity else {}
-        side_effects = execute_actions(db, entity_type, entity_id, custom_fields, on_after)
+        side_effects = execute_actions(db, entity_type, entity_id, custom_fields, on_after, event_type=event_type)
     settled = _settle_workflow(db, entity_type, entity_id, definition, workflow_version)
 
     # Check if this transition completed a child subprocess and can resume its parent

@@ -213,6 +213,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const [icon, setIcon] = useState('Layers');
   const [autoSlug, setAutoSlug] = useState(!isEdit);
   const [statuses, setStatuses] = useState<EntityLifecycleStatus[]>(DEFAULT_LIFECYCLE_STATUSES);
+  const [children, setChildren] = useState<Array<{ entity_type: string; link_field: string }>>([]);
 
   // ---- fields ----
   const [rows, setRows] = useState<DesignerRow[]>(baselineRows);
@@ -302,6 +303,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           } else {
             setStatuses(DEFAULT_LIFECYCLE_STATUSES);
           }
+          setChildren(et.children || []);
           setOriginalFields(fields);
           setRows(fields.length > 0 ? fields.map(fieldFromRegistry) : baselineRows());
         }
@@ -430,6 +432,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           description: description.trim(),
           icon,
           statuses,
+          children,
         });
         const original = [...originalFields];
         for (const inp of fieldInputs) {
@@ -456,6 +459,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           icon,
           fields: fieldInputs,
           statuses,
+          children,
         });
         setCreated(createdEntity);
         if (createdEntity.version_label) setVersionLabel(createdEntity.version_label);
@@ -596,6 +600,9 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             isEdit={isEdit}
             statuses={statuses}
             onStatuses={setStatuses}
+            children={children}
+            onChildren={setChildren}
+            knownTypes={knownTypes}
           />
         ) : step === 2 ? (
           <Step2
@@ -778,6 +785,9 @@ function Step1(p: {
   isEdit: boolean;
   statuses: EntityLifecycleStatus[];
   onStatuses: (st: EntityLifecycleStatus[]) => void;
+  children: Array<{ entity_type: string; link_field: string }>;
+  onChildren: (rows: Array<{ entity_type: string; link_field: string }>) => void;
+  knownTypes: EntityTypeDefinition[];
 }) {
   return (
     <div className="mx-auto max-w-2xl">
@@ -940,6 +950,63 @@ function Step1(p: {
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-700">Child records</label>
+                <p className="text-[10px] text-gray-400">
+                  Rows of another entity edited on this record. Each child keeps its own workflow. The link field stores this record's id.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => p.onChildren([...p.children, { entity_type: '', link_field: '' }])}
+                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                <Plus className="h-3 w-3" />
+                <span>Add child</span>
+              </button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {p.children.map((child, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <select
+                    value={child.entity_type}
+                    onChange={(e) => {
+                      const updated = [...p.children];
+                      updated[idx] = { ...child, entity_type: e.target.value };
+                      p.onChildren(updated);
+                    }}
+                    className="w-40 rounded border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-800 focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">Entity type</option>
+                    {p.knownTypes.map((t) => (
+                      <option key={t.name} value={t.name}>{t.display_name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={child.link_field}
+                    onChange={(e) => {
+                      const updated = [...p.children];
+                      updated[idx] = { ...child, link_field: e.target.value };
+                      p.onChildren(updated);
+                    }}
+                    placeholder="link field, e.g. parent_id"
+                    className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 font-mono text-[11px] text-gray-800 focus:border-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => p.onChildren(p.children.filter((_, i) => i !== idx))}
+                    className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               ))}
             </div>

@@ -46,6 +46,7 @@ class CreateEntityTypeRequest(BaseModel):
     icon: Optional[str] = "Layers"
     fields: Optional[List[EntityFieldIn]] = None
     statuses: Optional[List[dict]] = None
+    children: Optional[List[dict]] = None
     """Optional field schemas defined at creation time. When omitted, baseline
     title and description fields (and matching form) are initialized."""
 
@@ -54,6 +55,19 @@ class UpdateEntityTypeRequest(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     statuses: Optional[List[dict]] = None
+    children: Optional[List[dict]] = None
+
+
+def _clean_children(items: Optional[List[dict]]) -> List[dict]:
+    cleaned = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        child_type = str(item.get("entity_type") or "").strip().lower()
+        link_field = str(item.get("link_field") or "").strip()
+        if child_type and link_field:
+            cleaned.append({"entity_type": child_type, "link_field": link_field})
+    return cleaned
 
 def _slugify(name: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9_]+', '_', name.strip().lower())
@@ -256,6 +270,7 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
         description=req.description.strip() if req.description else "",
         icon=req.icon or "Layers",
         statuses=statuses,
+        children=_clean_children(req.children),
         is_system=False,
     )
     db.add(new_et)
@@ -341,12 +356,14 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     new_desc = req.description.strip() if req.description is not None else et.description
     new_icon = req.icon.strip() if req.icon is not None else et.icon
     new_statuses = req.statuses if req.statuses is not None else et.statuses
+    new_children = _clean_children(req.children) if req.children is not None else (et.children or [])
 
     has_changed = (
         et.display_name != new_display
         or (et.description or "").strip() != (new_desc or "").strip()
         or (et.icon or "").strip() != (new_icon or "").strip()
         or et.statuses != new_statuses
+        or (et.children or []) != new_children
     )
 
     if has_changed:
@@ -357,6 +374,7 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
         et.description = new_desc
         et.icon = new_icon
         et.statuses = new_statuses
+        et.children = new_children
 
         from backend.models.entity_type import EntityTypeVersion
         from backend.models.base import generate_uuid, utc_now

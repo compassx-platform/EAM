@@ -195,6 +195,84 @@ function getActionButtonClass(t: ValidTransition): string {
   return 'inline-flex items-center gap-2 rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-blue-800 active:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
 }
 
+function ChildRecordsPanel({ entityType, recordId }: { entityType: string; recordId: string }) {
+  const [groups, setGroups] = useState<Array<{ entity_type: string; link_field: string; items: EntityRecord[] }>>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    if (!entityType || !recordId) return;
+    api.listChildRecords(entityType, recordId)
+      .then((res) => setGroups(res.groups || []))
+      .catch(() => setGroups([]));
+  }, [entityType, recordId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (!groups.length) return null;
+
+  const addChild = async (childType: string, linkField: string) => {
+    setBusy(childType);
+    setError('');
+    try {
+      const created = await api.createEntity(childType, {
+        custom_fields: { title: 'New line', [linkField]: recordId },
+      });
+      navigate('/records', { type: childType, id: created.entity_id });
+    } catch (err: any) {
+      setError(err?.message || 'The child record could not be created.');
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4 shadow-2xs">
+      <div className="mb-3 flex items-center gap-2">
+        <Layers className="h-4 w-4 text-blue-700" />
+        <h3 className="text-sm font-bold text-gray-900">Child records</h3>
+      </div>
+      {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+      <div className="flex flex-col gap-4">
+        {groups.map((group) => (
+          <div key={`${group.entity_type}:${group.link_field}`}>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-wide text-gray-500">{group.entity_type}</span>
+              <button
+                type="button"
+                disabled={busy === group.entity_type}
+                onClick={() => addChild(group.entity_type, group.link_field)}
+                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            </div>
+            {group.items.length === 0 ? (
+              <p className="text-xs text-gray-400">No rows yet.</p>
+            ) : (
+              <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+                {group.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => navigate('/records', { type: group.entity_type, id: item.id })}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-gray-50"
+                  >
+                    <span className="font-medium text-gray-800">{String(item.custom_fields?.title || item.id)}</span>
+                    <span className="font-mono text-[10px] text-gray-500">{item.status}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function EntityFormView({
   entity: initialEntity,
   recordId: initialRecordId,
@@ -1726,6 +1804,8 @@ export function EntityFormView({
           </div>
         )}
       </div>
+
+      {activeId && <ChildRecordsPanel entityType={entityType} recordId={activeId} />}
 
       {/* Audit Timeline Slide-Over Sidebar */}
       {auditLogOpen && (

@@ -199,7 +199,6 @@ export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPag
                     <p className="text-[11px] text-gray-500 mt-0.5">Active enterprise accounts in this tenant</p>
                   </div>
                   <div className="md:col-span-8 flex flex-wrap gap-2">
-                    {['admin@compassx.io', 'vishalkumar.vora@jsw.in', 'alice.safety@compassx.io', 'bob.supervisor@compassx.io', 'charlie.tech@compassx.io'].map((u) => (
                     {directoryError ? (
                       <span className="text-xs text-red-600">{directoryError}</span>
                     ) : directoryUsers.length === 0 ? (
@@ -207,6 +206,7 @@ export function SystemSettingsPage({ initialTab = 'profile' }: SystemSettingsPag
                     ) : directoryUsers.map((user) => (
                       <span key={user.id} className="rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-700">
                         {user.display_name}{user.email ? ` (${user.email})` : ''}
+                      </span>
                     ))}
                   </div>
                 </div>

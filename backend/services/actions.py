@@ -5,9 +5,9 @@ Workflow definitions reference actions *inline* on a transition (``on_after``);
 the action *types* below are the fixed, app-owned implementations. A workflow
 can never define a new action type — it can only parameterize one of these.
 
-Side effects run AFTER the main transition commits, each in its own
-transaction, and are best-effort: a failure is recorded in the response under
-``side_effects`` and never rolls back the transition itself.
+Actions marked ``reject_on_failure`` run before the transition commits. If one
+of them fails, the transition is rolled back. The other actions still run
+after the commit and a failure there is recorded without undoing the move.
 
 Event-sourcing contract:
   - ``create_related_entity``  goes through ``create_entity``         (real events)
@@ -89,6 +89,82 @@ ACTION_TYPES_CATALOG = [
             {"name": "category", "label": "Category (task_assigned / workflow_action / system_alert)", "type": "string", "required": False},
         ],
     },
+    {
+        "type": "set_value",
+        "name": "Set Value",
+        "description": "Writes fields on the current record. A value of 'now' stores the current time. {{field}} templates are supported.",
+        "parameters": [
+            {"name": "fields", "label": "Fields to set", "type": "json", "required": True},
+        ],
+    },
+    {
+        "type": "copy_lines",
+        "name": "Copy Lines",
+        "description": "Copies child rows from a template record onto the current record. The template is left unchanged.",
+        "parameters": [
+            {"name": "source_id_field", "label": "Field holding the template id", "type": "string", "required": True},
+            {"name": "child_entity_type", "label": "Child entity type", "type": "string", "required": True},
+            {"name": "source_link_field", "label": "Link field on the template's children", "type": "string", "required": True},
+            {"name": "target_link_field", "label": "Link field written with this record's id", "type": "string", "required": True},
+        ],
+    },
+    {
+        "type": "rollup",
+        "name": "Roll Up",
+        "description": "Sums numeric fields from child records onto the current record.",
+        "parameters": [
+            {"name": "child_entity_type", "label": "Child entity type", "type": "string", "required": True},
+            {"name": "link_field", "label": "Child field that points at this record", "type": "string", "required": True},
+            {"name": "sums", "label": "List of {from, to} field pairs", "type": "json", "required": True},
+        ],
+    },
+    {
+        "type": "inherit_status",
+        "name": "Inherit Status",
+        "description": "Fires this same event on child records that opt in. A child that cannot take the event is left as it is.",
+        "parameters": [
+            {"name": "child_entity_type", "label": "Child entity type", "type": "string", "required": True},
+            {"name": "link_field", "label": "Child field that points at this record", "type": "string", "required": True},
+            {"name": "opt_in_field", "label": "Child field that must be true", "type": "string", "required": False},
+            {"name": "flow_control_field", "label": "Parent field that blocks selected events", "type": "string", "required": False},
+            {"name": "skip_events", "label": "Events blocked while flow control is on", "type": "json", "required": False},
+        ],
+    },
+    {
+        "type": "reserve_stock",
+        "name": "Reserve Stock",
+        "description": "Reserves stocked lines. A direct-issue line is skipped. A short balance rejects the action.",
+        "parameters": [
+            {"name": "site_field", "label": "Site field", "type": "string", "required": True},
+            {"name": "item_field", "label": "Item field", "type": "string", "required": True},
+            {"name": "storeroom_field", "label": "Storeroom field", "type": "string", "required": True},
+            {"name": "quantity_field", "label": "Quantity field", "type": "string", "required": True},
+            {"name": "direct_issue_field", "label": "Direct issue field", "type": "string", "required": False},
+            {"name": "child_entity_type", "label": "Read lines from this child type", "type": "string", "required": False},
+            {"name": "link_field", "label": "Child link field", "type": "string", "required": False},
+        ],
+    },
+    {
+        "type": "release_stock",
+        "name": "Release Reservation",
+        "description": "Releases reservations held by this record and, when named, by its child lines.",
+        "parameters": [
+            {"name": "child_entity_type", "label": "Child entity type", "type": "string", "required": False},
+            {"name": "link_field", "label": "Child link field", "type": "string", "required": False},
+        ],
+    },
+    {
+        "type": "issue_stock",
+        "name": "Issue or Return Stock",
+        "description": "A positive quantity issues stock. A negative quantity returns it. A direct-issue line does not change the storeroom.",
+        "parameters": [
+            {"name": "site_field", "label": "Site field", "type": "string", "required": True},
+            {"name": "item_field", "label": "Item field", "type": "string", "required": True},
+            {"name": "storeroom_field", "label": "Storeroom field", "type": "string", "required": True},
+            {"name": "quantity_field", "label": "Quantity field", "type": "string", "required": True},
+            {"name": "direct_issue_field", "label": "Direct issue field", "type": "string", "required": False},
+        ],
+    },
 ]
 
 ACTION_TYPE_SET = {a["type"] for a in ACTION_TYPES_CATALOG} | {"in_app_notification"}
@@ -102,6 +178,7 @@ def update_entity_fields(
     reason: Optional[str] = None,
     actor_id: str = SYSTEM_ACTOR_ID,
     actor_type: str = "system",
+    commit: bool = True,
 ) -> Dict[str, Any]:
     """
     Applies a custom-field delta to an entity while preserving the event log:
@@ -111,7 +188,7 @@ def update_entity_fields(
     from sqlalchemy import update as sa_update
 
     EntityModel, EventModel = get_entity_models(entity_type)
-    entity = db.query(EntityModel).filter(EntityModel.id == entity_id).first()
+    entity = db.query(EntityModel).populate_existing().filter(EntityModel.id == entity_id).first()
     if not entity:
         raise CommandError("entity_not_found", f"{entity_type} with ID '{entity_id}' not found")
 
@@ -151,7 +228,10 @@ def update_entity_fields(
         },
     )
     db.add(event_row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(entity)
     return entity.to_dict()
 
@@ -169,10 +249,14 @@ def execute_actions(
     entity_id: str,
     custom_fields: Dict[str, Any],
     actions: List[Dict[str, Any]],
+    *,
+    commit: bool = True,
+    raise_on_failure: bool = False,
+    event_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Runs a transition's ``on_after`` actions post-commit. Always returns a list
-    of per-action results (success or error) — never raises for action failures.
+    Runs transition actions. When ``raise_on_failure`` is set, the first failed
+    action raises and the caller rolls the transition back.
     """
     results: List[Dict[str, Any]] = []
     for action in actions or []:
@@ -199,14 +283,49 @@ def execute_actions(
                         entity_id=str(linked_id),
                         fields_delta={field: new_val},
                         reason=f"Side effect of {entity_type} '{entity_id}' {atype}",
+                        commit=commit,
                     )
                     entry.update({"success": True, "target_entity_id": target["id"], "updated_field": field, "value": new_val})
 
             elif atype == "create_related_entity":
+                from backend.services.record_lines import asset_is_operating, find_open_record, is_due
                 target_type = params.get("target_entity_type")
                 template = params.get("template") or {}
                 rel_field = params.get("relationship_field")
+                if params.get("due_field"):
+                    lead_raw = custom_fields.get(params.get("lead_days_field")) if params.get("lead_days_field") else params.get("lead_days")
+                    try:
+                        lead_days = float(lead_raw or 0)
+                    except (TypeError, ValueError):
+                        lead_days = 0
+                    if not is_due(custom_fields, params["due_field"], lead_days):
+                        entry.update({"success": True, "skipped": True, "reason": "Not due yet."})
+                        results.append(entry)
+                        continue
+                if params.get("require_operating"):
+                    site = custom_fields.get(params.get("site_field") or "site_id")
+                    if not asset_is_operating(
+                        db,
+                        site,
+                        custom_fields.get(params.get("asset_field")) if params.get("asset_field") else None,
+                        custom_fields.get(params.get("location_field")) if params.get("location_field") else None,
+                    ):
+                        raise CommandError("not_operating", "The asset or location is not operating.")
                 rendered, unresolved = render_template_mapping(template, custom_fields)
+                if params.get("reuse_match_fields"):
+                    match = {name: rendered.get(name) for name in params["reuse_match_fields"]}
+                    existing = find_open_record(db, target_type, match, params.get("closed_statuses") or [])
+                    if existing:
+                        if rel_field:
+                            update_entity_fields(
+                                db, entity_type=entity_type, entity_id=entity_id,
+                                fields_delta={rel_field: existing.id},
+                                reason=f"Reused open {target_type}",
+                                commit=commit,
+                            )
+                        entry.update({"success": True, "created_entity_id": existing.id, "reused": True, "unresolved_placeholders": unresolved})
+                        results.append(entry)
+                        continue
                 created = create_entity(
                     db=db,
                     entity_type=target_type,
@@ -215,6 +334,7 @@ def execute_actions(
                     custom_fields=rendered,
                     workflow_version=params.get("workflow_version"),
                     payload={"reason": f"Generated as side effect of {entity_type} '{entity_id}'"},
+                    commit=commit,
                 )
                 new_id = created["entity_id"]
                 if rel_field:
@@ -224,6 +344,7 @@ def execute_actions(
                         entity_id=entity_id,
                         fields_delta={rel_field: new_id},
                         reason=f"Side effect of {atype} on {entity_type} '{entity_id}'",
+                        commit=commit,
                     )
                 entry.update({
                     "success": True,
@@ -250,6 +371,8 @@ def execute_actions(
                         actor_id=SYSTEM_ACTOR_ID,
                         actor_type="system",
                         payload={**(rendered or {}), "reason": f"Side effect of {entity_type} '{entity_id}'"},
+                        commit=commit,
+                        run_post_pipeline=commit,
                     )
                     entry.update({"success": True, "target_entity_id": linked_id, "new_status": result.get("new_status"), "unresolved_placeholders": unresolved})
 
@@ -281,7 +404,108 @@ def execute_actions(
                     auto_commit=True,
                 )
                 entry.update({"success": True, "notification_id": notif.id, "recipient_id": recipient, "title": title})
-        except Exception as ex:  # best-effort: record, never rollback the transition
-            entry.update({"success": False, "error": str(ex)})
+
+            elif atype == "set_value":
+                fields = params.get("fields") or {}
+                delta = {key: _resolve_value(value, custom_fields) if isinstance(value, str) else value for key, value in fields.items()}
+                update_entity_fields(
+                    db, entity_type=entity_type, entity_id=entity_id, fields_delta=delta,
+                    reason=f"Set value on {entity_type} '{entity_id}'", commit=commit,
+                )
+                custom_fields.update(delta)
+                entry.update({"success": True, "fields": delta})
+
+            elif atype == "copy_lines":
+                from backend.services.record_lines import copy_lines
+                source_id = custom_fields.get(params.get("source_id_field"))
+                if not source_id:
+                    entry.update({"success": True, "skipped": True, "reason": "No template record is selected."})
+                else:
+                    created_ids = copy_lines(
+                        db,
+                        parent_id=entity_id,
+                        source_id=str(source_id),
+                        child_entity_type=params.get("child_entity_type"),
+                        source_link_field=params.get("source_link_field"),
+                        target_link_field=params.get("target_link_field"),
+                        copy_fields=params.get("copy_fields"),
+                        commit=commit,
+                    )
+                    entry.update({"success": True, "created_ids": created_ids})
+
+            elif atype == "rollup":
+                from backend.services.record_lines import rollup_sums
+                totals = rollup_sums(
+                    db, entity_id, params.get("child_entity_type"), params.get("link_field"), params.get("sums") or [],
+                )
+                if totals:
+                    update_entity_fields(
+                        db, entity_type=entity_type, entity_id=entity_id, fields_delta=totals,
+                        reason="Rolled up child values", commit=commit,
+                    )
+                    custom_fields.update(totals)
+                entry.update({"success": True, "totals": totals})
+
+            elif atype == "inherit_status":
+                from backend.services.record_lines import inherit_event
+                outcome = inherit_event(
+                    db,
+                    parent_id=entity_id,
+                    parent_fields=custom_fields,
+                    child_entity_type=params.get("child_entity_type"),
+                    link_field=params.get("link_field"),
+                    event=params.get("event") or event_type or "",
+                    opt_in_field=params.get("opt_in_field"),
+                    flow_control_field=params.get("flow_control_field"),
+                    skip_events=params.get("skip_events"),
+                    commit=commit,
+                )
+                entry.update({"success": True, **outcome})
+
+            elif atype in ("reserve_stock", "release_stock", "issue_stock"):
+                from backend.services.record_lines import children_of
+                from backend.services.stock_service import StockError, issue, release_holder, reserve
+                holders = [(entity_type, entity_id, custom_fields)]
+                if params.get("child_entity_type") and params.get("link_field"):
+                    holders = [
+                        (params["child_entity_type"], row.id, row.custom_fields or {})
+                        for row in children_of(db, params["child_entity_type"], params["link_field"], entity_id)
+                    ]
+                if atype == "release_stock":
+                    released = release_holder(db, entity_type, entity_id)
+                    for holder_type, holder_id, _fields in holders:
+                        if holder_type == entity_type and holder_id == entity_id:
+                            continue
+                        released += release_holder(db, holder_type, holder_id)
+                    if commit:
+                        db.commit()
+                    entry.update({"success": True, "released": released})
+                else:
+                    for holder_type, holder_id, fields in holders:
+                        site = fields.get(params.get("site_field")) or custom_fields.get(params.get("site_field"))
+                        item = fields.get(params.get("item_field"))
+                        room = fields.get(params.get("storeroom_field"))
+                        direct = params.get("direct_issue_field") and str(fields.get(params.get("direct_issue_field")) or "").strip().lower() in ("1", "true", "yes", "y")
+                        try:
+                            qty = float(fields.get(params.get("quantity_field")) or 0)
+                        except (TypeError, ValueError):
+                            qty = 0
+                        if direct or not item:
+                            continue
+                        try:
+                            if atype == "reserve_stock":
+                                reserve(db, str(site or ""), str(room or ""), str(item), qty, holder_type, holder_id)
+                            else:
+                                issue(db, str(site or ""), str(room or ""), str(item), qty, holder_type, holder_id)
+                        except StockError as exc:
+                            raise CommandError("stock", exc.message) from exc
+                    if commit:
+                        db.commit()
+                    entry.update({"success": True})
+        except Exception as ex:
+            entry.update({"success": False, "error": getattr(ex, "message", None) or str(ex)})
+            if raise_on_failure:
+                results.append(entry)
+                raise
         results.append(entry)
     return results

@@ -43,6 +43,7 @@ from backend.routers import (
     documents_router,
     safety_router,
     failures_router,
+    stock_router,
 )
 import logging
 
@@ -137,6 +138,7 @@ app.include_router(classifications_router)  # /api/classifications, /api/classif
 app.include_router(meters_router)  # /api/meters, /api/meter-groups, /api/measure-points, readings
 app.include_router(safety_router)  # /api/hazards, /api/safety-plans, /api/applied-safety
 app.include_router(failures_router)  # /api/failure-nodes, /api/failure-codes
+app.include_router(stock_router)  # /api/stock — before the entity wildcard
 app.include_router(entities_router)  # Wildcard /api/{entity_type}/... MUST be last
 
 # Mount MCP Server (SSE & HTTP transport) directly into FastAPI
