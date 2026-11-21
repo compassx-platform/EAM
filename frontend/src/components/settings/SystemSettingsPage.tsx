@@ -20,6 +20,7 @@ import {
   Building,
   Palette,
 } from 'lucide-react';
+import { api } from '../../api/client';
 import { StorageSettingsTab } from './StorageSettingsTab';
 
 export type SettingSection =
