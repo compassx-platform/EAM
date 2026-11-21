@@ -11,8 +11,10 @@ from backend.routers.fields import list_fields, delete_field
 from backend.routers.entity_types import (
     CreateEntityTypeRequest,
     EntityFieldIn,
+    UpdateEntityTypeRequest,
     create_entity_type,
     get_entity_type,
+    update_entity_type,
 )
 
 
@@ -482,3 +484,45 @@ def test_boolean_entity_field_lifecycle(client, test_db):
     cf2 = res_get2.json()["entity"]["custom_fields"]
     assert cf2["is_hazardous"] is False
     assert cf2["hot_work_approved"] is False
+
+
+def test_list_columns_save_a_field_and_reject_unknown_keys(test_db):
+    create_entity_type(CreateEntityTypeRequest(
+        name="incident_report",
+        display_name="Incident Report",
+        fields=wizard_fields(),
+    ), test_db)
+
+    saved = update_entity_type("incident_report", UpdateEntityTypeRequest(list_columns=[
+        {"source": "builtin", "key": "status"},
+        {"source": "field", "key": "priority"},
+    ]), test_db)
+    assert saved["list_columns"] == [
+        {"source": "builtin", "key": "status"},
+        {"source": "field", "key": "priority"},
+    ]
+
+    with pytest.raises(HTTPException) as unknown:
+        update_entity_type("incident_report", UpdateEntityTypeRequest(list_columns=[
+            {"source": "field", "key": "not_a_field"},
+        ]), test_db)
+    assert unknown.value.status_code == 400
+
+    with pytest.raises(HTTPException) as builtin:
+        update_entity_type("incident_report", UpdateEntityTypeRequest(list_columns=[
+            {"source": "builtin", "key": "owner"},
+        ]), test_db)
+    assert builtin.value.status_code == 400
+
+
+def test_list_columns_reject_a_file_field(test_db):
+    create_entity_type(CreateEntityTypeRequest(
+        name="with_file",
+        display_name="With File",
+        fields=[EntityFieldIn(field_name="photo", field_type="file")],
+    ), test_db)
+    with pytest.raises(HTTPException) as exc:
+        update_entity_type("with_file", UpdateEntityTypeRequest(list_columns=[
+            {"source": "field", "key": "photo"},
+        ]), test_db)
+    assert exc.value.status_code == 400

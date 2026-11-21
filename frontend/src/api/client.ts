@@ -533,6 +533,7 @@ export const api = {
     fields?: EntityFieldInput[];
     statuses?: EntityLifecycleStatus[];
     children?: Array<{ entity_type: string; link_field: string }>;
+    list_columns?: Array<{ source: 'builtin' | 'field'; key: string }>;
   }): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>('/entity-types', {
       method: 'POST',
@@ -548,6 +549,7 @@ export const api = {
       icon?: string;
       statuses?: EntityLifecycleStatus[];
       children?: Array<{ entity_type: string; link_field: string }>;
+      list_columns?: Array<{ source: 'builtin' | 'field'; key: string }>;
     }
   ): Promise<EntityTypeDefinition> {
     return request<EntityTypeDefinition>(`/entity-types/${encodeURIComponent(name)}`, {

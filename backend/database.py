@@ -74,6 +74,7 @@ def ensure_schema_compatibility(db: Session) -> None:
     _ensure_column(db, "entity_type_definition", "version_label", "version_label VARCHAR(50) DEFAULT 'v1'")
     _ensure_column(db, "entity_type_definition", "statuses", "statuses JSON")
     _ensure_column(db, "entity_type_definition", "children", "children JSON")
+    _ensure_column(db, "entity_type_definition", "list_columns", "list_columns JSON")
     _ensure_column(db, "entity_type_version", "statuses", "statuses JSON")
     _ensure_column(db, "dynamic_entity", "workflow_stage", "workflow_stage VARCHAR(100)")
     _ensure_column(db, "task_assignment", "escalated_to_person_id", "escalated_to_person_id VARCHAR(50)")

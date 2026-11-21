@@ -652,6 +652,7 @@ export interface EntityTypeDefinition {
   version_label?: string;
   statuses?: EntityLifecycleStatus[];
   children?: Array<{ entity_type: string; link_field: string }>;
+  list_columns?: Array<{ source: 'builtin' | 'field'; key: string }>;
   field_count?: number;
   workflow_count?: number;
   condition_count?: number;

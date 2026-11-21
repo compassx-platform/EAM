@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ClipboardList,
   Columns3,
   FileText,
@@ -25,6 +27,12 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { navigate } from '../../lib/router';
+import {
+  DEFAULT_LIST_COLUMNS,
+  LIST_BUILTINS,
+  isListField,
+  type ListColumn,
+} from '../../lib/listColumns';
 import type { EntityTypeDefinition, EntityTypeVersion, EntityField, EntityFieldInput, EntityLifecycleStatus } from '../../types';
 
 const DEFAULT_LIFECYCLE_STATUSES: EntityLifecycleStatus[] = [
@@ -214,6 +222,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const [autoSlug, setAutoSlug] = useState(!isEdit);
   const [statuses, setStatuses] = useState<EntityLifecycleStatus[]>(DEFAULT_LIFECYCLE_STATUSES);
   const [children, setChildren] = useState<Array<{ entity_type: string; link_field: string }>>([]);
+  const [listColumns, setListColumns] = useState<ListColumn[]>(DEFAULT_LIST_COLUMNS);
 
   // ---- fields ----
   const [rows, setRows] = useState<DesignerRow[]>(baselineRows);
@@ -304,6 +313,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             setStatuses(DEFAULT_LIFECYCLE_STATUSES);
           }
           setChildren(et.children || []);
+          setListColumns(et.list_columns && et.list_columns.length > 0 ? et.list_columns : DEFAULT_LIST_COLUMNS);
           setOriginalFields(fields);
           setRows(fields.length > 0 ? fields.map(fieldFromRegistry) : baselineRows());
         }
@@ -322,6 +332,16 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const fieldNames = useMemo(() => new Set(rows.map((r) => r.field_name).filter(Boolean)), [rows]);
 
   const patchRow = (localId: string, patch: Partial<DesignerRow>) => {
+    if (patch.field_name !== undefined) {
+      const current = rows.find((row) => row.localId === localId);
+      const previous = cleanFieldSlug(current?.field_name || '');
+      const next = cleanFieldSlug(patch.field_name);
+      if (previous && next && previous !== next) {
+        setListColumns((columns) => columns.map((column) => (
+          column.source === 'field' && column.key === previous ? { ...column, key: next } : column
+        )));
+      }
+    }
     setRows((prev) => prev.map((r) => (r.localId === localId ? { ...r, ...patch } : r)));
   };
 
@@ -352,6 +372,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
   const removeRow = (localId: string) => {
     const target = rows.find((r) => r.localId === localId);
     if (!target || target.pinned || (target.blockers && target.blockers.length > 0)) return;
+    const removed = cleanFieldSlug(target.field_name);
+    setListColumns((columns) => columns.filter((column) => !(column.source === 'field' && column.key === removed)));
     setRows((prev) => prev.filter((r) => r.localId !== localId));
   };
 
@@ -423,17 +445,17 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
       flash('err', metadataError);
       return;
     }
+    const fieldInputs = rows.map(rowToInput);
+    const fieldNames = new Set(fieldInputs.map((field) => field.field_name));
+    const columns = listColumns.filter((column) => column.source === 'builtin' || fieldNames.has(column.key));
+    if (columns.length === 0) {
+      setStep(2);
+      flash('err', 'Keep at least one column on the records list.');
+      return;
+    }
     setSaving(true);
     try {
-      const fieldInputs = rows.map(rowToInput);
       if (isEdit && entityName) {
-        await api.updateEntityType(entityName, {
-          display_name: displayName.trim(),
-          description: description.trim(),
-          icon,
-          statuses,
-          children,
-        });
         const original = [...originalFields];
         for (const inp of fieldInputs) {
           const existing = original.find((f) => f.field_name === inp.field_name);
@@ -446,6 +468,14 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             await api.deleteField(entityName, f.field_name);
           }
         }
+        await api.updateEntityType(entityName, {
+          display_name: displayName.trim(),
+          description: description.trim(),
+          icon,
+          statuses,
+          children,
+          list_columns: columns,
+        });
         const updated = await api.getEntityType(entityName);
         setCreated(updated);
         if (updated.version_label) setVersionLabel(updated.version_label);
@@ -460,6 +490,7 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
           fields: fieldInputs,
           statuses,
           children,
+          list_columns: columns,
         });
         setCreated(createdEntity);
         if (createdEntity.version_label) setVersionLabel(createdEntity.version_label);
@@ -614,6 +645,8 @@ export function EntityDesigner({ entityName }: EntityDesignerProps) {
             errors={rowErrors}
             currentType={isEdit ? entityName : (autoSlug ? slugify(displayName) : slugify(name)) || undefined}
             sequenceNames={sequenceNames}
+            listColumns={listColumns}
+            onListColumns={setListColumns}
           />
         ) : (
           <Step3
@@ -1026,6 +1059,8 @@ function Step2(p: {
   errors: Record<string, string>;
   currentType?: string;
   sequenceNames: string[];
+  listColumns: ListColumn[];
+  onListColumns: (columns: ListColumn[]) => void;
 }) {
   return (
     <div className="mx-auto max-w-5xl">
@@ -1065,6 +1100,100 @@ function Step2(p: {
         <Plus className="h-3.5 w-3.5" />
         Add field
       </button>
+
+      <ListColumnPicker rows={p.rows} columns={p.listColumns} onChange={p.onListColumns} />
+    </div>
+  );
+}
+
+function ListColumnPicker({
+  rows,
+  columns,
+  onChange,
+}: {
+  rows: DesignerRow[];
+  columns: ListColumn[];
+  onChange: (columns: ListColumn[]) => void;
+}) {
+  const fieldChoices = rows
+    .map((row) => ({
+      key: cleanFieldSlug(row.field_name),
+      label: (row.label || '').trim() || humanize(cleanFieldSlug(row.field_name)),
+      field_type: row.field_type,
+    }))
+    .filter((row) => row.key.length >= 2 && isListField(row));
+  const choices: Array<{ column: ListColumn; label: string }> = [
+    ...LIST_BUILTINS.map((item) => ({ column: { source: 'builtin' as const, key: item.key }, label: item.label })),
+    ...fieldChoices.map((field) => ({ column: { source: 'field' as const, key: field.key }, label: field.label })),
+  ];
+  const selected = new Set(columns.map((column) => `${column.source}:${column.key}`));
+  const ordered = [
+    ...columns.map((column) => choices.find((choice) => choice.column.source === column.source && choice.column.key === column.key)).filter(Boolean) as Array<{ column: ListColumn; label: string }>,
+    ...choices.filter((choice) => !selected.has(`${choice.column.source}:${choice.column.key}`)),
+  ];
+
+  const toggle = (column: ListColumn) => {
+    const key = `${column.source}:${column.key}`;
+    if (selected.has(key)) {
+      if (columns.length === 1) return;
+      onChange(columns.filter((item) => `${item.source}:${item.key}` !== key));
+      return;
+    }
+    onChange([...columns, column]);
+  };
+
+  const move = (column: ListColumn, direction: -1 | 1) => {
+    const index = columns.findIndex((item) => item.source === column.source && item.key === column.key);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= columns.length) return;
+    const copy = [...columns];
+    const [item] = copy.splice(index, 1);
+    copy.splice(next, 0, item);
+    onChange(copy);
+  };
+
+  return (
+    <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xs">
+      <div className="border-b border-gray-100 px-4 py-3">
+        <div className="text-sm font-semibold text-gray-900">Records list</div>
+        <p className="mt-0.5 text-xs text-gray-500">Choose which columns appear when someone opens this entity’s records. At least one stays on.</p>
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {ordered.map(({ column, label }) => {
+          const key = `${column.source}:${column.key}`;
+          const checked = selected.has(key);
+          const index = columns.findIndex((item) => item.source === column.source && item.key === column.key);
+          return (
+            <li key={key} className="flex items-center gap-3 px-4 py-2">
+              <input
+                type="checkbox"
+                checked={checked}
+                aria-label={label}
+                onChange={() => toggle(column)}
+              />
+              <span className="min-w-0 flex-1 truncate text-xs text-gray-800">{label}</span>
+              <button
+                type="button"
+                disabled={!checked || index === 0}
+                onClick={() => move(column, -1)}
+                className="rounded border border-gray-200 p-1 text-gray-500 disabled:opacity-30"
+                aria-label={`Move ${label} up`}
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={!checked || index === columns.length - 1}
+                onClick={() => move(column, 1)}
+                className="rounded border border-gray-200 p-1 text-gray-500 disabled:opacity-30"
+                aria-label={`Move ${label} down`}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

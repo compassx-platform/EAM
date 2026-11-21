@@ -47,6 +47,7 @@ class CreateEntityTypeRequest(BaseModel):
     fields: Optional[List[EntityFieldIn]] = None
     statuses: Optional[List[dict]] = None
     children: Optional[List[dict]] = None
+    list_columns: Optional[List[dict]] = None
     """Optional field schemas defined at creation time. When omitted, baseline
     title and description fields (and matching form) are initialized."""
 
@@ -56,6 +57,52 @@ class UpdateEntityTypeRequest(BaseModel):
     icon: Optional[str] = None
     statuses: Optional[List[dict]] = None
     children: Optional[List[dict]] = None
+    list_columns: Optional[List[dict]] = None
+
+
+BUILTIN_LIST_COLUMNS = (
+    "title",
+    "id",
+    "status",
+    "workflow_stage",
+    "workflow_version",
+    "updated_at",
+    "created_at",
+)
+EXCLUDED_LIST_FIELD_TYPES = {"file", "table"}
+
+
+def _clean_list_columns(items: Optional[List[dict]], fields_by_name: dict) -> List[dict]:
+    """Keep a column only when it is a built-in record value or a field on this entity."""
+    cleaned = []
+    seen = set()
+    for item in items or []:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="A list column must name a built-in value or a field.")
+        source = str(item.get("source") or "").strip()
+        key = str(item.get("key") or "").strip()
+        if source == "builtin":
+            if key not in BUILTIN_LIST_COLUMNS:
+                raise HTTPException(status_code=400, detail=f"'{key}' is not a record column.")
+        elif source == "field":
+            field_type = fields_by_name.get(key)
+            if field_type is None:
+                raise HTTPException(status_code=400, detail=f"'{key}' is not a field on this entity.")
+            if field_type in EXCLUDED_LIST_FIELD_TYPES:
+                raise HTTPException(status_code=400, detail=f"'{key}' cannot be shown as a list column.")
+        else:
+            raise HTTPException(status_code=400, detail="A list column must name a built-in value or a field.")
+        token = (source, key)
+        if token in seen:
+            continue
+        seen.add(token)
+        cleaned.append({"source": source, "key": key})
+    return cleaned
+
+
+def _fields_by_name(db: Session, entity_type: str) -> dict:
+    rows = db.query(EntityField).filter(EntityField.entity_type == entity_type).all()
+    return {row.field_name: row.field_type for row in rows}
 
 
 def _clean_children(items: Optional[List[dict]]) -> List[dict]:
@@ -324,6 +371,8 @@ def create_entity_type(req: CreateEntityTypeRequest, db: Session = Depends(get_d
             sections=[],
         ))
 
+    new_et.list_columns = _clean_list_columns(req.list_columns, _fields_by_name(db, key))
+
     from backend.models.entity_type import EntityTypeVersion
     from backend.models.base import generate_uuid, utc_now
 
@@ -357,6 +406,11 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
     new_icon = req.icon.strip() if req.icon is not None else et.icon
     new_statuses = req.statuses if req.statuses is not None else et.statuses
     new_children = _clean_children(req.children) if req.children is not None else (et.children or [])
+    new_columns = (
+        _clean_list_columns(req.list_columns, _fields_by_name(db, key))
+        if req.list_columns is not None
+        else (et.list_columns or [])
+    )
 
     has_changed = (
         et.display_name != new_display
@@ -364,6 +418,7 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
         or (et.icon or "").strip() != (new_icon or "").strip()
         or et.statuses != new_statuses
         or (et.children or []) != new_children
+        or (et.list_columns or []) != new_columns
     )
 
     if has_changed:
@@ -375,6 +430,7 @@ def update_entity_type(name: str, req: UpdateEntityTypeRequest, db: Session = De
         et.icon = new_icon
         et.statuses = new_statuses
         et.children = new_children
+        et.list_columns = new_columns
 
         from backend.models.entity_type import EntityTypeVersion
         from backend.models.base import generate_uuid, utc_now

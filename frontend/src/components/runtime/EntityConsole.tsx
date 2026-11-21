@@ -7,7 +7,15 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useHashRoute, navigate } from '../../lib/router';
-import type { EntityRecord } from '../../types';
+import {
+  DEFAULT_LIST_COLUMNS,
+  builtinLabel,
+  fieldColumnLabel,
+  isListField,
+  type ListColumn,
+} from '../../lib/listColumns';
+import { printPieces } from '../../lib/printValue';
+import type { EntityField, EntityRecord } from '../../types';
 import { EntityFormView } from './EntityFormView';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -40,6 +48,40 @@ function truncate(id: string, n = 14) {
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'label'];
 
+function columnText(value: string | null | undefined): ReactNode {
+  const text = (value || '').trim();
+  return text ? text : <span className="font-normal text-gray-400">—</span>;
+}
+
+function shorten(text: string, limit = 80): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`;
+}
+
+function formatFieldValue(value: unknown, fieldType: string): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (fieldType === 'date' || fieldType === 'datetime') {
+    const parsed = new Date(String(value));
+    if (!Number.isNaN(parsed.getTime())) {
+      return fieldType === 'date' ? parsed.toLocaleDateString() : parsed.toLocaleString();
+    }
+  }
+  const text = printPieces(value)
+    .filter((piece) => piece.type === 'text')
+    .map((piece) => piece.text)
+    .filter(Boolean)
+    .join(', ');
+  return fieldType === 'long_text' ? shorten(text) : text;
+}
+
+function activeColumns(saved: ListColumn[] | undefined, fields: EntityField[]): ListColumn[] {
+  const allowed = new Set(fields.filter(isListField).map((field) => field.field_name));
+  const chosen = (saved || []).filter((column) => (
+    column.source === 'builtin' || (column.source === 'field' && allowed.has(column.key))
+  ));
+  return chosen.length > 0 ? chosen : DEFAULT_LIST_COLUMNS;
+}
+
 function entityTitle(e: { custom_fields?: Record<string, unknown> }): string | null {
   const cf = e.custom_fields || {};
   for (const k of TITLE_KEYS) {
@@ -49,14 +91,37 @@ function entityTitle(e: { custom_fields?: Record<string, unknown> }): string | n
   return null;
 }
 
+function cellContent(record: EntityRecord, column: ListColumn, fields: EntityField[]): ReactNode {
+  if (column.source === 'field') {
+    const field = fields.find((item) => item.field_name === column.key);
+    return columnText(formatFieldValue(record.custom_fields?.[column.key], field?.field_type || 'text'));
+  }
+  if (column.key === 'title') return columnText(entityTitle(record));
+  if (column.key === 'id') return <span className="font-mono text-[11px] text-gray-600">{truncate(record.id)}</span>;
+  if (column.key === 'status') {
+    return (
+      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge(record.status)}`}>
+        {record.status}
+      </span>
+    );
+  }
+  if (column.key === 'workflow_stage') return <span className="font-mono text-xs text-gray-700 font-medium">{record.workflow_stage || record.status}</span>;
+  if (column.key === 'workflow_version') return <span className="font-mono text-xs text-gray-600">{record.workflow_version}</span>;
+  const stamp = column.key === 'created_at' ? record.created_at : record.updated_at;
+  return <span className="text-xs text-gray-500">{stamp ? new Date(stamp).toLocaleString() : '—'}</span>;
+}
+
 export function EntityConsole({ entityType, displayName }: { entityType: string; displayName?: string }) {
   const route = useHashRoute();
   const type = entityType;
   const [statusFilter, setStatusFilter] = useState(() => route.query.get('status') || '');
   const [items, setItems] = useState<EntityRecord[]>([]);
   const [total, setTotal] = useState(0);
+  const [fields, setFields] = useState<EntityField[]>([]);
+  const [savedColumns, setSavedColumns] = useState<ListColumn[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const columns = activeColumns(savedColumns, fields);
 
   const selectedRecordId = route.query.get('record') || route.query.get('selected');
 
@@ -77,10 +142,16 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
   const loadList = useCallback(() => {
     setLoading(true);
     setError(null);
-    api.listEntities(type, { status: statusFilter || undefined })
-      .then((res) => {
+    Promise.all([
+      api.listEntities(type, { status: statusFilter || undefined }),
+      api.getEntityType(type).catch(() => null),
+      api.listFields(type).catch(() => [] as EntityField[]),
+    ])
+      .then(([res, entityTypeDefinition, entityFields]) => {
         setItems(res.items);
         setTotal(res.total);
+        setSavedColumns(entityTypeDefinition?.list_columns || []);
+        setFields(entityFields);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -166,53 +237,42 @@ export function EntityConsole({ entityType, displayName }: { entityType: string;
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-gray-200 bg-white text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                <th className="px-4 py-2.5">Title</th>
-                <th className="px-4 py-2.5">Record ID</th>
-                <th className="px-4 py-2.5">Lifecycle Status</th>
-                <th className="px-4 py-2.5">Workflow Step</th>
-                <th className="px-4 py-2.5">Version</th>
-                <th className="px-4 py-2.5">Updated</th>
+                {columns.map((column) => (
+                  <th key={`${column.source}:${column.key}`} className="px-4 py-2.5">
+                    {column.source === 'builtin' ? builtinLabel(column.key) : fieldColumnLabel(column.key, fields)}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={columns.length} className="px-4 py-16 text-center text-gray-400">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-600" />
                     Loading {type} records…
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                  <td colSpan={columns.length} className="px-4 py-16 text-center text-gray-400">
                     No {type} records{statusFilter ? ` in state "${statusFilter}"` : ''}. Click &ldquo;Create {displayName || type}&rdquo; to start.
                   </td>
                 </tr>
               ) : (
-                items.map((e) => (
+                items.map((record) => (
                   <tr
-                    key={e.id}
-                    onClick={() => patchQuery({ record: e.id, selected: undefined })}
+                    key={record.id}
+                    onClick={() => patchQuery({ record: record.id, selected: undefined })}
                     className="cursor-pointer hover:bg-slate-50/80 transition-colors group"
                   >
-                    <td className="max-w-[200px] truncate px-4 py-3 text-xs font-semibold text-gray-900 group-hover:text-blue-700">
-                      {entityTitle(e) ?? <span className="font-normal text-gray-400">—</span>}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-gray-600">{truncate(e.id)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge(e.status)}`}>
-                        {e.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs text-gray-700 font-medium">
-                        {e.workflow_stage || e.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{e.workflow_version}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
-                      {e.updated_at ? new Date(e.updated_at).toLocaleString() : '—'}
-                    </td>
+                    {columns.map((column) => (
+                      <td
+                        key={`${column.source}:${column.key}`}
+                        className={`max-w-[220px] truncate px-4 py-3 text-xs text-gray-700 ${column.source === 'builtin' && column.key === 'title' ? 'font-semibold text-gray-900 group-hover:text-blue-700' : ''}`}
+                      >
+                        {cellContent(record, column, fields)}
+                      </td>
+                    ))}
                   </tr>
                 ))
               )}
