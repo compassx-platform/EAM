@@ -1091,6 +1091,7 @@ function GeneralSettingsModal({
               />
             </div>
           </div>
+          <p className="text-[10px] text-gray-400">Drag the right edge for columns and the bottom edge for rows. These numbers follow the field.</p>
         </div>
 
         {/* Required Field Checkbox */}

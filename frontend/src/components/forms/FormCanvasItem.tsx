@@ -69,6 +69,17 @@ function ConditionPill({
   );
 }
 
+function SizeBadge({ w, h }: { w?: number; h?: number }) {
+  return (
+    <span
+      className="pointer-events-none absolute bottom-1 left-2 z-10 hidden rounded bg-slate-900/80 px-1.5 py-0.5 font-mono text-[10px] text-white group-hover:inline"
+      title="Columns × rows"
+    >
+      {w ?? 1} × {h ?? 1}
+    </span>
+  );
+}
+
 interface FormCanvasItemProps {
   item: EntityFormItem;
   isSelected: boolean;
@@ -81,6 +92,7 @@ interface FormCanvasItemProps {
   onRemove: (id: string) => void;
   style?: CSSProperties;
   className?: string;
+  children?: React.ReactNode;
 }
 
 export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
@@ -97,6 +109,7 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
       onRemove,
       style,
       className,
+      children,
       ...rest
     },
     ref
@@ -124,6 +137,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
           }`}
           {...rest}
         >
+          {children}
+          <SizeBadge w={item.w} h={item.h} />
           <div className="flex items-center justify-between w-full">
             <div className="flex min-w-0 items-center gap-2">
               <Layers className="h-4 w-4 shrink-0 text-gray-500" />
@@ -174,6 +189,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
           }`}
           {...rest}
         >
+          {children}
+          <SizeBadge w={item.w} h={item.h} />
           <div className="flex items-center justify-between w-full">
             <div className="flex min-w-0 items-center gap-2">
               <div>
@@ -221,6 +238,8 @@ export const FormCanvasItem = forwardRef<HTMLDivElement, FormCanvasItemProps>(
         }`}
         {...rest}
       >
+        {children}
+        <SizeBadge w={item.w} h={item.h} />
         {/* Field Top Label Row: Stacked Label, Info Icon, Metadata chips, Drag Handle at end */}
         <div className="flex items-center justify-between gap-1.5 mb-1.5 w-full">
           <div className="flex items-center gap-1.5 min-w-0">

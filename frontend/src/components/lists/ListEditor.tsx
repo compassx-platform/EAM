@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
+  GripVertical,
   Loader2,
   Plus,
   Rocket,
@@ -21,6 +22,38 @@ import type { ChecklistItem, ListDefinition, ListKind } from '../../types';
 const INPUT =
   'w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 placeholder:text-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500';
 
+function freshKey() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function freshKeys(count: number) {
+  return Array.from({ length: count }, freshKey);
+}
+
+function DragHandle({
+  index,
+  dragging,
+  onDragStart,
+}: {
+  index: number;
+  dragging: boolean;
+  onDragStart: (index: number, event: DragEvent) => void;
+}) {
+  return (
+    <span
+      draggable
+      onDragStart={(event) => onDragStart(index, event)}
+      className={`shrink-0 cursor-grab overflow-hidden text-gray-400 transition-all active:cursor-grabbing ${
+        dragging ? 'w-4 opacity-100' : 'w-0 opacity-0 group-hover:w-4 group-hover:opacity-100'
+      }`}
+      title="Drag to reorder"
+      aria-label="Drag to reorder"
+    >
+      <GripVertical className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
 interface ListEditorProps {
   listKey: string; // 'new' for a fresh list
   onBack: () => void;
@@ -35,6 +68,12 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
   const [kind, setKind] = useState<ListKind>('options');
   const [description, setDescription] = useState('');
   const [items, setItems] = useState<Array<string | ChecklistItem>>([]);
+  const [rowKeys, setRowKeys] = useState<string[]>([]);
+  const itemsRef = useRef(items);
+  const keysRef = useRef(rowKeys);
+  const draggingKey = useRef<string | null>(null);
+  itemsRef.current = items;
+  keysRef.current = rowKeys;
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -43,6 +82,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
   const [versions, setVersions] = useState<ListDefinition[]>([]);
   const [usage, setUsage] = useState<{ field_count: number; form_item_count: number } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (isNew) return;
@@ -54,6 +94,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
         setKind(list.kind);
         setDescription(list.description ?? '');
         setItems(list.items);
+        setRowKeys(freshKeys(list.items.length));
         const [vers, use] = await Promise.all([
           api.listListVersions(listKey).catch(() => []),
           api.getListUsage(listKey).catch(() => null),
@@ -96,6 +137,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
 
   const handleRestoreVersionItems = (snap: ListDefinition) => {
     setItems(snap.items);
+    setRowKeys(freshKeys(snap.items.length));
     setKind(snap.kind);
     if (snap.description) setDescription(snap.description);
     setHistoryOpen(false);
@@ -109,10 +151,49 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
   const addOption = () => {
     const n = optionItems.length;
     setItems((prev) => [...prev, `Option ${n + 1}`]);
+    setRowKeys((prev) => [...prev, freshKey()]);
   };
 
-  const removeOption = (idx: number) => {
+  const removeAt = (idx: number) => {
     setItems((prev) => prev.filter((_, i) => i !== idx));
+    setRowKeys((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const startDrag = (index: number, event: DragEvent) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', keysRef.current[index] ?? '');
+    draggingKey.current = keysRef.current[index] ?? null;
+    setDragIndex(index);
+  };
+
+  const placeDragged = (index: number, event: DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const key = draggingKey.current;
+    if (!key) return;
+    const keys = keysRef.current;
+    const from = keys.indexOf(key);
+    if (from < 0 || from === index) return;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const before = event.clientY < rect.top + rect.height / 2;
+    const dest = from < index ? (before ? index - 1 : index) : before ? index : index + 1;
+    if (dest === from || dest < 0 || dest >= keys.length) return;
+    const nextKeys = [...keys];
+    const [movedKey] = nextKeys.splice(from, 1);
+    nextKeys.splice(dest, 0, movedKey);
+    const nextItems = [...itemsRef.current];
+    const [movedItem] = nextItems.splice(from, 1);
+    nextItems.splice(dest, 0, movedItem);
+    keysRef.current = nextKeys;
+    itemsRef.current = nextItems;
+    setRowKeys(nextKeys);
+    setItems(nextItems);
+    setDragIndex(dest);
+  };
+
+  const endDrag = () => {
+    draggingKey.current = null;
+    setDragIndex(null);
   };
 
   const setChecklistItem = (idx: number, patch: Partial<ChecklistItem>) => {
@@ -124,6 +205,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
 
   const addChecklistItem = () => {
     setItems((prev) => [...prev, { label: '', required: false, assigned_role: null }]);
+    setRowKeys((prev) => [...prev, freshKey()]);
   };
 
   const saveDraft = async () => {
@@ -195,6 +277,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
       : checklistItems.length > 0 && checklistItems.every((c) => c.label.trim() !== '');
 
   return (
+    <div className="h-full min-h-0 overflow-y-auto">
     <div className="mx-auto w-full max-w-4xl px-6 py-8">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -301,14 +384,24 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
                     </p>
                   )}
                   {optionItems.map((o, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5">
+                    <div
+                      key={rowKeys[idx] ?? idx}
+                      className={`group flex items-center gap-1.5 rounded-md ${dragIndex === idx ? 'relative z-10 bg-white shadow-md ring-1 ring-blue-300' : ''}`}
+                      onDragOver={(event) => placeDragged(idx, event)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        endDrag();
+                      }}
+                      onDragEnd={endDrag}
+                    >
+                      <DragHandle index={idx} dragging={dragIndex === idx} onDragStart={startDrag} />
                       <input
                         value={o}
                         onChange={(e) => setOption(idx, e.target.value)}
                         className={`${INPUT} flex-1`}
                       />
                       <button
-                        onClick={() => removeOption(idx)}
+                        onClick={() => removeAt(idx)}
                         className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
                         title="Remove option"
                       >
@@ -325,7 +418,17 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
                     </p>
                   )}
                   {checklistItems.map((c, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white p-1.5">
+                    <div
+                      key={rowKeys[idx] ?? idx}
+                      className={`group flex items-center gap-1.5 rounded-md border p-1.5 ${dragIndex === idx ? 'relative z-10 border-blue-300 bg-white shadow-md ring-1 ring-blue-300' : 'border-gray-200 bg-white'}`}
+                      onDragOver={(event) => placeDragged(idx, event)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        endDrag();
+                      }}
+                      onDragEnd={endDrag}
+                    >
+                      <DragHandle index={idx} dragging={dragIndex === idx} onDragStart={startDrag} />
                       <input
                         value={c.label}
                         onChange={(e) => setChecklistItem(idx, { label: e.target.value })}
@@ -348,7 +451,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
                         className={`${INPUT} w-32 shrink-0 border-0 focus:ring-0`}
                       />
                       <button
-                        onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
+                        onClick={() => removeAt(idx)}
                         className="shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
                         title="Remove item"
                       >
@@ -544,6 +647,7 @@ export function ListEditor({ listKey, onBack, onChanged }: ListEditorProps) {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

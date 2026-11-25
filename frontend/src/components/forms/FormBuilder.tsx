@@ -851,7 +851,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                   </div>
                 </div>
               ) : (
-                <div ref={canvasRef} className="w-full flex-1 min-h-0">
+                <div ref={canvasRef} className="form-canvas w-full flex-1 min-h-0">
                   {mounted && (
                     <GridLayout
                       width={canvasWidth > 0 ? canvasWidth : 800}
@@ -869,6 +869,7 @@ export function FormBuilder({ entityType, onBack, onChanged }: FormBuilderProps)
                       }}
                       resizeConfig={{
                         enabled: true,
+                        handles: ['e', 's', 'se'],
                       }}
                       onLayoutChange={handleLayoutChange}
                       className="transition-all"

@@ -1,5 +1,82 @@
 @import "tailwindcss";
 
+/* Form builder: resize a field's columns from the right edge and its rows from the bottom. */
+.form-canvas .react-grid-item > .react-resizable-handle {
+  z-index: 20;
+  background-image: none;
+}
+.form-canvas .react-grid-item.resizing > .react-resizable-handle {
+  opacity: 1;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-e,
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-s,
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-se {
+  transform: none;
+  margin: 0;
+  padding: 0;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-e {
+  top: 8px;
+  bottom: 8px;
+  right: -5px;
+  width: 10px;
+  height: auto;
+  cursor: ew-resize;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 3px;
+  width: 3px;
+  height: 28px;
+  margin-top: -14px;
+  border: 0;
+  border-radius: 9999px;
+  background: #2563eb;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+  left: 8px;
+  right: 8px;
+  bottom: -5px;
+  width: auto;
+  height: 10px;
+  cursor: ns-resize;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  right: auto;
+  bottom: auto;
+  width: 28px;
+  height: 3px;
+  margin-left: -14px;
+  border: 0;
+  border-radius: 9999px;
+  background: #2563eb;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-se {
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+.form-canvas .react-grid-item > .react-resizable-handle.react-resizable-handle-se::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid #2563eb;
+  border-bottom: 2px solid #2563eb;
+}
+
 /* 
  * Custom scrollbar design:
  * - Slender reduced width (5px)
